@@ -85,6 +85,7 @@ async function initDb() {
     is_admin INTEGER DEFAULT 0,
     pto_total INTEGER DEFAULT 10, pto_left INTEGER DEFAULT 10,
     avatar_color TEXT DEFAULT '#7a5010',
+    hire_date TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now'))
   )`);
   db.run(`CREATE TABLE IF NOT EXISTS announcements (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, body TEXT NOT NULL, priority TEXT DEFAULT 'normal', author_name TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')))`);
@@ -97,7 +98,7 @@ async function initDb() {
   saveDb();
 
   // Migrate: add new columns if upgrading
-  ['oncall_dept','oncall_role','paired_with'].forEach(col => {
+  ['oncall_dept','oncall_role','paired_with','hire_date'].forEach(col => {
     try { db.run(`ALTER TABLE users ADD COLUMN ${col} TEXT DEFAULT ''`); saveDb(); } catch(e){}
   });
   try { db.run(`ALTER TABLE oncall ADD COLUMN department TEXT DEFAULT ''`); saveDb(); } catch(e){}
@@ -189,10 +190,20 @@ app.use(express.json());
 app.use(express.urlencoded({extended:true}));
 app.use(express.static(path.join(__dirname,'public')));
 app.use(cors({origin:['http://kvmdoor.com','https://kvmdoor.com','http://www.kvmdoor.com','https://www.kvmdoor.com'],credentials:true}));
-app.use(session({secret:'kvm-door-v3-2024',resave:false,saveUninitialized:false,cookie:{maxAge:8*60*60*1000}}));
+app.use(session({secret:'kvm-door-v3-2024',resave:true,saveUninitialized:false,rolling:true,cookie:{maxAge:24*60*60*1000}}));
 
-const requireAuth  = (req,res,next) => req.session.userId ? next() : res.status(401).json({error:'Not authenticated'});
-const requireAdmin = (req,res,next) => (req.session.userId&&req.session.isAdmin) ? next() : res.status(403).json({error:'Admin only'});
+const requireAuth = (req,res,next) => {
+  if (!req.session.userId) return res.status(401).json({error:'Not authenticated'});
+  next();
+};
+const requireAdmin = (req,res,next) => {
+  if (!req.session.userId) return res.status(401).json({error:'Not authenticated'});
+  // Always re-verify admin status from DB so session loss doesn't cause false denials
+  const u = get('SELECT is_admin FROM users WHERE id=?',[req.session.userId]);
+  if (!u || !u.is_admin) return res.status(403).json({error:'Admin only'});
+  req.session.isAdmin = true; // refresh session flag
+  next();
+};
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
 app.post('/api/login',(req,res)=>{
@@ -204,31 +215,31 @@ app.post('/api/login',(req,res)=>{
 });
 app.post('/api/logout',(req,res)=>{req.session.destroy();res.json({ok:true});});
 app.get('/api/me',requireAuth,(req,res)=>{
-  const u=get('SELECT id,username,first_name,last_name,role,department,oncall_dept,oncall_role,phone,email,is_admin,pto_total,pto_left,avatar_color FROM users WHERE id=?',[req.session.userId]);
+  const u=get('SELECT id,username,first_name,last_name,role,department,oncall_dept,oncall_role,phone,email,is_admin,pto_total,pto_left,avatar_color,hire_date FROM users WHERE id=?',[req.session.userId]);
   if(!u) return res.status(404).json({error:'Not found'});
   res.json({...u,is_admin:!!u.is_admin});
 });
 
 // ─── USERS ────────────────────────────────────────────────────────────────────
 app.get('/api/users',requireAuth,(req,res)=>{
-  res.json(all('SELECT id,username,first_name,last_name,role,department,oncall_dept,oncall_role,paired_with,phone,email,is_admin,pto_total,pto_left,avatar_color FROM users ORDER BY first_name').map(u=>({...u,is_admin:!!u.is_admin})));
+  res.json(all('SELECT id,username,first_name,last_name,role,department,oncall_dept,oncall_role,paired_with,phone,email,is_admin,pto_total,pto_left,avatar_color,hire_date FROM users ORDER BY first_name').map(u=>({...u,is_admin:!!u.is_admin})));
 });
 app.post('/api/users',requireAdmin,(req,res)=>{
-  const {username,password,first_name,last_name,role,department,oncall_dept,oncall_role,paired_with,phone,email,is_admin,pto_total,pto_left,avatar_color}=req.body;
+  const {username,password,first_name,last_name,role,department,oncall_dept,oncall_role,paired_with,phone,email,is_admin,pto_total,pto_left,avatar_color,hire_date}=req.body;
   if(!username||!password||!first_name) return res.status(400).json({error:'Missing required fields'});
   if(get('SELECT id FROM users WHERE username=?',[username])) return res.status(400).json({error:'Username already exists'});
-  const id=runGetId(`INSERT INTO users (username,password,first_name,last_name,role,department,oncall_dept,oncall_role,paired_with,phone,email,is_admin,pto_total,pto_left,avatar_color) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [username,bcrypt.hashSync(password,10),first_name,last_name||'',role||'',department||'',oncall_dept||'',oncall_role||'',paired_with||0,phone||'',email||'',is_admin?1:0,pto_total||10,pto_left||10,avatar_color||'#7a5010']);
+  const id=runGetId(`INSERT INTO users (username,password,first_name,last_name,role,department,oncall_dept,oncall_role,paired_with,phone,email,is_admin,pto_total,pto_left,avatar_color,hire_date) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [username,bcrypt.hashSync(password,10),first_name,last_name||'',role||'',department||'',oncall_dept||'',oncall_role||'',paired_with||0,phone||'',email||'',is_admin?1:0,pto_total||10,pto_left||10,avatar_color||'#7a5010',hire_date||'']);
   res.json({id});
 });
 app.put('/api/users/:id',requireAdmin,(req,res)=>{
-  const {first_name,last_name,username,role,department,oncall_dept,oncall_role,paired_with,phone,email,is_admin,pto_total,pto_left}=req.body;
+  const {first_name,last_name,username,role,department,oncall_dept,oncall_role,paired_with,phone,email,is_admin,pto_total,pto_left,hire_date}=req.body;
   if(!first_name||!username) return res.status(400).json({error:'First name and username are required'});
   // Check username not taken by another user
   const existing=get('SELECT id FROM users WHERE username=? AND id!=?',[username,req.params.id]);
   if(existing) return res.status(400).json({error:'Username already taken by another employee'});
-  run(`UPDATE users SET first_name=?,last_name=?,username=?,role=?,department=?,oncall_dept=?,oncall_role=?,paired_with=?,phone=?,email=?,is_admin=?,pto_total=?,pto_left=? WHERE id=?`,
-    [first_name,last_name||'',username,role||'',department||'',oncall_dept||'',oncall_role||'',paired_with||0,phone||'',email||'',is_admin?1:0,pto_total||10,pto_left||10,req.params.id]);
+  run(`UPDATE users SET first_name=?,last_name=?,username=?,role=?,department=?,oncall_dept=?,oncall_role=?,paired_with=?,phone=?,email=?,is_admin=?,pto_total=?,pto_left=?,hire_date=? WHERE id=?`,
+    [first_name,last_name||'',username,role||'',department||'',oncall_dept||'',oncall_role||'',paired_with||0,phone||'',email||'',is_admin?1:0,pto_total||10,pto_left||10,hire_date||'',req.params.id]);
   res.json({ok:true});
 });
 // Change own password

@@ -348,12 +348,36 @@
 
 <!-- PTO Request -->
 <div class="modal-overlay" id="ptoReqModal" onclick="closeOnOverlay(event,'ptoReqModal')">
-  <div class="modal">
-    <div class="modal-header"><span class="modal-title">Request Time Off</span><button class="modal-close" onclick="closeModal('ptoReqModal')">✕</button></div>
+  <div class="modal modal-lg">
+    <div class="modal-header"><span class="modal-title">Request Time Off</span><button class="modal-close" onclick="closeModal('ptoReqModal')">&#x2715;</button></div>
     <div id="blackoutWarning" class="alert alert-danger" style="display:none"></div>
-    <div class="form-row">
-      <div class="form-group"><label>Start Date</label><input type="date" id="ptoStart" oninput="calcPtoDays()" /></div>
-      <div class="form-group"><label>End Date</label><input type="date" id="ptoEnd" oninput="calcPtoDays()" /></div>
+    <div id="ptoCalendarWrap">
+      <div class="pto-cal-nav">
+        <button class="pto-cal-nav-btn" onclick="ptoCalShift(-1)">&#8249;</button>
+        <div class="pto-cal-months">
+          <div class="pto-cal-month-label" id="ptoCalLabel1"></div>
+          <div class="pto-cal-month-label" id="ptoCalLabel2"></div>
+        </div>
+        <button class="pto-cal-nav-btn" onclick="ptoCalShift(1)">&#8250;</button>
+      </div>
+      <div class="pto-cal-jump">
+        <select id="ptoJumpMonth" onchange="ptoJump()"></select>
+        <select id="ptoJumpYear" onchange="ptoJump()"></select>
+        <span style="font-size:11px;color:var(--text-muted)">Jump to month</span>
+      </div>
+      <div class="pto-cal-grid-wrap">
+        <div id="ptoCalGrid1" class="pto-cal-grid"></div>
+        <div id="ptoCalGrid2" class="pto-cal-grid"></div>
+      </div>
+      <div class="pto-cal-legend">
+        <span class="pto-leg-item"><span class="pto-leg-dot" style="background:var(--amber)"></span>Selected</span>
+        <span class="pto-leg-item"><span class="pto-leg-dot" style="background:var(--danger)"></span>Blackout</span>
+        <span class="pto-leg-item"><span class="pto-leg-dot" style="background:var(--bg-surface);border:1px solid var(--border2)"></span>Weekend</span>
+      </div>
+    </div>
+    <div class="form-row" style="margin-top:.75rem">
+      <div class="form-group"><label>Start Date</label><input type="date" id="ptoStart" oninput="ptoManualInput()" /></div>
+      <div class="form-group"><label>End Date</label><input type="date" id="ptoEnd" oninput="ptoManualInput()" /></div>
     </div>
     <div class="form-group"><label>Type</label>
       <select id="ptoType"><option>Vacation</option><option>Personal</option><option>Sick</option><option>Bereavement</option><option>Other</option></select>
@@ -370,7 +394,7 @@
 <!-- Add User -->
 <div class="modal-overlay" id="addUserModal" onclick="closeOnOverlay(event,'addUserModal')">
   <div class="modal modal-lg">
-    <div class="modal-header"><span class="modal-title">Add Employee</span><button class="modal-close" onclick="closeModal('addUserModal')">✕</button></div>
+    <div class="modal-header"><span class="modal-title">Add Employee</span><button class="modal-close" onclick="closeModal('addUserModal')">&#x2715;</button></div>
     <div class="form-row">
       <div class="form-group"><label>First Name</label><input type="text" id="addFirst" /></div>
       <div class="form-group"><label>Last Name</label><input type="text" id="addLast" /></div>
@@ -383,43 +407,40 @@
       <div class="form-group"><label>Job Title</label><input type="text" id="addRole" placeholder="e.g. Field Technician" /></div>
       <div class="form-group"><label>Department</label><input type="text" id="addDept" placeholder="e.g. Installation" /></div>
     </div>
-    <div class="form-group"><label>On-Call Department</label>
-      <select id="addOncallDept">
-        <option value="">Not on on-call rotation</option>
-        <option value="Automatic Door Division">Automatic Door Division</option>
-        <option value="Overhead Door Division">Overhead Door Division</option>
-      </select>
+    <div class="form-row">
+      <div class="form-group"><label>On-Call Department</label>
+        <select id="addOncallDept">
+          <option value="">Not on on-call rotation</option>
+          <option value="Automatic Door Division">Automatic Door Division</option>
+          <option value="Overhead Door Division">Overhead Door Division</option>
+          <option value="Both Divisions">Both Divisions</option>
+        </select>
+      </div>
+      <div class="form-group"><label>On-Call Role</label>
+        <select id="addOncallRole">
+          <option value="">&#8212; Not applicable</option>
+          <option value="Leader">Leader</option>
+          <option value="Helper">Helper</option>
+        </select>
+      </div>
     </div>
     <div class="form-row">
       <div class="form-group"><label>Phone</label><input type="tel" id="addPhone" /></div>
       <div class="form-group"><label>Email</label><input type="email" id="addEmail" /></div>
     </div>
     <div class="form-row">
+      <div class="form-group"><label>Hire Date</label><input type="date" id="addHireDate" /></div>
+      <div class="form-group"><label>Access Level</label>
+        <select id="addIsAdmin"><option value="false">Employee</option><option value="true">Admin (full access)</option></select>
+      </div>
+    </div>
+    <div class="form-row">
       <div class="form-group"><label>PTO Days / Year</label><input type="number" id="addPtoTotal" value="10" min="0" /></div>
       <div class="form-group"><label>PTO Days Remaining</label><input type="number" id="addPtoLeft" value="10" min="0" /></div>
-    </div>
-    <div class="form-group"><label>Access Level</label>
-      <select id="addIsAdmin"><option value="false">Employee</option><option value="true">Admin (full access)</option></select>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('addUserModal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveUser()">Add Employee</button>
-    </div>
-  </div>
-</div>
-
-<!-- Blackout Date -->
-<div class="modal-overlay" id="blackoutModal" onclick="closeOnOverlay(event,'blackoutModal')">
-  <div class="modal">
-    <div class="modal-header"><span class="modal-title">Add Blackout Period</span><button class="modal-close" onclick="closeModal('blackoutModal')">✕</button></div>
-    <div class="form-group"><label>Label / Reason</label><input type="text" id="boLabel" placeholder="e.g. Year-End Busy Period, Holiday Freeze" /></div>
-    <div class="form-row">
-      <div class="form-group"><label>Start Date</label><input type="date" id="boStart" /></div>
-      <div class="form-group"><label>End Date</label><input type="date" id="boEnd" /></div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('blackoutModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveBlackout()">Save Blackout</button>
     </div>
   </div>
 </div>
@@ -486,6 +507,10 @@
     <div class="form-row">
       <div class="form-group"><label>PTO Days / Year</label><input type="number" id="editPtoTotal" min="0" /></div>
       <div class="form-group"><label>PTO Days Remaining</label><input type="number" id="editPtoLeft" min="0" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Hire Date</label><input type="date" id="editHireDate" /></div>
+      <div class="form-group"></div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('editUserModal')">Cancel</button>

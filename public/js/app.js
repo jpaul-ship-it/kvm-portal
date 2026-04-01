@@ -466,7 +466,7 @@ async function renderDirectory() {
       const ac=u.avatar_color||avatarBg(u.first_name+u.last_name);
       const name=displayName(u);
       const deptBadge=u.oncall_dept?`<span class="badge ${deptColors[u.oncall_dept]||'badge-amber'}" style="font-size:9px;margin-top:4px">${u.oncall_dept.replace(' Division','')}</span>`:'';
-      return `<div class="dir-card">${currentUser.is_admin ? `<div style="display:flex;justify-content:flex-end;margin-bottom:6px;gap:6px"><button class="btn btn-ghost btn-sm" onclick="openEditUser(${u.id})">Edit</button><button class="btn btn-ghost btn-sm" onclick="openResetPw(${u.id},'${(u.first_name+' '+u.last_name).trim()}')">Reset PW</button></div>` : ''}<div class="dir-card-top"><div class="avatar" style="width:44px;height:44px;font-size:15px;background:${ac}">${initials(u.first_name,u.last_name)}</div><div><div style="font-weight:500;font-size:13.5px;font-family:Oswald,sans-serif">${name}</div><div style="font-size:11px;color:var(--text-muted)">${u.role||'—'}</div>${deptBadge}</div></div><div class="dir-info" style="margin-top:8px"><div>📞 ${u.phone||'—'}</div><div>✉ ${u.email||'—'}</div><div>🏢 ${u.department||'—'}</div></div></div>`;
+      return `<div class="dir-card">${currentUser.is_admin ? `<div style="display:flex;justify-content:flex-end;margin-bottom:6px;gap:6px"><button class="btn btn-ghost btn-sm" onclick="openEditUser(${u.id})">Edit</button><button class="btn btn-ghost btn-sm" onclick="openResetPw(${u.id},'${(u.first_name+' '+u.last_name).trim()}')">Reset PW</button></div>` : ''}<div class="dir-card-top"><div class="avatar" style="width:44px;height:44px;font-size:15px;background:${ac}">${initials(u.first_name,u.last_name)}</div><div><div style="font-weight:500;font-size:13.5px;font-family:Oswald,sans-serif">${name}</div><div style="font-size:11px;color:var(--text-muted)">${u.role||'—'}</div>${deptBadge}</div></div><div class="dir-info" style="margin-top:8px"><div>📞 ${u.phone||'—'}</div><div>✉ ${u.email||'—'}</div><div>🏢 ${u.department||'—'}</div>${u.hire_date?'<div>📅 Hired: '+fmtDate(u.hire_date)+'</div>':''}</div></div>`;
     }).join(''):'<div class="empty-state" style="grid-column:1/-1">No employees found.</div>';
   } catch(e){ console.error(e); }
 }
@@ -511,7 +511,7 @@ async function renderPto() {
         <div class="stat-card"><div class="stat-label">Used</div><div class="stat-value">${used}</div></div>
         <div class="stat-card"><div class="stat-label">Remaining</div><div class="stat-value" style="color:${cls==='low'?'var(--danger)':cls==='warn'?'var(--amber)':'var(--green)'}">${me.pto_left}</div></div>
       </div>
-      <div class="pto-bar-wrap"><div class="pto-bar-label"><span>${pct}% remaining</span><span>${me.pto_left} of ${me.pto_total} days</span></div><div class="pto-bar"><div class="pto-fill ${cls}" style="width:${pct}%"></div></div></div>`;
+      <div class="pto-bar-wrap"><div class="pto-bar-label"><span>${pct}% remaining</span><span>${me.pto_left} of ${me.pto_total} days</span></div><div class="pto-bar"><div class="pto-fill ${cls}" style="width:${pct}%"></div></div></div>${me.hire_date ? '<div style="margin-top:10px;font-size:12px;color:var(--text-muted);padding:7px 10px;background:var(--bg-surface);border-radius:var(--radius-sm);border-left:3px solid var(--amber)">&#128257; Your PTO renews annually on your hire date: <strong style="color:var(--amber)">' + fmtDate(me.hire_date) + '</strong></div>' : ''}`;
     $('myPtoList').innerHTML=reqs.length?`<div class="table-wrap"><table class="data-table"><thead><tr><th>Dates</th><th>Type</th><th>Days</th><th>Status</th><th>Notes</th></tr></thead><tbody>`+
       reqs.map(r=>`<tr><td>${fmtDate(r.start_date)} – ${fmtDate(r.end_date)}</td><td>${r.type}</td><td>${r.days}</td><td><span class="badge ${r.status==='approved'?'badge-green':r.status==='denied'?'badge-red':'badge-amber'}">${r.status}</span></td><td style="font-size:12px;color:var(--text-muted)">${r.notes||'—'}</td></tr>`).join('')+'</tbody></table></div>'
       :'<div class="empty-state">No requests yet.</div>';
@@ -536,7 +536,7 @@ async function renderAdminUsers() {
         <td style="color:var(--text-muted)">${u.username}</td>
         <td>${u.role||'—'}<br><span style="font-size:11px;color:var(--text-faint)">${u.department||''}</span></td>
         <td>${u.oncall_dept?`<span class="badge badge-amber" style="font-size:9px">${u.oncall_dept.replace(' Division','')}</span>`:'<span style="color:var(--text-faint);font-size:12px">—</span>'}</td>
-        <td><div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;min-width:36px;font-family:Oswald,sans-serif">${u.pto_left}/${u.pto_total}</span><div class="pto-bar" style="width:60px;flex-shrink:0"><div class="pto-fill ${cls}" style="width:${pct}%"></div></div></div></td>
+        <td><div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;min-width:36px;font-family:Oswald,sans-serif">${u.pto_left}/${u.pto_total}</span><div class="pto-bar" style="width:60px;flex-shrink:0"><div class="pto-fill ${cls}" style="width:${pct}%"></div></div></div><div style="font-size:10px;color:var(--text-faint);margin-top:3px">${u.hire_date?'Hired: '+fmtDate(u.hire_date):''}</div></td>
         <td style="white-space:nowrap">${u.id!==1 ? `<button class="btn btn-ghost btn-sm" onclick="openEditUser(${u.id})">Edit</button> <button class="btn btn-ghost btn-sm" onclick="openResetPw(${u.id},'${(u.first_name+' '+u.last_name).trim()}')">Reset PW</button> <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id})">Remove</button>` : '<span style="font-size:11px;color:var(--text-faint)">Protected</span>'}</td>
       </tr>`;
     }).join('');
@@ -547,8 +547,8 @@ async function saveUser() {
   const username=$('addUsername').value.trim(),password=$('addPass').value;
   if(!first_name||!username||!password) return showToast('Fill in required fields.','error');
   try {
-    await api('POST','/api/users',{username,password,first_name,last_name,role:$('addRole').value,department:$('addDept').value,oncall_dept:$('addOncallDept').value,oncall_role:$('addOncallRole').value,phone:$('addPhone').value,email:$('addEmail').value,is_admin:$('addIsAdmin').value==='true',pto_total:parseInt($('addPtoTotal').value)||10,pto_left:parseInt($('addPtoLeft').value)||10,avatar_color:avatarBg(first_name+last_name)});
-    closeModal('addUserModal'); ['addFirst','addLast','addUsername','addPass','addRole','addDept','addPhone','addEmail'].forEach(id=>$(id).value='');
+    await api('POST','/api/users',{username,password,first_name,last_name,role:$('addRole').value,department:$('addDept').value,oncall_dept:$('addOncallDept').value,oncall_role:$('addOncallRole').value,phone:$('addPhone').value,email:$('addEmail').value,is_admin:$('addIsAdmin').value==='true',pto_total:parseInt($('addPtoTotal').value)||10,pto_left:parseInt($('addPtoLeft').value)||10,hire_date:$('addHireDate').value||'',avatar_color:avatarBg(first_name+last_name)});
+    closeModal('addUserModal'); ['addFirst','addLast','addUsername','addPass','addRole','addDept','addPhone','addEmail','addHireDate'].forEach(id=>$(id).value='');
     allUsers=[]; showToast('Employee added!','success'); renderAdminUsers();
   } catch(e){ showToast(e.message,'error'); }
 }
@@ -631,6 +631,7 @@ async function openEditUser(id) {
   $('editEmail').value     = u.email      || '';
   $('editPtoTotal').value  = u.pto_total  ?? 10;
   $('editPtoLeft').value   = u.pto_left   ?? 10;
+  $('editHireDate').value  = u.hire_date  || '';
 
   // Set selects
   const oncallDeptEl = $('editOncallDept');
@@ -666,6 +667,7 @@ async function saveEditUser() {
       is_admin:     $('editIsAdmin').value === 'true',
       pto_total:    parseInt($('editPtoTotal').value) || 10,
       pto_left:     parseInt($('editPtoLeft').value)  || 10,
+      hire_date:    $('editHireDate').value || '',
     });
     closeModal('editUserModal');
     allUsers = []; // clear cache so next load is fresh
@@ -710,3 +712,189 @@ async function adminResetPassword() {
     errEl.style.display = 'block';
   }
 }
+
+// ─── PTO CALENDAR PICKER ──────────────────────────────────────────────────────
+let calViewYear  = new Date().getFullYear();
+let calViewMonth = new Date().getMonth(); // 0-indexed
+let calSelectStart = null; // 'YYYY-MM-DD'
+let calSelectEnd   = null;
+let calClickState  = 0; // 0=picking start, 1=picking end
+
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DOW    = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+
+function ptoCalShift(dir) {
+  calViewMonth += dir;
+  if (calViewMonth > 11) { calViewMonth = 0; calViewYear++; }
+  if (calViewMonth < 0)  { calViewMonth = 11; calViewYear--; }
+  syncJumpSelects();
+  renderPtoCal();
+}
+
+function ptoJump() {
+  const m = parseInt($('ptoJumpMonth').value);
+  const y = parseInt($('ptoJumpYear').value);
+  if (!isNaN(m) && !isNaN(y)) {
+    calViewMonth = m;
+    calViewYear  = y;
+    renderPtoCal();
+  }
+}
+
+function syncJumpSelects() {
+  const mEl = $('ptoJumpMonth');
+  const yEl = $('ptoJumpYear');
+  if (!mEl || !yEl) return;
+  if (!mEl.options.length) {
+    MONTHS.forEach((name, i) => {
+      const o = document.createElement('option');
+      o.value = i; o.textContent = name;
+      mEl.appendChild(o);
+    });
+    const curY = new Date().getFullYear();
+    for (let y = curY - 1; y <= curY + 3; y++) {
+      const o = document.createElement('option');
+      o.value = y; o.textContent = y;
+      yEl.appendChild(o);
+    }
+  }
+  mEl.value = calViewMonth;
+  yEl.value = calViewYear;
+}
+
+function renderPtoCal() {
+  const m1 = calViewMonth;
+  const y1 = calViewYear;
+  let m2 = m1 + 1, y2 = y1;
+  if (m2 > 11) { m2 = 0; y2++; }
+
+  $('ptoCalLabel1').textContent = MONTHS[m1] + ' ' + y1;
+  $('ptoCalLabel2').textContent = MONTHS[m2] + ' ' + y2;
+
+  $('ptoCalGrid1').innerHTML = buildCalMonth(y1, m1);
+  $('ptoCalGrid2').innerHTML = buildCalMonth(y2, m2);
+
+  // Attach click handlers
+  document.querySelectorAll('.pto-cal-day[data-date]').forEach(el => {
+    el.addEventListener('click', () => ptoCalDayClick(el.dataset.date));
+  });
+}
+
+function buildCalMonth(year, month) {
+  const today    = new Date().toISOString().split('T')[0];
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  // Build blackout set
+  const blackoutDates = new Set();
+  allBlackouts.forEach(b => {
+    let cur = new Date(b.start_date + 'T00:00:00');
+    const end = new Date(b.end_date + 'T00:00:00');
+    while (cur <= end) {
+      blackoutDates.add(cur.toISOString().split('T')[0]);
+      cur.setDate(cur.getDate() + 1);
+    }
+  });
+
+  let html = '<div class="pto-cal-dow">' + DOW.map(d => `<span>${d}</span>`).join('') + '</div>';
+  html += '<div class="pto-cal-days">';
+
+  // Empty cells before first day
+  for (let i = 0; i < firstDay; i++) {
+    html += '<div class="pto-cal-day pto-day-empty"></div>';
+  }
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dow = new Date(dateStr + 'T00:00:00').getDay();
+    const isWeekend   = dow === 0 || dow === 6;
+    const isPast      = dateStr < today;
+    const isBlackout  = blackoutDates.has(dateStr);
+    const isToday     = dateStr === today;
+    const isStart     = dateStr === calSelectStart;
+    const isEnd       = dateStr === calSelectEnd;
+    const inRange     = calSelectStart && calSelectEnd && dateStr > calSelectStart && dateStr < calSelectEnd;
+
+    let cls = 'pto-cal-day';
+    if (isBlackout) cls += ' pto-day-blackout';
+    else if (isPast) cls += ' pto-day-past';
+    else if (isWeekend) cls += ' pto-day-weekend';
+    if (isStart) cls += ' pto-day-start';
+    if (isEnd)   cls += ' pto-day-end';
+    if (inRange) cls += ' pto-day-range';
+    if (isToday) cls += ' pto-day-today';
+
+    const clickable = !isPast && !isBlackout ? `data-date="${dateStr}"` : '';
+    html += `<div class="${cls}" ${clickable}>${d}</div>`;
+  }
+
+  html += '</div>';
+  return html;
+}
+
+function ptoCalDayClick(dateStr) {
+  if (calClickState === 0) {
+    // Picking start
+    calSelectStart = dateStr;
+    calSelectEnd   = null;
+    calClickState  = 1;
+  } else {
+    // Picking end
+    if (dateStr < calSelectStart) {
+      // Clicked before start — swap
+      calSelectEnd   = calSelectStart;
+      calSelectStart = dateStr;
+    } else {
+      calSelectEnd = dateStr;
+    }
+    calClickState = 0;
+  }
+
+  // Sync to text inputs
+  $('ptoStart').value = calSelectStart || '';
+  $('ptoEnd').value   = calSelectEnd   || '';
+  calcPtoDays();
+  renderPtoCal();
+}
+
+function ptoManualInput() {
+  // Sync text inputs back to calendar
+  const s = $('ptoStart').value;
+  const e = $('ptoEnd').value;
+  if (s) {
+    calSelectStart = s;
+    // Navigate calendar to show start month
+    const d = new Date(s + 'T00:00:00');
+    calViewYear  = d.getFullYear();
+    calViewMonth = d.getMonth();
+    syncJumpSelects();
+  }
+  if (e) calSelectEnd = e;
+  calcPtoDays();
+  renderPtoCal();
+}
+
+// Override openPtoReqModal to init calendar
+const _origOpenPtoReqModal = openPtoReqModal;
+openPtoReqModal = async function() {
+  await loadBlackouts();
+  $('blackoutWarning').style.display = 'none';
+  $('ptoSubmitBtn').disabled = false;
+  // Reset calendar state
+  calSelectStart = null;
+  calSelectEnd   = null;
+  calClickState  = 0;
+  $('ptoStart').value = '';
+  $('ptoEnd').value   = '';
+  $('ptoDaysCalc').style.display = 'none';
+  // Set view to current month
+  const now = new Date();
+  calViewYear  = now.getFullYear();
+  calViewMonth = now.getMonth();
+  openModal('ptoReqModal');
+  // Slight delay to ensure modal is visible before rendering
+  setTimeout(() => {
+    syncJumpSelects();
+    renderPtoCal();
+  }, 30);
+};

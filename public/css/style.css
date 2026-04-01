@@ -341,3 +341,39 @@ textarea { resize: vertical; }
 /* ── PASSWORD / EDIT ADDITIONS ── */
 .btn-logout + .btn-logout { margin-left: 0; }
 #page-adminUsers .data-table td { vertical-align: middle; }
+
+/* ══ PTO CALENDAR PICKER ══════════════════════════════════════════════════ */
+.pto-cal-nav { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.pto-cal-nav-btn { background:var(--bg-surface); border:1px solid var(--border2); color:var(--text); width:32px; height:32px; border-radius:var(--radius-sm); font-size:20px; cursor:pointer; line-height:1; display:flex; align-items:center; justify-content:center; transition:all .12s; }
+.pto-cal-nav-btn:hover { border-color:var(--amber); color:var(--amber); }
+.pto-cal-months { display:flex; gap:1rem; flex:1; justify-content:center; }
+.pto-cal-month-label { font-family:'Oswald',sans-serif; font-size:14px; font-weight:600; color:var(--white); letter-spacing:.04em; text-align:center; min-width:140px; }
+.pto-cal-jump { display:flex; align-items:center; gap:8px; margin-bottom:10px; padding:6px 10px; background:var(--bg-surface); border-radius:var(--radius-sm); border:1px solid var(--border); }
+.pto-cal-jump select { width:auto; padding:4px 8px; font-size:12px; background:var(--bg-card); border:1px solid var(--border2); color:var(--text); border-radius:var(--radius-sm); }
+.pto-cal-grid-wrap { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+.pto-cal-grid { min-width:0; }
+.pto-cal-dow { display:grid; grid-template-columns:repeat(7,1fr); margin-bottom:3px; }
+.pto-cal-dow span { text-align:center; font-size:10px; font-weight:600; color:var(--text-faint); font-family:'Oswald',sans-serif; letter-spacing:.06em; padding:3px 0; }
+.pto-cal-days { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
+.pto-cal-day { aspect-ratio:1; display:flex; align-items:center; justify-content:center; font-size:12px; border-radius:4px; cursor:pointer; transition:all .1s; color:var(--text); position:relative; user-select:none; }
+.pto-cal-day:hover:not(.pto-day-empty):not(.pto-day-past):not(.pto-day-blackout) { background:var(--amber-bg2); color:var(--amber); }
+.pto-cal-day.pto-day-empty { cursor:default; }
+.pto-cal-day.pto-day-past { color:var(--text-faint); cursor:not-allowed; }
+.pto-cal-day.pto-day-weekend { color:var(--text-faint); background:rgba(255,255,255,0.02); }
+.pto-cal-day.pto-day-blackout { background:rgba(192,57,43,0.12); color:#ff7070; cursor:not-allowed; text-decoration:line-through; }
+.pto-cal-day.pto-day-blackout::after { content:''; position:absolute; inset:0; border-radius:4px; border:1px solid rgba(192,57,43,0.3); }
+.pto-cal-day.pto-day-start { background:var(--amber) !important; color:var(--bg-dark) !important; font-weight:700; border-radius:4px 0 0 4px; }
+.pto-cal-day.pto-day-end { background:var(--amber) !important; color:var(--bg-dark) !important; font-weight:700; border-radius:0 4px 4px 0; }
+.pto-cal-day.pto-day-start.pto-day-end { border-radius:4px !important; }
+.pto-cal-day.pto-day-range { background:var(--amber-bg2); color:var(--amber); border-radius:0; }
+.pto-cal-day.pto-day-today { font-weight:700; }
+.pto-cal-day.pto-day-today::before { content:''; position:absolute; bottom:2px; left:50%; transform:translateX(-50%); width:4px; height:4px; border-radius:50%; background:var(--amber); }
+.pto-cal-legend { display:flex; gap:1rem; margin-top:8px; flex-wrap:wrap; }
+.pto-leg-item { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--text-muted); }
+.pto-leg-dot { width:10px; height:10px; border-radius:2px; flex-shrink:0; }
+
+@media (max-width:580px) {
+  .pto-cal-grid-wrap { grid-template-columns:1fr; }
+  .pto-cal-months { gap:.5rem; }
+  .pto-cal-month-label { min-width:100px; font-size:13px; }
+}
