@@ -9,9 +9,11 @@ const nodemailer = require('nodemailer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DB_PATH = path.join(__dirname, 'data', 'kvm.db');
+// Use RENDER_DISK_PATH env var for Render persistent disk, fallback to local data dir
+const DATA_DIR = process.env.RENDER_DISK_PATH || path.join(__dirname, 'data');
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+const DB_PATH = path.join(DATA_DIR, 'kvm.db');
 
-if (!fs.existsSync(path.join(__dirname, 'data'))) fs.mkdirSync(path.join(__dirname, 'data'));
 
 let db;
 
@@ -364,9 +366,38 @@ app.put('/api/pto/:id/review',requireAdmin,async(req,res)=>{
 });
 
 // ─── SETTINGS ────────────────────────────────────────────────────────────────
-app.get('/api/settings',requireAdmin,(req,res)=>{ const s=getSettings(); delete s.smtp_pass; res.json(s); });
+app.get('/api/settings',requireAdmin,(req,res)=>{ const s=getSettings(); delete s.smtp_pass; delete s.gcal_key; res.json(s); });
+
+// Test email
+app.post('/api/settings/test-email', requireAdmin, async (req,res) => {
+  const settings = getSettings();
+  if (!settings.smtp_host || !settings.smtp_user || !settings.smtp_pass) {
+    return res.status(400).json({ error: 'Email settings not configured. Please save your SMTP settings first.' });
+  }
+  const nodemailer = require('nodemailer');
+  try {
+    const transporter = nodemailer.createTransport({
+      host: settings.smtp_host,
+      port: parseInt(settings.smtp_port)||587,
+      secure: false,
+      auth: { user: settings.smtp_user, pass: settings.smtp_pass },
+      tls: { rejectUnauthorized: false }
+    });
+    const user = get('SELECT email, first_name FROM users WHERE id=?', [req.session.userId]);
+    const toEmail = user && user.email ? user.email : settings.smtp_user;
+    await transporter.sendMail({
+      from: \`"\${settings.smtp_from_name||'KVM Door Systems'}" <\${settings.smtp_user}>\`,
+      to: toEmail,
+      subject: 'KVM Portal — Test Email',
+      html: '<div style="font-family:Arial,sans-serif;padding:20px"><h2 style="color:#F5A623">KVM Door Systems Portal</h2><p>This is a test email confirming your email notifications are working correctly.</p><p style="color:#888;font-size:12px">Sent from KVM Employee Portal</p></div>'
+    });
+    res.json({ ok: true, sent_to: toEmail });
+  } catch(e) {
+    res.status(500).json({ error: 'Email failed: ' + e.message });
+  }
+});
 app.post('/api/settings',requireAdmin,(req,res)=>{
-  ['smtp_host','smtp_port','smtp_user','smtp_pass','smtp_from_name'].forEach(k=>{
+  ['smtp_host','smtp_port','smtp_user','smtp_pass','smtp_from_name','gcal_id','gcal_key'].forEach(k=>{
     if(req.body[k]!==undefined){ if(get('SELECT key FROM settings WHERE key=?',[k])) run('UPDATE settings SET value=? WHERE key=?',[req.body[k],k]); else run('INSERT INTO settings (key,value) VALUES (?,?)',[k,req.body[k]]); }
   });
   res.json({ok:true});

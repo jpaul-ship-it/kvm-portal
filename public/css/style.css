@@ -391,3 +391,27 @@ textarea { resize: vertical; }
 .oncall-avatar-sm { width:30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; flex-shrink:0; font-family:'Oswald',sans-serif; }
 .oncall-chip-name { font-size:13px; font-weight:500; color:var(--white); }
 .oncall-chip-phone { font-size:11px; color:var(--amber); font-family:'Oswald',sans-serif; }
+
+/* ══ PTO CALENDAR VIEW ════════════════════════════════════════════════════ */
+.ptov-dow-row { display:grid; grid-template-columns:repeat(7,1fr); margin-bottom:2px; }
+.ptov-dow { text-align:center; font-family:'Oswald',sans-serif; font-size:11px; font-weight:600; color:var(--text-faint); padding:4px 0; text-transform:uppercase; letter-spacing:.06em; }
+.ptov-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
+.ptov-cell { min-height:80px; background:var(--bg-surface); border-radius:4px; padding:4px; position:relative; border:1px solid var(--border); }
+.ptov-cell.ptov-weekend { background:rgba(255,255,255,0.02); }
+.ptov-cell.ptov-today { border-color:var(--amber); }
+.ptov-cell.ptov-empty { background:transparent; border-color:transparent; }
+.ptov-day-num { font-family:'Oswald',sans-serif; font-size:13px; font-weight:600; color:var(--text-muted); margin-bottom:3px; }
+.ptov-today-num { color:var(--amber); }
+.ptov-entry { font-size:10px; font-weight:600; padding:2px 4px; border-radius:3px; margin-bottom:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-family:'Oswald',sans-serif; letter-spacing:.03em; }
+.ptov-more { font-size:10px; color:var(--text-faint); }
+
+/* Week view */
+.ptov-week-grid { display:grid; grid-template-columns:100px repeat(7,1fr); gap:2px; }
+.ptov-week-header { display:contents; }
+.ptov-week-day { background:var(--bg-surface); padding:8px 4px; text-align:center; font-size:11px; color:var(--text-muted); border-radius:4px; font-family:'Oswald',sans-serif; letter-spacing:.04em; }
+.ptov-week-day.ptov-today { color:var(--amber); border:1px solid var(--amber); }
+.ptov-week-label { display:flex; align-items:center; font-size:12px; font-weight:500; padding:4px 8px; color:var(--text); }
+.ptov-week-row { display:contents; }
+.ptov-week-cell { background:var(--bg-surface); border-radius:4px; min-height:48px; display:flex; align-items:center; justify-content:center; border:1px solid var(--border); }
+.ptov-week-cell.ptov-weekend { background:rgba(255,255,255,0.01); }
+.ptov-week-off { font-size:11px; font-weight:700; padding:4px 8px; border-radius:4px; font-family:'Oswald',sans-serif; letter-spacing:.04em; }

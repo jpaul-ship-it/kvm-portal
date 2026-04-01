@@ -81,6 +81,10 @@
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"/></svg>
         Time Off
       </div>
+      <div class="nav-item" data-page="ptoCalendar" onclick="showPage('ptoCalendar',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M5 4a1 1 0 00-2 0v7.268a2 2 0 000 3.464V16a1 1 0 102 0v-1.268a2 2 0 000-3.464V4zM11 4a1 1 0 10-2 0v1.268a2 2 0 000 3.464V16a1 1 0 102 0V8.732a2 2 0 000-3.464V4zM16 3a1 1 0 011 1v7.268a2 2 0 010 3.464V16a1 1 0 11-2 0v-1.268a2 2 0 010-3.464V4a1 1 0 011-1z"/></svg>
+        Time Off Calendar
+      </div>
       <div id="adminSection" style="display:none">
         <div class="nav-group-label">Admin</div>
         <div class="nav-item" data-page="adminUsers" onclick="showPage('adminUsers',this)">
@@ -237,30 +241,79 @@
       <!-- ADMIN: SETTINGS -->
       <div class="page" id="page-adminSettings">
         <div class="page-header"><h1 class="page-title">PORTAL SETTINGS</h1></div>
+
+        <div class="alert alert-warning" style="margin-bottom:1rem">
+          &#9888; <strong>Data Persistence:</strong> Render free tier resets data on redeploy.
+          To permanently save data, upgrade to Render Starter ($7/mo), add a Persistent Disk at mount path <strong>/data</strong>,
+          and set environment variable <strong>RENDER_DISK_PATH=/data</strong> in your Render service settings.
+          <a href="https://render.com/docs/disks" target="_blank" style="color:var(--amber);margin-left:4px">Render Disk Docs &#8599;</a>
+        </div>
+
         <div class="card">
-          <div class="card-header"><span class="card-title">Email Notifications</span></div>
-          <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem">Configure SMTP settings to send email notifications when PTO is approved or denied.</p>
+          <div class="card-header"><span class="card-title">Email Notifications — Microsoft 365</span></div>
+          <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem">Employees receive email when PTO is approved or denied. Requires Microsoft 365 / Outlook SMTP credentials.</p>
+          <div id="emailTestResult" style="display:none;margin-bottom:10px"></div>
           <div class="form-row">
             <div class="form-group"><label>SMTP Host</label><input type="text" id="smtpHost" placeholder="smtp.office365.com" /></div>
             <div class="form-group"><label>SMTP Port</label><input type="number" id="smtpPort" placeholder="587" /></div>
           </div>
           <div class="form-row">
-            <div class="form-group"><label>Email Username</label><input type="email" id="smtpUser" placeholder="portal@kvmdoors.com" /></div>
-            <div class="form-group"><label>Email Password</label><input type="password" id="smtpPass" placeholder="••••••••" /></div>
+            <div class="form-group"><label>Email / Username</label><input type="email" id="smtpUser" placeholder="portal@kvmdoors.com" /></div>
+            <div class="form-group"><label>Password or App Password</label><input type="password" id="smtpPass" placeholder="&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;" /></div>
           </div>
           <div class="form-group"><label>From Name</label><input type="text" id="smtpFromName" placeholder="KVM Door Systems Portal" /></div>
-          <button class="btn btn-primary" onclick="saveSmtpSettings()">Save Email Settings</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+            <button class="btn btn-primary" onclick="saveSmtpSettings()">Save Settings</button>
+            <button class="btn btn-ghost" onclick="testEmail()">&#9993; Send Test Email to Me</button>
+          </div>
+          <p style="font-size:11px;color:var(--text-faint);margin-top:10px">&#9432; If MFA is enabled on your Microsoft account, create an App Password at <a href="https://account.microsoft.com/security" target="_blank" style="color:var(--amber)">account.microsoft.com/security</a> and use that instead of your regular password.</p>
         </div>
+
+        <div class="card">
+          <div class="card-header"><span class="card-title">Google Calendar — Time Off Sync</span></div>
+          <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">When PTO is approved, automatically add it to your company Google Calendar so managers can see who is off.</p>
+          <div class="form-group"><label>Google Calendar ID</label><input type="text" id="gcalId" placeholder="yourcompany@group.calendar.google.com" /></div>
+          <div class="form-group"><label>Google Service Account Key (JSON)</label><textarea id="gcalKey" rows="3" placeholder="Paste your Google service account JSON here..."></textarea></div>
+          <button class="btn btn-primary" onclick="saveGcalSettings()">Save Calendar Settings</button>
+          <div style="margin-top:10px;font-size:11px;color:var(--text-faint)">
+            &#9432; Setup: <a href="https://calendar.google.com/calendar/r/settings/createcalendar" target="_blank" style="color:var(--amber)">1. Create a Google Calendar</a> for KVM Time Off &rarr;
+            <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:var(--amber)">2. Create a Service Account</a> in Google Cloud &rarr;
+            3. Share the calendar with the service account email &rarr; 4. Paste the JSON key above.
+          </div>
+        </div>
+
         <div class="card">
           <div class="card-header"><span class="card-title">On-Call Departments</span></div>
-          <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">Currently configured: <strong style="color:var(--text)">Automatic Door Division</strong> (1 person) and <strong style="color:var(--text)">Overhead Door Division</strong> (2 people).</p>
-          <div class="alert alert-warning">To change department structure, contact your portal administrator to update the server configuration.</div>
+          <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">Configured: <strong style="color:var(--text)">Automatic Door Division</strong> (1 person) and <strong style="color:var(--text)">Overhead Door Division</strong> (2 people).</p>
+          <div class="alert alert-warning">To change department structure, update the server configuration.</div>
         </div>
       </div>
 
-    </main>
-  </div>
-</div>
+
+
+      <!-- PTO CALENDAR VIEW -->
+      <div class="page" id="page-ptoCalendar">
+        <div class="page-header">
+          <div><h1 class="page-title">TIME OFF CALENDAR</h1><p class="page-sub">Company-wide view of approved time off</p></div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="pto-cal-nav-btn" onclick="ptoViewShift(-1)">&#8249;</button>
+            <span id="ptoViewLabel" style="font-family:Oswald,sans-serif;font-size:15px;font-weight:600;min-width:150px;text-align:center;color:var(--amber)"></span>
+            <button class="pto-cal-nav-btn" onclick="ptoViewShift(1)">&#8250;</button>
+            <select id="ptoViewMode" onchange="renderPtoCalendar()" style="width:auto;padding:5px 10px;font-size:13px">
+              <option value="month">Month</option>
+              <option value="week">Week</option>
+            </select>
+            <a id="gcalLink" href="#" target="_blank" style="display:none;font-size:12px;color:var(--amber)">&#128197; Open Google Calendar</a>
+          </div>
+        </div>
+        <div class="card" style="padding:.75rem 1rem">
+          <div id="ptoCalendarGrid"></div>
+        </div>
+        <div class="card" style="margin-top:1rem">
+          <div class="card-header"><span class="card-title">Approved Time Off This Period</span></div>
+          <div id="ptoCalendarList"></div>
+        </div>
+      </div>
 
 <!-- ═══ MODALS ═══ -->
 
@@ -547,6 +600,24 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('swapOncallModal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveOncallSwap()">Confirm Swap</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══ BLACKOUT DATE ═══ -->
+<div class="modal-overlay" id="blackoutModal" onclick="closeOnOverlay(event,'blackoutModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Add Blackout Period</span><button class="modal-close" onclick="closeModal('blackoutModal')">&#x2715;</button></div>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem">Employees will not be able to request PTO during this period.</p>
+    <div class="form-group"><label>Label / Reason</label><input type="text" id="boLabel" placeholder="e.g. Year-End Freeze, Holiday Season" /></div>
+    <div class="form-row">
+      <div class="form-group"><label>Start Date</label><input type="date" id="boStart" /></div>
+      <div class="form-group"><label>End Date</label><input type="date" id="boEnd" /></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('blackoutModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveBlackout()">Save Blackout</button>
     </div>
   </div>
 </div>

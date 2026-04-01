@@ -92,7 +92,7 @@ function showPage(name, el) {
   if(pg) pg.classList.add('active');
   if(el) el.classList.add('active');
   $('sidebar').classList.remove('open');
-  const map={dashboard:renderDashboard,announcements:renderAnnouncements,news:renderNews,oncall:renderOncall,directory:renderDirectory,pto:renderPto,adminUsers:renderAdminUsers,adminPto:renderAdminPto,adminBlackout:renderBlackouts,adminRotation:renderRotation,adminSettings:loadSettings};
+  const map={dashboard:renderDashboard,announcements:renderAnnouncements,news:renderNews,oncall:renderOncall,directory:renderDirectory,pto:renderPto,ptoCalendar:renderPtoCalendar,adminUsers:renderAdminUsers,adminPto:renderAdminPto,adminBlackout:renderBlackouts,adminRotation:renderRotation,adminSettings:loadSettings};
   if(map[name]) map[name]();
 }
 
@@ -668,13 +668,21 @@ async function reviewPto(id,status) {
 
 // ─── SETTINGS ────────────────────────────────────────────────────────────────
 async function loadSettings() {
-  try { const s=await api('GET','/api/settings'); ['smtp_host','smtp_port','smtp_user','smtp_from_name'].forEach(k=>{ if(s[k]&&$(k)) $(k).value=s[k]; }); } catch(e){}
+  try {
+    const s=await api('GET','/api/settings');
+    ['smtp_host','smtp_port','smtp_user','smtp_from_name'].forEach(k=>{ if(s[k]&&$(k)) $(k).value=s[k]; });
+    if(s.gcal_id&&$('gcalId')) $('gcalId').value=s.gcal_id;
+  } catch(e){}
 }
 async function saveSmtpSettings() {
   try { await api('POST','/api/settings',{smtp_host:$('smtpHost').value,smtp_port:$('smtpPort').value,smtp_user:$('smtpUser').value,smtp_pass:$('smtpPass').value,smtp_from_name:$('smtpFromName').value}); showToast('Email settings saved!','success'); } catch(e){showToast(e.message,'error');}
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
+// Init PTO view date
+ptoViewYear  = new Date().getFullYear();
+ptoViewMonth = new Date().getMonth();
+
 (async function init() {
   try {
     currentUser=await api('GET','/api/me');
@@ -999,4 +1007,194 @@ async function loadKVMSchedule() {
     showToast(`Schedule loaded! ${result.created} entries created.`, 'success');
     renderOncall();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ─── PTO CALENDAR VIEW ────────────────────────────────────────────────────────
+let ptoViewYear  = new Date().getFullYear();
+let ptoViewMonth = new Date().getMonth();
+
+function ptoViewShift(dir) {
+  const mode = ($('ptoViewMode') && $('ptoViewMode').value) || 'month';
+  if (mode === 'week') {
+    ptoViewMonth += dir * 0; // shift by week handled differently
+    const ref = new Date(ptoViewYear, ptoViewMonth, 1);
+    ref.setDate(ref.getDate() + dir * 7);
+    ptoViewYear  = ref.getFullYear();
+    ptoViewMonth = ref.getMonth();
+  } else {
+    ptoViewMonth += dir;
+    if (ptoViewMonth > 11) { ptoViewMonth = 0; ptoViewYear++; }
+    if (ptoViewMonth < 0)  { ptoViewMonth = 11; ptoViewYear--; }
+  }
+  renderPtoCalendar();
+}
+
+async function renderPtoCalendar() {
+  const mode = ($('ptoViewMode') && $('ptoViewMode').value) || 'month';
+  const labelEl = $('ptoViewLabel');
+  const gridEl  = $('ptoCalendarGrid');
+  const listEl  = $('ptoCalendarList');
+  if (!gridEl) return;
+
+  // Load all approved PTO
+  let allPto = [];
+  try { allPto = await api('GET', '/api/pto'); } catch(e) {}
+  const approved = allPto.filter(r => r.status === 'approved');
+
+  // Load all users for color mapping
+  if (!allUsers.length) { try { allUsers = await api('GET', '/api/users'); } catch(e) {} }
+
+  const userColors = {};
+  allUsers.forEach(u => { userColors[u.id] = u.avatar_color || avatarBg(u.first_name + (u.last_name||'')); });
+
+  if (mode === 'month') {
+    labelEl.textContent = MONTHS[ptoViewMonth] + ' ' + ptoViewYear;
+    const firstDay = new Date(ptoViewYear, ptoViewMonth, 1).getDay();
+    const daysInMonth = new Date(ptoViewYear, ptoViewMonth + 1, 0).getDate();
+    const today = new Date().toISOString().split('T')[0];
+
+    // Build a map of date -> approved requests
+    const dayMap = {};
+    approved.forEach(r => {
+      let cur = new Date(r.start_date + 'T00:00:00');
+      const end = new Date(r.end_date + 'T00:00:00');
+      while (cur <= end) {
+        const ds = cur.toISOString().split('T')[0];
+        if (!dayMap[ds]) dayMap[ds] = [];
+        dayMap[ds].push(r);
+        cur.setDate(cur.getDate() + 1);
+      }
+    });
+
+    let html = '<div class="ptov-dow-row">' + ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => `<div class="ptov-dow">${d}</div>`).join('') + '</div>';
+    html += '<div class="ptov-grid">';
+    for (let i = 0; i < firstDay; i++) html += '<div class="ptov-cell ptov-empty"></div>';
+    for (let d = 1; d <= daysInMonth; d++) {
+      const ds = `${ptoViewYear}-${String(ptoViewMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const dow = new Date(ds + 'T00:00:00').getDay();
+      const isWeekend = dow === 0 || dow === 6;
+      const isToday = ds === today;
+      const entries = dayMap[ds] || [];
+      html += `<div class="ptov-cell ${isWeekend?'ptov-weekend':''} ${isToday?'ptov-today':''}">
+        <div class="ptov-day-num ${isToday?'ptov-today-num':''}">${d}</div>
+        ${entries.slice(0,3).map(r => {
+          const u = allUsers.find(x => x.id == r.user_id);
+          const col = u ? (u.avatar_color || avatarBg(u.first_name+(u.last_name||''))) : '#F5A623';
+          const name = r.user_name.split(' ')[0];
+          return `<div class="ptov-entry" style="background:${col}22;border-left:3px solid ${col};color:${col}">${name}</div>`;
+        }).join('')}
+        ${entries.length > 3 ? `<div class="ptov-more">+${entries.length-3} more</div>` : ''}
+      </div>`;
+    }
+    html += '</div>';
+    gridEl.innerHTML = html;
+
+    // List view below calendar
+    const monthStart = `${ptoViewYear}-${String(ptoViewMonth+1).padStart(2,'0')}-01`;
+    const monthEnd   = `${ptoViewYear}-${String(ptoViewMonth+1).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
+    const inMonth = approved.filter(r => r.start_date <= monthEnd && r.end_date >= monthStart);
+    inMonth.sort((a,b) => a.start_date.localeCompare(b.start_date));
+    listEl.innerHTML = inMonth.length
+      ? `<table class="data-table"><thead><tr><th>Employee</th><th>Dates</th><th>Days</th><th>Type</th></tr></thead><tbody>`
+        + inMonth.map(r => {
+          const u = allUsers.find(x => x.id == r.user_id);
+          const col = u ? (u.avatar_color || avatarBg(u.first_name+(u.last_name||''))) : '#F5A623';
+          return `<tr><td><span style="display:inline-flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:50%;background:${col};display:inline-block"></span>${r.user_name}</span></td><td>${fmtDate(r.start_date)} – ${fmtDate(r.end_date)}</td><td>${r.days}</td><td>${r.type}</td></tr>`;
+        }).join('') + '</tbody></table>'
+      : '<div class="empty-state">No approved time off this month.</div>';
+
+  } else {
+    // Week view
+    const refDate = new Date(ptoViewYear, ptoViewMonth, 1);
+    const dayOfWeek = refDate.getDay();
+    const weekStart = new Date(refDate); weekStart.setDate(refDate.getDate() - dayOfWeek);
+    const weekEnd   = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
+    labelEl.textContent = `Week of ${fmtDate(weekStart.toISOString().split('T')[0])}`;
+
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(weekStart); d.setDate(weekStart.getDate() + i);
+      days.push(d.toISOString().split('T')[0]);
+    }
+    const today = new Date().toISOString().split('T')[0];
+
+    // Build user -> days off map
+    const userDays = {};
+    approved.forEach(r => {
+      days.forEach(ds => {
+        if (ds >= r.start_date && ds <= r.end_date) {
+          if (!userDays[r.user_id]) userDays[r.user_id] = { name: r.user_name, days: new Set(), type: r.type };
+          userDays[r.user_id].days.add(ds);
+        }
+      });
+    });
+
+    let html = `<div class="ptov-week-grid">`;
+    html += `<div class="ptov-week-header"><div class="ptov-week-label"></div>` + days.map(ds => {
+      const d = new Date(ds+'T00:00:00');
+      const isToday = ds === today;
+      return `<div class="ptov-week-day ${isToday?'ptov-today':''}">${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]}<br><span style="font-size:16px;font-weight:700">${d.getDate()}</span></div>`;
+    }).join('') + '</div>';
+
+    Object.entries(userDays).forEach(([uid, data]) => {
+      const u = allUsers.find(x => String(x.id) === uid);
+      const col = u ? (u.avatar_color || avatarBg(data.name)) : '#F5A623';
+      html += `<div class="ptov-week-row">
+        <div class="ptov-week-label" style="color:${col}">${data.name.split(' ')[0]}</div>`;
+      days.forEach(ds => {
+        const off = data.days.has(ds);
+        const dow = new Date(ds+'T00:00:00').getDay();
+        const isWknd = dow === 0 || dow === 6;
+        html += `<div class="ptov-week-cell ${isWknd?'ptov-weekend':''}">${off ? `<div class="ptov-week-off" style="background:${col}33;border:1px solid ${col};color:${col}">Off</div>` : ''}</div>`;
+      });
+      html += '</div>';
+    });
+
+    if (!Object.keys(userDays).length) html += '<div style="grid-column:1/-1;padding:1rem;text-align:center;color:var(--text-faint)">No one off this week.</div>';
+    html += '</div>';
+    gridEl.innerHTML = html;
+    listEl.innerHTML = '';
+  }
+
+  // Show Google Calendar link if configured
+  try {
+    const s = await api('GET', '/api/settings');
+    if (s.gcal_id) {
+      const link = $('gcalLink');
+      if (link) { link.href = `https://calendar.google.com/calendar/r?cid=${s.gcal_id}`; link.style.display = 'inline'; }
+    }
+  } catch(e) {}
+}
+
+// ─── EMAIL TEST ────────────────────────────────────────────────────────────────
+async function testEmail() {
+  const resultEl = $('emailTestResult');
+  resultEl.className = 'alert alert-warning';
+  resultEl.textContent = 'Sending test email...';
+  resultEl.style.display = 'block';
+  try {
+    const r = await api('POST', '/api/settings/test-email', {});
+    resultEl.className = 'alert alert-success';
+    resultEl.textContent = `✓ Test email sent to ${r.sent_to}. Check your inbox!`;
+  } catch(e) {
+    resultEl.className = 'alert alert-danger';
+    resultEl.textContent = `✗ Failed: ${e.message}`;
+  }
+}
+
+// ─── GOOGLE CALENDAR SETTINGS ─────────────────────────────────────────────────
+async function saveGcalSettings() {
+  const gcal_id  = $('gcalId') && $('gcalId').value.trim();
+  const gcal_key = $('gcalKey') && $('gcalKey').value.trim();
+  try {
+    await api('POST', '/api/settings', { gcal_id, gcal_key });
+    showToast('Google Calendar settings saved!', 'success');
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function loadGcalSettings() {
+  try {
+    const s = await api('GET', '/api/settings');
+    if (s.gcal_id && $('gcalId')) $('gcalId').value = s.gcal_id;
+  } catch(e) {}
 }
