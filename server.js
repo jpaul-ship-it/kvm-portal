@@ -222,11 +222,37 @@ app.post('/api/users',requireAdmin,(req,res)=>{
   res.json({id});
 });
 app.put('/api/users/:id',requireAdmin,(req,res)=>{
-  const {role,department,oncall_dept,oncall_role,paired_with,phone,email,pto_total,pto_left}=req.body;
-  run('UPDATE users SET role=?,department=?,oncall_dept=?,oncall_role=?,paired_with=?,phone=?,email=?,pto_total=?,pto_left=? WHERE id=?',
-    [role||'',department||'',oncall_dept||'',oncall_role||'',paired_with||0,phone||'',email||'',pto_total||10,pto_left||10,req.params.id]);
+  const {first_name,last_name,username,role,department,oncall_dept,oncall_role,paired_with,phone,email,is_admin,pto_total,pto_left}=req.body;
+  if(!first_name||!username) return res.status(400).json({error:'First name and username are required'});
+  // Check username not taken by another user
+  const existing=get('SELECT id FROM users WHERE username=? AND id!=?',[username,req.params.id]);
+  if(existing) return res.status(400).json({error:'Username already taken by another employee'});
+  run(`UPDATE users SET first_name=?,last_name=?,username=?,role=?,department=?,oncall_dept=?,oncall_role=?,paired_with=?,phone=?,email=?,is_admin=?,pto_total=?,pto_left=? WHERE id=?`,
+    [first_name,last_name||'',username,role||'',department||'',oncall_dept||'',oncall_role||'',paired_with||0,phone||'',email||'',is_admin?1:0,pto_total||10,pto_left||10,req.params.id]);
   res.json({ok:true});
 });
+// Change own password
+app.put('/api/users/me/password', requireAuth, (req, res) => {
+  const { current_password, new_password } = req.body;
+  if (!current_password || !new_password) return res.status(400).json({ error: 'Missing fields' });
+  if (new_password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  const user = get('SELECT * FROM users WHERE id=?', [req.session.userId]);
+  if (!user || !bcrypt.compareSync(current_password, user.password)) return res.status(401).json({ error: 'Current password is incorrect' });
+  run('UPDATE users SET password=? WHERE id=?', [bcrypt.hashSync(new_password, 10), req.session.userId]);
+  res.json({ ok: true });
+});
+
+// Admin reset any user password
+app.put('/api/users/:id/password', requireAdmin, (req, res) => {
+  const { new_password } = req.body;
+  if (!new_password) return res.status(400).json({ error: 'Missing new password' });
+  if (new_password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  const user = get('SELECT id FROM users WHERE id=?', [req.params.id]);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  run('UPDATE users SET password=? WHERE id=?', [bcrypt.hashSync(new_password, 10), req.params.id]);
+  res.json({ ok: true });
+});
+
 app.delete('/api/users/:id',requireAdmin,(req,res)=>{
   if(parseInt(req.params.id)===1) return res.status(403).json({error:'Cannot delete primary admin'});
   run('DELETE FROM users WHERE id=?',[req.params.id]); res.json({ok:true});

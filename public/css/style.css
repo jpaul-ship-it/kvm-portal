@@ -337,3 +337,7 @@ textarea { resize: vertical; }
   .form-row, .form-row-3 { grid-template-columns: 1fr; }
   .dir-grid { grid-template-columns: 1fr 1fr; }
 }
+
+/* ── PASSWORD / EDIT ADDITIONS ── */
+.btn-logout + .btn-logout { margin-left: 0; }
+#page-adminUsers .data-table td { vertical-align: middle; }

@@ -466,7 +466,7 @@ async function renderDirectory() {
       const ac=u.avatar_color||avatarBg(u.first_name+u.last_name);
       const name=displayName(u);
       const deptBadge=u.oncall_dept?`<span class="badge ${deptColors[u.oncall_dept]||'badge-amber'}" style="font-size:9px;margin-top:4px">${u.oncall_dept.replace(' Division','')}</span>`:'';
-      return `<div class="dir-card"><div class="dir-card-top"><div class="avatar" style="width:44px;height:44px;font-size:15px;background:${ac}">${initials(u.first_name,u.last_name)}</div><div><div style="font-weight:500;font-size:13.5px;font-family:Oswald,sans-serif">${name}</div><div style="font-size:11px;color:var(--text-muted)">${u.role||'—'}</div>${deptBadge}</div></div><div class="dir-info" style="margin-top:8px"><div>📞 ${u.phone||'—'}</div><div>✉ ${u.email||'—'}</div><div>🏢 ${u.department||'—'}</div></div></div>`;
+      return `<div class="dir-card">${currentUser.is_admin ? `<div style="display:flex;justify-content:flex-end;margin-bottom:6px;gap:6px"><button class="btn btn-ghost btn-sm" onclick="openEditUser(${u.id})">Edit</button><button class="btn btn-ghost btn-sm" onclick="openResetPw(${u.id},'${(u.first_name+' '+u.last_name).trim()}')">Reset PW</button></div>` : ''}<div class="dir-card-top"><div class="avatar" style="width:44px;height:44px;font-size:15px;background:${ac}">${initials(u.first_name,u.last_name)}</div><div><div style="font-weight:500;font-size:13.5px;font-family:Oswald,sans-serif">${name}</div><div style="font-size:11px;color:var(--text-muted)">${u.role||'—'}</div>${deptBadge}</div></div><div class="dir-info" style="margin-top:8px"><div>📞 ${u.phone||'—'}</div><div>✉ ${u.email||'—'}</div><div>🏢 ${u.department||'—'}</div></div></div>`;
     }).join(''):'<div class="empty-state" style="grid-column:1/-1">No employees found.</div>';
   } catch(e){ console.error(e); }
 }
@@ -537,7 +537,7 @@ async function renderAdminUsers() {
         <td>${u.role||'—'}<br><span style="font-size:11px;color:var(--text-faint)">${u.department||''}</span></td>
         <td>${u.oncall_dept?`<span class="badge badge-amber" style="font-size:9px">${u.oncall_dept.replace(' Division','')}</span>`:'<span style="color:var(--text-faint);font-size:12px">—</span>'}</td>
         <td><div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;min-width:36px;font-family:Oswald,sans-serif">${u.pto_left}/${u.pto_total}</span><div class="pto-bar" style="width:60px;flex-shrink:0"><div class="pto-fill ${cls}" style="width:${pct}%"></div></div></div></td>
-        <td>${u.id!==1?`<button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id})">Remove</button>`:'<span style="font-size:11px;color:var(--text-faint)">Protected</span>'}</td>
+        <td style="white-space:nowrap">${u.id!==1 ? `<button class="btn btn-ghost btn-sm" onclick="openEditUser(${u.id})">Edit</button> <button class="btn btn-ghost btn-sm" onclick="openResetPw(${u.id},'${(u.first_name+' '+u.last_name).trim()}')">Reset PW</button> <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id})">Remove</button>` : '<span style="font-size:11px;color:var(--text-faint)">Protected</span>'}</td>
       </tr>`;
     }).join('');
   } catch(e){ console.error(e); }
@@ -591,3 +591,122 @@ async function saveSmtpSettings() {
     showPage('dashboard',document.querySelector('.nav-item[data-page="dashboard"]'));
   } catch(e){ $('loginScreen').style.display='flex'; }
 })();
+
+// ─── CHANGE OWN PASSWORD ──────────────────────────────────────────────────────
+async function changeMyPassword() {
+  const current = $('cpCurrent').value;
+  const newPw   = $('cpNew').value;
+  const confirm = $('cpConfirm').value;
+  const errEl   = $('changePwError');
+  errEl.style.display = 'none';
+
+  if (!current || !newPw || !confirm) { errEl.textContent = 'Please fill in all fields.'; errEl.style.display = 'block'; return; }
+  if (newPw.length < 6) { errEl.textContent = 'New password must be at least 6 characters.'; errEl.style.display = 'block'; return; }
+  if (newPw !== confirm) { errEl.textContent = 'New passwords do not match.'; errEl.style.display = 'block'; return; }
+
+  try {
+    await api('PUT', '/api/users/me/password', { current_password: current, new_password: newPw });
+    closeModal('changePwModal');
+    $('cpCurrent').value = ''; $('cpNew').value = ''; $('cpConfirm').value = '';
+    showToast('Password updated successfully!', 'success');
+  } catch(e) {
+    errEl.textContent = e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+// ─── ADMIN: OPEN EDIT EMPLOYEE ────────────────────────────────────────────────
+async function openEditUser(id) {
+  if (!allUsers.length) allUsers = await api('GET', '/api/users');
+  const u = allUsers.find(x => x.id === id || String(x.id) === String(id));
+  if (!u) return showToast('Employee not found.', 'error');
+
+  $('editUserId').value    = u.id;
+  $('editFirst').value     = u.first_name || '';
+  $('editLast').value      = u.last_name  || '';
+  $('editUsername').value  = u.username   || '';
+  $('editRole').value      = u.role       || '';
+  $('editDept').value      = u.department || '';
+  $('editPhone').value     = u.phone      || '';
+  $('editEmail').value     = u.email      || '';
+  $('editPtoTotal').value  = u.pto_total  ?? 10;
+  $('editPtoLeft').value   = u.pto_left   ?? 10;
+
+  // Set selects
+  const oncallDeptEl = $('editOncallDept');
+  for (let i = 0; i < oncallDeptEl.options.length; i++) {
+    if (oncallDeptEl.options[i].value === (u.oncall_dept || '')) { oncallDeptEl.selectedIndex = i; break; }
+  }
+  const oncallRoleEl = $('editOncallRole');
+  for (let i = 0; i < oncallRoleEl.options.length; i++) {
+    if (oncallRoleEl.options[i].value === (u.oncall_role || '')) { oncallRoleEl.selectedIndex = i; break; }
+  }
+  $('editIsAdmin').value = u.is_admin ? 'true' : 'false';
+
+  openModal('editUserModal');
+}
+
+async function saveEditUser() {
+  const id = $('editUserId').value;
+  const first_name = $('editFirst').value.trim();
+  const username   = $('editUsername').value.trim();
+  if (!first_name || !username) return showToast('First name and username are required.', 'error');
+
+  try {
+    await api('PUT', '/api/users/' + id, {
+      first_name,
+      last_name:    $('editLast').value.trim(),
+      username,
+      role:         $('editRole').value,
+      department:   $('editDept').value,
+      oncall_dept:  $('editOncallDept').value,
+      oncall_role:  $('editOncallRole').value,
+      phone:        $('editPhone').value,
+      email:        $('editEmail').value,
+      is_admin:     $('editIsAdmin').value === 'true',
+      pto_total:    parseInt($('editPtoTotal').value) || 10,
+      pto_left:     parseInt($('editPtoLeft').value)  || 10,
+    });
+    closeModal('editUserModal');
+    allUsers = []; // clear cache so next load is fresh
+    showToast('Employee updated!', 'success');
+    // Refresh whichever page is visible
+    const activePage = document.querySelector('.page.active');
+    if (activePage) {
+      const pageId = activePage.id.replace('page-', '');
+      if (pageId === 'adminUsers') renderAdminUsers();
+      if (pageId === 'directory')  renderDirectory();
+    }
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+// ─── ADMIN: RESET EMPLOYEE PASSWORD ──────────────────────────────────────────
+function openResetPw(id, name) {
+  $('resetPwUserId').value  = id;
+  $('resetPwName').textContent = name;
+  $('resetPwNew').value     = '';
+  $('resetPwConfirm').value = '';
+  $('resetPwError').style.display = 'none';
+  openModal('resetPwModal');
+}
+
+async function adminResetPassword() {
+  const id      = $('resetPwUserId').value;
+  const newPw   = $('resetPwNew').value;
+  const confirm = $('resetPwConfirm').value;
+  const errEl   = $('resetPwError');
+  errEl.style.display = 'none';
+
+  if (!newPw || !confirm) { errEl.textContent = 'Please fill in both fields.'; errEl.style.display = 'block'; return; }
+  if (newPw.length < 6)   { errEl.textContent = 'Password must be at least 6 characters.'; errEl.style.display = 'block'; return; }
+  if (newPw !== confirm)  { errEl.textContent = 'Passwords do not match.'; errEl.style.display = 'block'; return; }
+
+  try {
+    await api('PUT', '/api/users/' + id + '/password', { new_password: newPw });
+    closeModal('resetPwModal');
+    showToast('Password reset successfully!', 'success');
+  } catch(e) {
+    errEl.textContent = e.message;
+    errEl.style.display = 'block';
+  }
+}

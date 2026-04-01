@@ -48,6 +48,7 @@
         <div class="avatar" id="topAvatar">?</div>
         <span id="topName">User</span>
       </div>
+      <button class="btn-logout" onclick="openModal('changePwModal')" style="border-color:var(--amber-dim);color:var(--amber)" title="Change my password">&#128273; Password</button>
       <button class="btn-logout" onclick="doLogout()">Sign out</button>
     </div>
   </header>
@@ -419,6 +420,92 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('blackoutModal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveBlackout()">Save Blackout</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══ CHANGE OWN PASSWORD ═══ -->
+<div class="modal-overlay" id="changePwModal" onclick="closeOnOverlay(event,'changePwModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Change My Password</span><button class="modal-close" onclick="closeModal('changePwModal')">&#x2715;</button></div>
+    <div id="changePwError" class="alert alert-danger" style="display:none"></div>
+    <div class="form-group"><label>Current Password</label><input type="password" id="cpCurrent" placeholder="Your current password" /></div>
+    <div class="form-group"><label>New Password</label><input type="password" id="cpNew" placeholder="At least 6 characters" /></div>
+    <div class="form-group"><label>Confirm New Password</label><input type="password" id="cpConfirm" placeholder="Repeat new password" /></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('changePwModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="changeMyPassword()">Update Password</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ EDIT EMPLOYEE ═══ -->
+<div class="modal-overlay" id="editUserModal" onclick="closeOnOverlay(event,'editUserModal')">
+  <div class="modal modal-lg">
+    <div class="modal-header"><span class="modal-title">Edit Employee</span><button class="modal-close" onclick="closeModal('editUserModal')">&#x2715;</button></div>
+    <input type="hidden" id="editUserId" />
+    <div class="form-row">
+      <div class="form-group"><label>First Name</label><input type="text" id="editFirst" /></div>
+      <div class="form-group"><label>Last Name</label><input type="text" id="editLast" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Username</label><input type="text" id="editUsername" /></div>
+      <div class="form-group"><label>Job Title</label><input type="text" id="editRole" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Department</label><input type="text" id="editDept" /></div>
+      <div class="form-group"><label>On-Call Department</label>
+        <select id="editOncallDept">
+          <option value="">Not on on-call rotation</option>
+          <option value="Automatic Door Division">Automatic Door Division</option>
+          <option value="Overhead Door Division">Overhead Door Division</option>
+          <option value="Both Divisions">Both Divisions</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>On-Call Role</label>
+        <select id="editOncallRole">
+          <option value="">—</option>
+          <option value="Leader">Leader</option>
+          <option value="Helper">Helper</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Access Level</label>
+        <select id="editIsAdmin">
+          <option value="false">Employee</option>
+          <option value="true">Admin (full access)</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Phone</label><input type="tel" id="editPhone" /></div>
+      <div class="form-group"><label>Email</label><input type="email" id="editEmail" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>PTO Days / Year</label><input type="number" id="editPtoTotal" min="0" /></div>
+      <div class="form-group"><label>PTO Days Remaining</label><input type="number" id="editPtoLeft" min="0" /></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('editUserModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEditUser()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ADMIN RESET PASSWORD ═══ -->
+<div class="modal-overlay" id="resetPwModal" onclick="closeOnOverlay(event,'resetPwModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Reset Employee Password</span><button class="modal-close" onclick="closeModal('resetPwModal')">&#x2715;</button></div>
+    <input type="hidden" id="resetPwUserId" />
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem">Resetting password for: <strong id="resetPwName" style="color:var(--text)"></strong></p>
+    <div id="resetPwError" class="alert alert-danger" style="display:none"></div>
+    <div class="form-group"><label>New Password</label><input type="password" id="resetPwNew" placeholder="At least 6 characters" /></div>
+    <div class="form-group"><label>Confirm Password</label><input type="password" id="resetPwConfirm" placeholder="Repeat new password" /></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('resetPwModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="adminResetPassword()">Reset Password</button>
     </div>
   </div>
 </div>
