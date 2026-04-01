@@ -149,8 +149,9 @@
         <div class="page-header">
           <div><h1 class="page-title">ON-CALL SCHEDULE</h1><p class="page-sub">After-hours emergency contacts by department</p></div>
           <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" id="btnLoadSchedule" style="display:none" onclick="loadKVMSchedule()" title="Load the paper schedule">&#128196; Load KVM Schedule</button>
             <button class="btn btn-ghost" id="btnAutoSchedule" style="display:none" onclick="openModal('autoScheduleModal')">⟳ Auto-Schedule</button>
-            <button class="btn btn-primary" id="btnNewOncall" style="display:none" onclick="openModal('oncallModal')">+ Add Entry</button>
+            <button class="btn btn-primary" id="btnNewOncall" style="display:none" onclick="openOncallModal()">+ Add Entry</button>
           </div>
         </div>
         <div class="tab-bar">
@@ -297,16 +298,15 @@
 
 <!-- On-Call (manual) -->
 <div class="modal-overlay" id="oncallModal" onclick="closeOnOverlay(event,'oncallModal')">
-  <div class="modal">
-    <div class="modal-header"><span class="modal-title">Add On-Call Entry</span><button class="modal-close" onclick="closeModal('oncallModal')">✕</button></div>
-    <div class="form-group"><label>Department</label>
-      <select id="ocDept" onchange="populateOncallEmployees()">
-        <option value="Automatic Door Division">Automatic Door Division (1 person)</option>
-        <option value="Overhead Door Division">Overhead Door Division (2 people)</option>
-      </select>
-    </div>
-    <div class="form-group"><label>Primary Employee</label><select id="ocEmp1"></select></div>
-    <div class="form-group" id="ocEmp2Group" style="display:none"><label>Second Employee</label><select id="ocEmp2"></select></div>
+  <div class="modal modal-lg">
+    <div class="modal-header"><span class="modal-title">Add On-Call Entry</span><button class="modal-close" onclick="closeModal('oncallModal')">&#x2715;</button></div>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:1rem">Each weekly entry covers 2 Overhead Door staff and 1 Automatic Door tech.</p>
+    <div class="modal-section">Overhead Door Division — 2 people</div>
+    <div class="form-group"><label>Person 1 (Leader)</label><select id="ocOH1"></select></div>
+    <div class="form-group"><label>Person 2 (Helper / Leader)</label><select id="ocOH2"></select></div>
+    <div class="modal-section">Automatic Door Division — 1 person</div>
+    <div class="form-group"><label>Technician</label><select id="ocAD1"></select></div>
+    <div class="modal-section">Schedule</div>
     <div class="form-row">
       <div class="form-group"><label>Start Date</label><input type="date" id="ocStart" /></div>
       <div class="form-group"><label>End Date</label><input type="date" id="ocEnd" /></div>
@@ -317,6 +317,7 @@
     </div>
   </div>
 </div>
+
 
 <!-- Auto-Schedule Builder -->
 <div class="modal-overlay" id="autoScheduleModal" onclick="closeOnOverlay(event,'autoScheduleModal')">
@@ -531,6 +532,21 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('resetPwModal')">Cancel</button>
       <button class="btn btn-primary" onclick="adminResetPassword()">Reset Password</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══ SWAP ON-CALL EMPLOYEE ═══ -->
+<div class="modal-overlay" id="swapOncallModal" onclick="closeOnOverlay(event,'swapOncallModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Swap On-Call Employee</span><button class="modal-close" onclick="closeModal('swapOncallModal')">&#x2715;</button></div>
+    <input type="hidden" id="swapOncallId" />
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem">Replacing: <strong id="swapOncallCurrentName" style="color:var(--amber)"></strong></p>
+    <div class="form-group"><label>Replace With</label><select id="swapOncallNewEmp"></select></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('swapOncallModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveOncallSwap()">Confirm Swap</button>
     </div>
   </div>
 </div>

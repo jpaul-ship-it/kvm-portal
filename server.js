@@ -138,6 +138,8 @@ function seedDatabase() {
     ['sean.mccann',  pass,'Sean',   'McCann',    'Overhead Door Helper',     'Overhead Door', 'Overhead Door Division', 'Helper', '(313) 555-0115', 10, 10, '#2980b9'],
     ['derek',        pass,'Derek',  '',          'Overhead Door Helper',     'Overhead Door', 'Overhead Door Division', 'Helper', '(313) 555-0116', 10, 10, '#8e44ad'],
     ['jermiah',      pass,'Jermiah','',          'Overhead Door Helper',     'Overhead Door', 'Overhead Door Division', 'Helper', '(313) 555-0117', 10, 10, '#16a085'],
+    ['k.berry',       pass,'K',      'Berry',     'Automatic Door Technician','Automatic Door','Automatic Door Division', 'Leader', '(313) 555-0118', 10, 10, '#b8860b'],
+    ['lorne',         pass,'Lorne',  '',           'Overhead Door Leader',     'Overhead Door', 'Overhead Door Division', 'Leader', '(313) 555-0119', 10, 10, '#5d4e8a'],
   ];
 
   employees.forEach(e => {
@@ -313,6 +315,17 @@ app.post('/api/oncall',requireAdmin,(req,res)=>{
 });
 app.delete('/api/oncall/:id',requireAdmin,(req,res)=>{run('DELETE FROM oncall WHERE id=?',[req.params.id]);res.json({ok:true});});
 
+// Swap an on-call employee
+app.put('/api/oncall/:id/swap', requireAdmin, (req, res) => {
+  const { user_id } = req.body;
+  if (!user_id) return res.status(400).json({ error: 'Missing user_id' });
+  const user = get('SELECT first_name, last_name, role, phone FROM users WHERE id=?', [user_id]);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const name = user.first_name + (user.last_name ? ' ' + user.last_name : '');
+  run('UPDATE oncall SET name=?, role=?, phone=? WHERE id=?', [name, user.role||'', user.phone||'', req.params.id]);
+  res.json({ ok: true });
+});
+
 // ─── BLACKOUTS ────────────────────────────────────────────────────────────────
 app.get('/api/blackouts',requireAuth,(req,res)=>res.json(all('SELECT * FROM blackouts ORDER BY start_date')));
 app.post('/api/blackouts',requireAdmin,(req,res)=>{
@@ -357,6 +370,45 @@ app.post('/api/settings',requireAdmin,(req,res)=>{
     if(req.body[k]!==undefined){ if(get('SELECT key FROM settings WHERE key=?',[k])) run('UPDATE settings SET value=? WHERE key=?',[req.body[k],k]); else run('INSERT INTO settings (key,value) VALUES (?,?)',[k,req.body[k]]); }
   });
   res.json({ok:true});
+});
+
+
+// Seed current on-call schedule from KVM's paper list
+app.post('/api/oncall/seed-schedule', requireAdmin, (req, res) => {
+  // Clear existing future entries first
+  const today = new Date().toISOString().split('T')[0];
+  run('DELETE FROM oncall WHERE start_date >= ?', [today]);
+
+  // KVM schedule from paper list (3/21 onwards)
+  // Format: [start, end, OH1_username, OH2_username, AD_username]
+  const schedule = [
+    ['2026-03-21','2026-03-27','mike.l',    'robert.jr', 'scott.evans'],
+    ['2026-03-28','2026-04-03','steve.winter','jermiah',  'skyler'],
+    ['2026-04-04','2026-04-10','sherman',   'emmet',     'k.berry'],
+    ['2026-04-11','2026-04-17','lorne',     'derek',     'rob.s'],
+    ['2026-04-18','2026-04-24','mjr',       'sean.mccann','scott.evans'],
+    ['2026-04-25','2026-05-01','k.shaw',    'anthony',   'skyler'],
+    ['2026-05-02','2026-05-08','mike.l',    'robert.jr', 'k.berry'],
+    ['2026-05-09','2026-05-15','mark.todd', 'jermiah',   'scott.evans'],
+    ['2026-05-16','2026-05-22','steve.winter','derek',   'rob.s'],
+    ['2026-05-23','2026-05-29','sherman',   'emmet',     'skyler'],
+    ['2026-05-30','2026-06-05','mjr',       'sean.mccann','k.berry'],
+    ['2026-06-06','2026-06-12','lorne',     'anthony',   'scott.evans'],
+    ['2026-06-13','2026-06-19','mike.l',    'robert.jr', 'rob.s'],
+  ];
+
+  let created = 0;
+  schedule.forEach(([start, end, oh1un, oh2un, adun]) => {
+    const oh1 = get('SELECT first_name,last_name,role,phone FROM users WHERE username=?',[oh1un]);
+    const oh2 = get('SELECT first_name,last_name,role,phone FROM users WHERE username=?',[oh2un]);
+    const ad  = get('SELECT first_name,last_name,role,phone FROM users WHERE username=?',[adun]);
+    const mkName = u => u ? u.first_name+(u.last_name?' '+u.last_name:'') : null;
+    if (oh1) { db.run('INSERT INTO oncall (name,role,phone,department,start_date,end_date) VALUES (?,?,?,?,?,?)',[mkName(oh1),oh1.role||'',oh1.phone||'','Overhead Door Division',start,end]); created++; }
+    if (oh2) { db.run('INSERT INTO oncall (name,role,phone,department,start_date,end_date) VALUES (?,?,?,?,?,?)',[mkName(oh2),oh2.role||'',oh2.phone||'','Overhead Door Division',start,end]); created++; }
+    if (ad)  { db.run('INSERT INTO oncall (name,role,phone,department,start_date,end_date) VALUES (?,?,?,?,?,?)',[mkName(ad), ad.role||'', ad.phone||'', 'Automatic Door Division',start,end]); created++; }
+  });
+  saveDb();
+  res.json({ ok: true, created, message: `Loaded ${schedule.length} weeks, ${created} entries` });
 });
 
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));

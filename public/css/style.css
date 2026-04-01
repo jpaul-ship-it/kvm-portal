@@ -377,3 +377,17 @@ textarea { resize: vertical; }
   .pto-cal-months { gap:.5rem; }
   .pto-cal-month-label { min-width:100px; font-size:13px; }
 }
+
+/* ══ ON-CALL WEEK VIEW ════════════════════════════════════════════════════ */
+.oncall-week { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); margin-bottom:10px; overflow:hidden; }
+.oncall-week-active { border-color:var(--amber); box-shadow:0 0 0 1px var(--amber-dim); }
+.oncall-week-header { display:flex; align-items:center; justify-content:space-between; padding:9px 14px; background:var(--bg-surface); border-bottom:1px solid var(--border); }
+.oncall-week-dates { font-family:'Oswald',sans-serif; font-size:13px; font-weight:600; color:var(--white); letter-spacing:.04em; }
+.oncall-week-body { padding:10px 14px; display:flex; flex-direction:column; gap:8px; }
+.oncall-dept-row { display:flex; align-items:flex-start; gap:12px; }
+.oncall-dept-label { font-family:'Oswald',sans-serif; font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--text-muted); min-width:120px; padding-top:8px; flex-shrink:0; }
+.oncall-people { display:flex; flex-wrap:wrap; gap:8px; flex:1; }
+.oncall-person-chip { display:flex; align-items:center; gap:8px; background:var(--bg-surface); border:1px solid var(--border2); border-radius:6px; padding:6px 10px; }
+.oncall-avatar-sm { width:30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; flex-shrink:0; font-family:'Oswald',sans-serif; }
+.oncall-chip-name { font-size:13px; font-weight:500; color:var(--white); }
+.oncall-chip-phone { font-size:11px; color:var(--amber); font-family:'Oswald',sans-serif; }

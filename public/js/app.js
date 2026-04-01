@@ -70,7 +70,7 @@ function setupUI() {
   $('topName').textContent=u.first_name;
   if(u.is_admin){
     $('adminSection').style.display='block';
-    ['btnNewAnn','btnNewNews','btnNewOncall','btnAutoSchedule'].forEach(id=>{ const el=$(id); if(el) el.style.display='inline-flex'; });
+    ['btnNewAnn','btnNewNews','btnNewOncall','btnAutoSchedule','btnLoadSchedule'].forEach(id=>{ const el=$(id); if(el) el.style.display='inline-flex'; });
     updatePtoBadge();
   }
 }
@@ -169,6 +169,7 @@ function setOncallFilter(f,el) {
   if(el) el.classList.add('active');
   renderOncall();
 }
+
 async function renderOncall() {
   try {
     const all=await api('GET','/api/oncall');
@@ -178,66 +179,157 @@ async function renderOncall() {
     if(oncallFilter==='upcoming') list=list.filter(o=>o.start_date>today);
     list.sort((a,b)=>a.start_date.localeCompare(b.start_date));
     if(!list.length){$('oncallList').innerHTML='<div class="empty-state"><div class="empty-state-icon">📞</div>No entries for this period.</div>';return;}
-    const byDept={};
-    list.forEach(o=>{const d=o.department||'General';if(!byDept[d])byDept[d]=[];byDept[d].push(o);});
-    let html='';
-    ['Automatic Door Division','Overhead Door Division','General'].forEach(dept=>{
-      const entries=byDept[dept];
-      if(!entries||!entries.length) return;
-      html+=`<div class="dept-header"><h3>${dept}</h3><span style="font-size:11px;color:var(--text-muted);font-family:Inter,sans-serif">${entries.length} person${entries.length!==1?'s':''} on call</span></div>`;
-      entries.forEach(o=>{
-        const isCur=o.start_date<=today&&o.end_date>=today;
-        const ac=avatarBg(o.name);
-        const inits=o.name.split(' ').map(p=>p[0]).join('').slice(0,2).toUpperCase();
-        html+=`<div class="oncall-card"><div class="oncall-avatar" style="background:${ac}22;color:${ac}">${inits}</div><div class="oncall-info"><div class="oncall-name">${o.name} ${isCur?'<span class="badge badge-green">ON CALL NOW</span>':''}</div><div class="oncall-role">${o.role||''}</div><div class="oncall-dates">${fmtDate(o.start_date)} – ${fmtDate(o.end_date)}</div></div><div class="oncall-phone">${o.phone}</div>${currentUser.is_admin?`<button class="btn btn-danger btn-sm" onclick="deleteOncall(${o.id})">Remove</button>`:''}</div>`;
-      });
+
+    // Group by week (start_date+end_date combo)
+    const weeks = {};
+    list.forEach(o => {
+      const key = o.start_date + '_' + o.end_date;
+      if (!weeks[key]) weeks[key] = { start: o.start_date, end: o.end_date, entries: [] };
+      weeks[key].entries.push(o);
     });
-    $('oncallList').innerHTML=html;
-  } catch(e){ console.error(e); }
+
+    let html = '';
+    Object.values(weeks).sort((a,b)=>a.start.localeCompare(b.start)).forEach(week => {
+      const isCurWeek = week.start <= today && week.end >= today;
+      html += `<div class="oncall-week ${isCurWeek?'oncall-week-active':''}">
+        <div class="oncall-week-header">
+          <span class="oncall-week-dates">${fmtDate(week.start)} – ${fmtDate(week.end)}</span>
+          ${isCurWeek?'<span class="badge badge-amber">CURRENT WEEK</span>':''}
+        </div>
+        <div class="oncall-week-body">`;
+
+      // Group by department within week
+      const byDept = {};
+      week.entries.forEach(o => {
+        const d = o.department || 'General';
+        if (!byDept[d]) byDept[d] = [];
+        byDept[d].push(o);
+      });
+
+      ['Overhead Door Division','Automatic Door Division','General'].forEach(dept => {
+        const entries = byDept[dept];
+        if (!entries || !entries.length) return;
+        html += `<div class="oncall-dept-row"><span class="oncall-dept-label">${dept.replace(' Division','')}</span><div class="oncall-people">`;
+        entries.forEach(o => {
+          const ac = avatarBg(o.name);
+          const inits = o.name.split(' ').map(p=>p[0]).join('').slice(0,2).toUpperCase();
+          html += `<div class="oncall-person-chip">
+            <div class="oncall-avatar-sm" style="background:${ac}22;color:${ac}">${inits}</div>
+            <div>
+              <div class="oncall-chip-name">${o.name}</div>
+              <div class="oncall-chip-phone">${o.phone}</div>
+            </div>
+            ${currentUser.is_admin?`<button class="btn btn-ghost btn-sm" style="padding:2px 7px;font-size:11px" onclick="openSwapOncall(${o.id},'${o.name}','${o.department}')">Swap</button><button class="btn btn-danger btn-sm" style="padding:2px 7px;font-size:11px" onclick="deleteOncall(${o.id})">✕</button>`:''}
+          </div>`;
+        });
+        html += '</div></div>';
+      });
+      html += '</div></div>';
+    });
+    $('oncallList').innerHTML = html;
+  } catch(e) { console.error(e); }
 }
 
-async function populateOncallEmployees() {
-  if(!allUsers.length) allUsers=await api('GET','/api/users');
-  const dept=$('ocDept').value;
-  const isOverhead=dept==='Overhead Door Division';
-  $('ocEmp2Group').style.display=isOverhead?'block':'none';
-  const empList=allUsers.filter(u=>{
-    if(dept==='Automatic Door Division') return u.oncall_dept==='Automatic Door Division'||u.oncall_dept==='Both Divisions';
-    if(dept==='Overhead Door Division') return u.oncall_dept==='Overhead Door Division'||u.oncall_dept==='Both Divisions';
-    return !u.is_admin;
-  });
-  const opts=empList.map(u=>`<option value="${u.id}" data-name="${displayName(u)}" data-role="${u.role}" data-phone="${u.phone}" data-paired="${u.paired_with||0}">${displayName(u)} — ${u.oncall_role||u.role}</option>`).join('');
-  $('ocEmp1').innerHTML=opts;
-  $('ocEmp2').innerHTML='<option value="">— Select second person —</option>'+opts;
-}
+// Open the add oncall modal and populate dropdowns
+async function openOncallModal() {
+  if (!allUsers.length) allUsers = await api('GET', '/api/users');
 
-$('ocEmp1') && document.getElementById('ocEmp1').addEventListener('change', function() {
-  // Auto-select paired partner if Mike L selected
-  const sel=this.options[this.selectedIndex];
-  const pairedId=sel&&sel.dataset.paired;
-  if(pairedId&&pairedId!=='0'){
-    const emp2=document.getElementById('ocEmp2');
-    for(let i=0;i<emp2.options.length;i++){
-      if(emp2.options[i].value==pairedId){ emp2.selectedIndex=i; break; }
-    }
-  }
-});
+  const ohUsers = allUsers.filter(u =>
+    u.oncall_dept === 'Overhead Door Division' || u.oncall_dept === 'Both Divisions'
+  );
+  const adUsers = allUsers.filter(u =>
+    u.oncall_dept === 'Automatic Door Division' || u.oncall_dept === 'Both Divisions'
+  );
+  // Fallback: if no dept assigned, show all non-admin
+  const fallback = allUsers.filter(u => !u.is_admin);
+
+  const makeOpts = (list) => (list.length ? list : fallback)
+    .map(u => `<option value="${u.id}" data-name="${displayName(u)}" data-role="${u.role}" data-phone="${u.phone||''}">${displayName(u)}${u.oncall_role?' — '+u.oncall_role:''}</option>`)
+    .join('');
+
+  $('ocOH1').innerHTML = '<option value="">— Select —</option>' + makeOpts(ohUsers);
+  $('ocOH2').innerHTML = '<option value="">— Select —</option>' + makeOpts(ohUsers);
+  $('ocAD1').innerHTML = '<option value="">— Select —</option>' + makeOpts(adUsers);
+
+  // Default dates: next Monday to Sunday
+  const now = new Date();
+  const day = now.getDay();
+  const toMon = day === 0 ? 1 : 8 - day;
+  const nextMon = new Date(now); nextMon.setDate(now.getDate() + toMon);
+  const nextSun = new Date(nextMon); nextSun.setDate(nextMon.getDate() + 6);
+  $('ocStart').value = nextMon.toISOString().split('T')[0];
+  $('ocEnd').value   = nextSun.toISOString().split('T')[0];
+
+  openModal('oncallModal');
+}
 
 async function saveOncall() {
-  const dept=$('ocDept').value, start_date=$('ocStart').value, end_date=$('ocEnd').value;
-  if(!start_date||!end_date) return showToast('Select dates.','error');
-  const emp1=$('ocEmp1'); const sel1=emp1.options[emp1.selectedIndex];
-  const entries=[{name:sel1.dataset.name,role:sel1.dataset.role,phone:sel1.dataset.phone,department:dept,start_date,end_date}];
-  if(dept==='Overhead Door Division'){
-    const emp2=$('ocEmp2');
-    if(emp2.value){const sel2=emp2.options[emp2.selectedIndex]; entries.push({name:sel2.dataset.name,role:sel2.dataset.role,phone:sel2.dataset.phone,department:dept,start_date,end_date});}
-  }
+  const start_date = $('ocStart').value;
+  const end_date   = $('ocEnd').value;
+  if (!start_date || !end_date) return showToast('Select start and end dates.','error');
+
+  const getEmpData = (selId) => {
+    const sel = $(selId);
+    if (!sel || !sel.value) return null;
+    const opt = sel.options[sel.selectedIndex];
+    return { name: opt.dataset.name, role: opt.dataset.role, phone: opt.dataset.phone };
+  };
+
+  const oh1 = getEmpData('ocOH1');
+  const oh2 = getEmpData('ocOH2');
+  const ad1 = getEmpData('ocAD1');
+
+  if (!oh1 && !ad1) return showToast('Select at least one employee.','error');
+
+  const entries = [];
+  if (oh1) entries.push({ ...oh1, department: 'Overhead Door Division', start_date, end_date });
+  if (oh2 && oh2.name !== oh1?.name) entries.push({ ...oh2, department: 'Overhead Door Division', start_date, end_date });
+  if (ad1) entries.push({ ...ad1, department: 'Automatic Door Division', start_date, end_date });
+
   try {
-    for(const e of entries) await api('POST','/api/oncall',e);
-    closeModal('oncallModal'); $('ocStart').value=''; $('ocEnd').value='';
-    showToast('On-call entry saved!','success'); renderOncall();
-  } catch(e){ showToast(e.message,'error'); }
+    for (const e of entries) await api('POST', '/api/oncall', e);
+    closeModal('oncallModal');
+    $('ocStart').value = ''; $('ocEnd').value = '';
+    showToast(`${entries.length} on-call entries saved!`, 'success');
+    renderOncall();
+  } catch(e) { showToast(e.message, 'error'); }
 }
+
+async function deleteOncall(id) { if(!confirm('Remove this entry?'))return; await api('DELETE','/api/oncall/'+id); renderOncall(); }
+
+// SWAP FUNCTIONALITY
+async function openSwapOncall(id, currentName, dept) {
+  if (!allUsers.length) allUsers = await api('GET', '/api/users');
+  $('swapOncallId').value = id;
+  $('swapOncallCurrentName').textContent = currentName;
+
+  // Show relevant employees for the department
+  const relevant = allUsers.filter(u => {
+    if (dept === 'Overhead Door Division') return u.oncall_dept === 'Overhead Door Division' || u.oncall_dept === 'Both Divisions';
+    if (dept === 'Automatic Door Division') return u.oncall_dept === 'Automatic Door Division' || u.oncall_dept === 'Both Divisions';
+    return !u.is_admin;
+  });
+  const list = relevant.length ? relevant : allUsers.filter(u => !u.is_admin);
+  $('swapOncallNewEmp').innerHTML = list
+    .map(u => `<option value="${u.id}">${displayName(u)} — ${u.role||u.department}</option>`)
+    .join('');
+  openModal('swapOncallModal');
+}
+
+async function saveOncallSwap() {
+  const id = $('swapOncallId').value;
+  const user_id = $('swapOncallNewEmp').value;
+  try {
+    await api('PUT', '/api/oncall/' + id + '/swap', { user_id });
+    closeModal('swapOncallModal');
+    showToast('Employee swapped!', 'success');
+    renderOncall();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+// Legacy populateOncallEmployees kept for compatibility
+async function populateOncallEmployees() { await openOncallModal(); }
+
 async function deleteOncall(id) { if(!confirm('Remove?'))return; await api('DELETE','/api/oncall/'+id); renderOncall(); }
 
 // ─── AUTO-SCHEDULE ────────────────────────────────────────────────────────────
@@ -898,3 +990,13 @@ openPtoReqModal = async function() {
     renderPtoCal();
   }, 30);
 };
+
+// ─── LOAD KVM PAPER SCHEDULE ──────────────────────────────────────────────────
+async function loadKVMSchedule() {
+  if (!confirm('This will load your paper on-call schedule (3/21 through 6/19) into the system, replacing any existing future entries. Continue?')) return;
+  try {
+    const result = await api('POST', '/api/oncall/seed-schedule', {});
+    showToast(`Schedule loaded! ${result.created} entries created.`, 'success');
+    renderOncall();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
