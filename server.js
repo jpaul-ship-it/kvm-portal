@@ -386,7 +386,7 @@ app.post('/api/settings/test-email', requireAdmin, async (req,res) => {
     const user = get('SELECT email, first_name FROM users WHERE id=?', [req.session.userId]);
     const toEmail = user && user.email ? user.email : settings.smtp_user;
     await transporter.sendMail({
-      from: \`"\${settings.smtp_from_name||'KVM Door Systems'}" <\${settings.smtp_user}>\`,
+      from: '"' + (settings.smtp_from_name||'KVM Door Systems') + '" <' + settings.smtp_user + '>',
       to: toEmail,
       subject: 'KVM Portal — Test Email',
       html: '<div style="font-family:Arial,sans-serif;padding:20px"><h2 style="color:#F5A623">KVM Door Systems Portal</h2><p>This is a test email confirming your email notifications are working correctly.</p><p style="color:#888;font-size:12px">Sent from KVM Employee Portal</p></div>'
