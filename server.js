@@ -337,6 +337,11 @@ app.post('/api/blackouts',requireAdmin,(req,res)=>{
 app.delete('/api/blackouts/:id',requireAdmin,(req,res)=>{run('DELETE FROM blackouts WHERE id=?',[req.params.id]);res.json({ok:true});});
 
 // ─── PTO ─────────────────────────────────────────────────────────────────────
+// All approved PTO for calendar view (all users can see approved time off)
+app.get('/api/pto/all-approved', requireAuth, (req, res) => {
+  res.json(all("SELECT * FROM pto_requests WHERE status='approved' ORDER BY start_date"));
+});
+
 app.get('/api/pto',requireAuth,(req,res)=>{
   res.json(req.session.isAdmin ? all('SELECT * FROM pto_requests ORDER BY submitted_at DESC') : all('SELECT * FROM pto_requests WHERE user_id=? ORDER BY submitted_at DESC',[req.session.userId]));
 });

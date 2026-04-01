@@ -4,6 +4,9 @@ let oncallFilter = 'current';
 let adminPtoFilter = 'pending';
 let allUsers = [], allBlackouts = [], rotationData = null;
 
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DOW    = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+
 const $ = id => document.getElementById(id);
 
 async function api(method, url, body) {
@@ -679,15 +682,11 @@ async function saveSmtpSettings() {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
-// Init PTO view date
-ptoViewYear  = new Date().getFullYear();
-ptoViewMonth = new Date().getMonth();
-
 (async function init() {
   try {
     currentUser=await api('GET','/api/me');
     $('loginScreen').style.display='none'; $('mainApp').style.display='block';
-    setupUI(); await loadBlackouts();
+    setupUI(); await loadBlackouts(); ptoViewYear=new Date().getFullYear(); ptoViewMonth=new Date().getMonth();
     showPage('dashboard',document.querySelector('.nav-item[data-page="dashboard"]'));
   } catch(e){ $('loginScreen').style.display='flex'; }
 })();
@@ -820,8 +819,6 @@ let calSelectStart = null; // 'YYYY-MM-DD'
 let calSelectEnd   = null;
 let calClickState  = 0; // 0=picking start, 1=picking end
 
-const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const DOW    = ['Su','Mo','Tu','We','Th','Fr','Sa'];
 
 function ptoCalShift(dir) {
   calViewMonth += dir;
@@ -863,16 +860,22 @@ function syncJumpSelects() {
 }
 
 function renderPtoCal() {
+  const g1 = $('ptoCalGrid1');
+  const g2 = $('ptoCalGrid2');
+  const l1 = $('ptoCalLabel1');
+  const l2 = $('ptoCalLabel2');
+  if (!g1 || !g2) return; // modal not open yet
+
   const m1 = calViewMonth;
   const y1 = calViewYear;
   let m2 = m1 + 1, y2 = y1;
   if (m2 > 11) { m2 = 0; y2++; }
 
-  $('ptoCalLabel1').textContent = MONTHS[m1] + ' ' + y1;
-  $('ptoCalLabel2').textContent = MONTHS[m2] + ' ' + y2;
+  if (l1) l1.textContent = MONTHS[m1] + ' ' + y1;
+  if (l2) l2.textContent = MONTHS[m2] + ' ' + y2;
 
-  $('ptoCalGrid1').innerHTML = buildCalMonth(y1, m1);
-  $('ptoCalGrid2').innerHTML = buildCalMonth(y2, m2);
+  try { g1.innerHTML = buildCalMonth(y1, m1); } catch(e) { g1.innerHTML = '<div style="color:red;font-size:11px">Error: '+e.message+'</div>'; }
+  try { g2.innerHTML = buildCalMonth(y2, m2); } catch(e) { g2.innerHTML = ''; }
 
   // Attach click handlers
   document.querySelectorAll('.pto-cal-day[data-date]').forEach(el => {
@@ -996,7 +999,7 @@ openPtoReqModal = async function() {
   setTimeout(() => {
     syncJumpSelects();
     renderPtoCal();
-  }, 30);
+  }, 80);
 };
 
 // ─── LOAD KVM PAPER SCHEDULE ──────────────────────────────────────────────────
@@ -1036,9 +1039,16 @@ async function renderPtoCalendar() {
   const listEl  = $('ptoCalendarList');
   if (!gridEl) return;
 
-  // Load all approved PTO
+  // Show loading state
+  gridEl.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);font-size:13px">Loading calendar...</div>';
+
+  // Load ALL approved PTO (admin sees all, employees see their own)
   let allPto = [];
-  try { allPto = await api('GET', '/api/pto'); } catch(e) {}
+  try { 
+    allPto = await api('GET', '/api/pto/all-approved'); 
+  } catch(e) {
+    try { allPto = await api('GET', '/api/pto'); } catch(e2) {}
+  }
   const approved = allPto.filter(r => r.status === 'approved');
 
   // Load all users for color mapping
