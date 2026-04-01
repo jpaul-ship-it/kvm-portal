@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KVM Door Systems — Employee Portal</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+
+<!-- ═══ LOGIN ═══ -->
+<div id="loginScreen" class="login-screen">
+  <div class="login-bg-text">KVM</div>
+  <div class="login-box">
+    <div class="login-logo-wrap">
+      <img src="https://images.squarespace-cdn.com/content/v1/6769c43a83fc805786904afb/1fc9d3a5-749a-42f8-8fba-d7c894568b9c/LOGO+WHITE.png?format=400w" alt="KVM Door Systems" class="login-logo" onerror="this.style.display='none';document.getElementById('loginFallbackTitle').style.display='block'" />
+      <div id="loginFallbackTitle" style="display:none;font-family:'Oswald',sans-serif;font-size:24px;font-weight:700;color:#fff;letter-spacing:0.05em">KVM DOOR SYSTEMS</div>
+    </div>
+    <div class="login-divider"><div class="login-divider-line"></div><div class="login-divider-text">Employee Portal</div><div class="login-divider-line"></div></div>
+    <div id="loginError" class="alert alert-danger" style="display:none"></div>
+    <div class="form-group">
+      <label>Username</label>
+      <input type="text" id="loginUser" placeholder="firstname.lastname" autocomplete="username" />
+    </div>
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" id="loginPass" placeholder="••••••••" autocomplete="current-password" />
+    </div>
+    <button class="btn btn-primary btn-full" onclick="doLogin()">Sign In</button>
+    <p class="login-hint">Contact your administrator if you need access.</p>
+  </div>
+</div>
+
+<!-- ═══ MAIN APP ═══ -->
+<div id="mainApp" style="display:none">
+
+  <header class="topbar">
+    <div class="topbar-left">
+      <button class="sidebar-toggle" onclick="toggleSidebar()">&#9776;</button>
+      <div class="topbar-brand">
+        <img src="https://images.squarespace-cdn.com/content/v1/6769c43a83fc805786904afb/1fc9d3a5-749a-42f8-8fba-d7c894568b9c/LOGO+WHITE.png?format=400w" alt="KVM" class="brand-logo" onerror="this.outerHTML='<span style=\'font-family:Oswald,sans-serif;font-size:18px;font-weight:700;color:#fff;letter-spacing:0.05em\'>KVM DOORS</span>'" />
+        <div class="brand-divider"></div>
+        <span class="brand-portal-text">Employee Portal</span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="user-chip">
+        <div class="avatar" id="topAvatar">?</div>
+        <span id="topName">User</span>
+      </div>
+      <button class="btn-logout" onclick="doLogout()">Sign out</button>
+    </div>
+  </header>
+
+  <div class="app-layout">
+    <nav class="sidebar" id="sidebar">
+      <div class="nav-group-label">Main</div>
+      <div class="nav-item active" data-page="dashboard" onclick="showPage('dashboard',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z"/></svg>
+        Dashboard
+      </div>
+      <div class="nav-item" data-page="announcements" onclick="showPage('announcements',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z"/></svg>
+        Announcements
+      </div>
+      <div class="nav-item" data-page="news" onclick="showPage('news',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M2 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 002 2H4a2 2 0 01-2-2V5zm3 1h6v4H5V6zm6 6H5v2h6v-2z" clip-rule="evenodd"/><path d="M15 7h1a2 2 0 012 2v5.5a1.5 1.5 0 01-3 0V7z"/></svg>
+        Company News
+      </div>
+      <div class="nav-group-label">Team</div>
+      <div class="nav-item" data-page="oncall" onclick="showPage('oncall',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"/></svg>
+        On-Call Schedule
+      </div>
+      <div class="nav-item" data-page="directory" onclick="showPage('directory',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>
+        Employee Directory
+      </div>
+      <div class="nav-item" data-page="pto" onclick="showPage('pto',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"/></svg>
+        Time Off
+      </div>
+      <div id="adminSection" style="display:none">
+        <div class="nav-group-label">Admin</div>
+        <div class="nav-item" data-page="adminUsers" onclick="showPage('adminUsers',this)">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3z"/></svg>
+          Manage Employees <span class="admin-chip">ADMIN</span>
+        </div>
+        <div class="nav-item" data-page="adminPto" onclick="showPage('adminPto',this)">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+          PTO Approval <span class="nav-badge" id="ptoPendingBadge" style="display:none">0</span>
+        </div>
+        <div class="nav-item" data-page="adminBlackout" onclick="showPage('adminBlackout',this)">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M13.477 14.89A6 6 0 015.11 6.524l8.367 8.368zm1.414-1.414L6.524 5.11a6 6 0 018.367 8.367zM18 10a8 8 0 11-16 0 8 8 0 0116 0z" clip-rule="evenodd"/></svg>
+          Blackout Dates <span class="admin-chip">ADMIN</span>
+        </div>
+        <div class="nav-item" data-page="adminRotation" onclick="showPage('adminRotation',this)">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/></svg>
+          Rotation Order <span class="admin-chip">ADMIN</span>
+        </div>
+        <div class="nav-item" data-page="adminSettings" onclick="showPage('adminSettings',this)">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/></svg>
+          Portal Settings <span class="admin-chip">ADMIN</span>
+        </div>
+      </div>
+    </nav>
+
+    <main class="main-content">
+
+      <!-- DASHBOARD -->
+      <div class="page active" id="page-dashboard">
+        <div class="page-header">
+          <div><h1 class="page-title">DASHBOARD</h1><p class="page-sub" id="dashGreeting"></p></div>
+        </div>
+        <div class="stat-grid" id="dashStats"></div>
+        <div class="two-col">
+          <div class="card">
+            <div class="card-header"><span class="card-title">Latest Announcements</span><button class="btn btn-ghost btn-sm" onclick="showPage('announcements',null)">View all →</button></div>
+            <div id="dashAnnPreview"></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">On-Call Now</span></div>
+            <div id="dashOncallPreview"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ANNOUNCEMENTS -->
+      <div class="page" id="page-announcements">
+        <div class="page-header">
+          <div><h1 class="page-title">ANNOUNCEMENTS</h1><p class="page-sub">Company-wide messages from management</p></div>
+          <button class="btn btn-primary" id="btnNewAnn" style="display:none" onclick="openModal('annModal')">+ New Announcement</button>
+        </div>
+        <div id="annList"></div>
+      </div>
+
+      <!-- NEWS -->
+      <div class="page" id="page-news">
+        <div class="page-header">
+          <div><h1 class="page-title">COMPANY NEWS</h1><p class="page-sub">Updates, projects & company happenings</p></div>
+          <button class="btn btn-primary" id="btnNewNews" style="display:none" onclick="openModal('newsModal')">+ New Post</button>
+        </div>
+        <div id="newsList"></div>
+      </div>
+
+      <!-- ON-CALL -->
+      <div class="page" id="page-oncall">
+        <div class="page-header">
+          <div><h1 class="page-title">ON-CALL SCHEDULE</h1><p class="page-sub">After-hours emergency contacts by department</p></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" id="btnAutoSchedule" style="display:none" onclick="openModal('autoScheduleModal')">⟳ Auto-Schedule</button>
+            <button class="btn btn-primary" id="btnNewOncall" style="display:none" onclick="openModal('oncallModal')">+ Add Entry</button>
+          </div>
+        </div>
+        <div class="tab-bar">
+          <button class="tab active" onclick="setOncallFilter('current',this)">On Call Now</button>
+          <button class="tab" onclick="setOncallFilter('upcoming',this)">Upcoming</button>
+          <button class="tab" onclick="setOncallFilter('all',this)">All Entries</button>
+        </div>
+        <div id="oncallList"></div>
+      </div>
+
+      <!-- DIRECTORY -->
+      <div class="page" id="page-directory">
+        <div class="page-header"><h1 class="page-title">EMPLOYEE DIRECTORY</h1></div>
+        <input class="search-input" type="text" id="dirSearch" placeholder="Search by name, role, or department…" oninput="renderDirectory()" />
+        <div id="dirGrid" class="dir-grid"></div>
+      </div>
+
+      <!-- PTO -->
+      <div class="page" id="page-pto">
+        <div class="page-header">
+          <div><h1 class="page-title">TIME OFF</h1><p class="page-sub">Request and track your PTO (days-based)</p></div>
+          <button class="btn btn-primary" onclick="openPtoReqModal()">+ Request Time Off</button>
+        </div>
+        <div id="ptoBalanceCard" class="card" style="margin-bottom:1.25rem"></div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">My Requests</span></div>
+          <div id="myPtoList"></div>
+        </div>
+      </div>
+
+      <!-- ADMIN: USERS -->
+      <div class="page" id="page-adminUsers">
+        <div class="page-header">
+          <div><h1 class="page-title">MANAGE EMPLOYEES</h1></div>
+          <button class="btn btn-primary" onclick="openModal('addUserModal')">+ Add Employee</button>
+        </div>
+        <div class="card">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Employee</th><th>Username</th><th>Department</th><th>On-Call Dept</th><th>PTO Balance</th><th>Actions</th></tr></thead>
+              <tbody id="usersTbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ADMIN: PTO -->
+      <div class="page" id="page-adminPto">
+        <div class="page-header"><div><h1 class="page-title">PTO APPROVAL</h1><p class="page-sub">Review and approve employee time-off requests</p></div></div>
+        <div class="tab-bar">
+          <button class="tab active" onclick="setAdminPtoFilter('pending',this)">Pending</button>
+          <button class="tab" onclick="setAdminPtoFilter('approved',this)">Approved</button>
+          <button class="tab" onclick="setAdminPtoFilter('denied',this)">Denied</button>
+          <button class="tab" onclick="setAdminPtoFilter('all',this)">All</button>
+        </div>
+        <div id="adminPtoList"></div>
+      </div>
+
+      <!-- ADMIN: BLACKOUT DATES -->
+      <div class="page" id="page-adminBlackout">
+        <div class="page-header">
+          <div><h1 class="page-title">BLACKOUT DATES</h1><p class="page-sub">Dates when PTO requests cannot be submitted</p></div>
+          <button class="btn btn-primary" onclick="openModal('blackoutModal')">+ Add Blackout</button>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">Active Blackout Periods</span></div>
+          <div id="blackoutList"></div>
+        </div>
+      </div>
+
+      <!-- ADMIN: ROTATION -->
+      <div class="page" id="page-adminRotation">
+        <div class="page-header">
+          <div><h1 class="page-title">ROTATION ORDER</h1><p class="page-sub">Drag to reorder who rotates next in each division</p></div>
+          <button class="btn btn-primary" onclick="openAutoScheduleModal()">⟳ Auto-Schedule Builder</button>
+        </div>
+        <div class="two-col">
+          <div class="card"><div class="card-header"><span class="card-title">Overhead Door Division</span><span style="font-size:11px;color:var(--text-muted)">9 leaders + helpers · 2 per rotation</span></div><div id="rotOhTable"></div></div>
+          <div class="card"><div class="card-header"><span class="card-title">Automatic Door Division</span><span style="font-size:11px;color:var(--text-muted)">4 technicians · 1 per rotation</span></div><div id="rotAuTable"></div></div>
+        </div>
+      </div>
+
+      <!-- ADMIN: SETTINGS -->
+      <div class="page" id="page-adminSettings">
+        <div class="page-header"><h1 class="page-title">PORTAL SETTINGS</h1></div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">Email Notifications</span></div>
+          <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem">Configure SMTP settings to send email notifications when PTO is approved or denied.</p>
+          <div class="form-row">
+            <div class="form-group"><label>SMTP Host</label><input type="text" id="smtpHost" placeholder="smtp.office365.com" /></div>
+            <div class="form-group"><label>SMTP Port</label><input type="number" id="smtpPort" placeholder="587" /></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Email Username</label><input type="email" id="smtpUser" placeholder="portal@kvmdoors.com" /></div>
+            <div class="form-group"><label>Email Password</label><input type="password" id="smtpPass" placeholder="••••••••" /></div>
+          </div>
+          <div class="form-group"><label>From Name</label><input type="text" id="smtpFromName" placeholder="KVM Door Systems Portal" /></div>
+          <button class="btn btn-primary" onclick="saveSmtpSettings()">Save Email Settings</button>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">On-Call Departments</span></div>
+          <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">Currently configured: <strong style="color:var(--text)">Automatic Door Division</strong> (1 person) and <strong style="color:var(--text)">Overhead Door Division</strong> (2 people).</p>
+          <div class="alert alert-warning">To change department structure, contact your portal administrator to update the server configuration.</div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- ═══ MODALS ═══ -->
+
+<!-- Announcement -->
+<div class="modal-overlay" id="annModal" onclick="closeOnOverlay(event,'annModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">New Announcement</span><button class="modal-close" onclick="closeModal('annModal')">✕</button></div>
+    <div class="form-group"><label>Title</label><input type="text" id="annTitle" /></div>
+    <div class="form-group"><label>Priority</label>
+      <select id="annPriority"><option value="normal">Normal</option><option value="urgent">Urgent</option><option value="info">Info / FYI</option></select>
+    </div>
+    <div class="form-group"><label>Message</label><textarea id="annBody" rows="4"></textarea></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('annModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveAnnouncement()">Post</button>
+    </div>
+  </div>
+</div>
+
+<!-- News -->
+<div class="modal-overlay" id="newsModal" onclick="closeOnOverlay(event,'newsModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">New News Post</span><button class="modal-close" onclick="closeModal('newsModal')">✕</button></div>
+    <div class="form-group"><label>Title</label><input type="text" id="newsTitle" /></div>
+    <div class="form-group"><label>Category</label>
+      <select id="newsCat"><option>Project Update</option><option>Safety</option><option>HR</option><option>Recognition</option><option>General</option></select>
+    </div>
+    <div class="form-group"><label>Content</label><textarea id="newsBody" rows="5"></textarea></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('newsModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveNews()">Publish</button>
+    </div>
+  </div>
+</div>
+
+<!-- On-Call (manual) -->
+<div class="modal-overlay" id="oncallModal" onclick="closeOnOverlay(event,'oncallModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Add On-Call Entry</span><button class="modal-close" onclick="closeModal('oncallModal')">✕</button></div>
+    <div class="form-group"><label>Department</label>
+      <select id="ocDept" onchange="populateOncallEmployees()">
+        <option value="Automatic Door Division">Automatic Door Division (1 person)</option>
+        <option value="Overhead Door Division">Overhead Door Division (2 people)</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Primary Employee</label><select id="ocEmp1"></select></div>
+    <div class="form-group" id="ocEmp2Group" style="display:none"><label>Second Employee</label><select id="ocEmp2"></select></div>
+    <div class="form-row">
+      <div class="form-group"><label>Start Date</label><input type="date" id="ocStart" /></div>
+      <div class="form-group"><label>End Date</label><input type="date" id="ocEnd" /></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('oncallModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveOncall()">Save Entry</button>
+    </div>
+  </div>
+</div>
+
+<!-- Auto-Schedule Builder -->
+<div class="modal-overlay" id="autoScheduleModal" onclick="closeOnOverlay(event,'autoScheduleModal')">
+  <div class="modal modal-xl">
+    <div class="modal-header"><span class="modal-title">Auto-Schedule Builder</span><button class="modal-close" onclick="closeModal('autoScheduleModal')">✕</button></div>
+    <div class="form-row">
+      <div class="form-group"><label>Schedule Start Date</label><input type="date" id="schedStart" oninput="previewSchedule()" /></div>
+      <div class="form-group"><label>Number of Weeks</label><select id="schedWeeks" onchange="previewSchedule()"><option value="4">4 weeks</option><option value="6">6 weeks</option><option value="8" selected>8 weeks</option><option value="12">12 weeks</option><option value="26">26 weeks</option></select></div>
+    </div>
+    <div class="form-group"><label>Rotation Frequency</label>
+      <select id="schedFreq" onchange="previewSchedule()"><option value="1">Weekly</option><option value="2">Bi-weekly</option><option value="4">Monthly (every 4 weeks)</option></select>
+    </div>
+    <div class="modal-section">Automatic Door Division — 1 person per rotation</div>
+    <div class="form-group"><label>Select Employees to Rotate (in order)</label>
+      <div id="autoEmpListAuto" style="max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px"></div>
+    </div>
+    <div class="modal-section">Overhead Door Division — 2 people per rotation</div>
+    <div class="form-group"><label>Select Employees to Rotate (in order)</label>
+      <div id="autoEmpListOverhead" style="max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px"></div>
+    </div>
+    <div class="modal-section">Schedule Preview</div>
+    <div id="schedPreview" style="max-height:280px;overflow-y:auto"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('autoScheduleModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="applyAutoSchedule()">Apply Schedule</button>
+    </div>
+  </div>
+</div>
+
+<!-- PTO Request -->
+<div class="modal-overlay" id="ptoReqModal" onclick="closeOnOverlay(event,'ptoReqModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Request Time Off</span><button class="modal-close" onclick="closeModal('ptoReqModal')">✕</button></div>
+    <div id="blackoutWarning" class="alert alert-danger" style="display:none"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Start Date</label><input type="date" id="ptoStart" oninput="calcPtoDays()" /></div>
+      <div class="form-group"><label>End Date</label><input type="date" id="ptoEnd" oninput="calcPtoDays()" /></div>
+    </div>
+    <div class="form-group"><label>Type</label>
+      <select id="ptoType"><option>Vacation</option><option>Personal</option><option>Sick</option><option>Bereavement</option><option>Other</option></select>
+    </div>
+    <div class="form-group"><label>Notes (optional)</label><textarea id="ptoNotes" rows="2"></textarea></div>
+    <div id="ptoDaysCalc" class="calc-note" style="display:none"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('ptoReqModal')">Cancel</button>
+      <button class="btn btn-primary" id="ptoSubmitBtn" onclick="submitPto()">Submit Request</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add User -->
+<div class="modal-overlay" id="addUserModal" onclick="closeOnOverlay(event,'addUserModal')">
+  <div class="modal modal-lg">
+    <div class="modal-header"><span class="modal-title">Add Employee</span><button class="modal-close" onclick="closeModal('addUserModal')">✕</button></div>
+    <div class="form-row">
+      <div class="form-group"><label>First Name</label><input type="text" id="addFirst" /></div>
+      <div class="form-group"><label>Last Name</label><input type="text" id="addLast" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Username</label><input type="text" id="addUsername" placeholder="firstname.lastname" /></div>
+      <div class="form-group"><label>Password</label><input type="password" id="addPass" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Job Title</label><input type="text" id="addRole" placeholder="e.g. Field Technician" /></div>
+      <div class="form-group"><label>Department</label><input type="text" id="addDept" placeholder="e.g. Installation" /></div>
+    </div>
+    <div class="form-group"><label>On-Call Department</label>
+      <select id="addOncallDept">
+        <option value="">Not on on-call rotation</option>
+        <option value="Automatic Door Division">Automatic Door Division</option>
+        <option value="Overhead Door Division">Overhead Door Division</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Phone</label><input type="tel" id="addPhone" /></div>
+      <div class="form-group"><label>Email</label><input type="email" id="addEmail" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>PTO Days / Year</label><input type="number" id="addPtoTotal" value="10" min="0" /></div>
+      <div class="form-group"><label>PTO Days Remaining</label><input type="number" id="addPtoLeft" value="10" min="0" /></div>
+    </div>
+    <div class="form-group"><label>Access Level</label>
+      <select id="addIsAdmin"><option value="false">Employee</option><option value="true">Admin (full access)</option></select>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('addUserModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveUser()">Add Employee</button>
+    </div>
+  </div>
+</div>
+
+<!-- Blackout Date -->
+<div class="modal-overlay" id="blackoutModal" onclick="closeOnOverlay(event,'blackoutModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Add Blackout Period</span><button class="modal-close" onclick="closeModal('blackoutModal')">✕</button></div>
+    <div class="form-group"><label>Label / Reason</label><input type="text" id="boLabel" placeholder="e.g. Year-End Busy Period, Holiday Freeze" /></div>
+    <div class="form-row">
+      <div class="form-group"><label>Start Date</label><input type="date" id="boStart" /></div>
+      <div class="form-group"><label>End Date</label><input type="date" id="boEnd" /></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('blackoutModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveBlackout()">Save Blackout</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+<script src="/js/app.js"></script>
+</body>
+</html>
+<script>
+// Patch autoScheduleModal HTML after DOM loads
+document.addEventListener('DOMContentLoaded', function() {
+  const modal = document.getElementById('autoScheduleModal');
+  if (modal) {
+    modal.querySelector('.modal').innerHTML = `
+      <div class="modal-header"><span class="modal-title">Auto-Schedule Builder</span><button class="modal-close" onclick="closeModal('autoScheduleModal')">✕</button></div>
+      <div class="form-row">
+        <div class="form-group"><label>Schedule Start Date</label><input type="date" id="schedStart" oninput="previewSchedule()" /></div>
+        <div class="form-group"><label>Number of Weeks</label><select id="schedWeeks" onchange="previewSchedule()"><option value="4">4 weeks</option><option value="6">6 weeks</option><option value="8" selected>8 weeks</option><option value="12">12 weeks</option><option value="26">26 weeks</option></select></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Rotation Frequency</label><select id="schedFreq" onchange="previewSchedule()"><option value="1">Weekly</option><option value="2">Bi-weekly</option><option value="4">Monthly (4 weeks)</option></select></div>
+        <div class="form-group"></div>
+      </div>
+      <div class="modal-section">Continue Rotation From Position</div>
+      <div class="form-row">
+        <div class="form-group"><label>Overhead Door — Start at position #</label><input type="number" id="ohStartIdx" value="0" min="0" oninput="previewSchedule()" /></div>
+        <div class="form-group"><label>Automatic Door — Start at position #</label><input type="number" id="auStartIdx" value="0" min="0" oninput="previewSchedule()" /></div>
+      </div>
+      <div class="modal-section">Overhead Door Division Rotation Order</div>
+      <div id="rotListOverhead" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px"></div>
+      <div class="modal-section">Automatic Door Division Rotation Order</div>
+      <div id="rotListAutomatic" style="max-height:120px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px"></div>
+      <div class="modal-section">Schedule Preview</div>
+      <div id="schedPreview" style="max-height:300px;overflow-y:auto"></div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('autoScheduleModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="applyAutoSchedule()">Apply Schedule</button>
+      </div>`;
+  }
+});
+</script>
