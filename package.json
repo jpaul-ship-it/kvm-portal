@@ -1,0 +1,17 @@
+{
+  "name": "kvm-door-portal",
+  "version": "2.0.0",
+  "description": "KVM Door Systems Employee Intranet Portal",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "express-session": "^1.17.3",
+    "nodemailer": "^6.9.9",
+    "sql.js": "^1.11.0"
+  }
+}
