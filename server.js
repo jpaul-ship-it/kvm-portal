@@ -1703,8 +1703,7 @@ app.delete('/api/customers/:cid/docs/:id', requireAdmin, (req, res) => {
 // ─── QB DESKTOP IIF EXPORT ────────────────────────────────────────────────────
 app.get('/api/customers/export/qb-iif', requireAdmin, (req, res) => {
   const customers = all("SELECT * FROM customers WHERE status='active' ORDER BY company_name");
-  let iif = '!CUST	NAME	REFNUM	TIMESTAMP	BSTYPE	ACCNUM	CCARDNUM	ALTDPHONE	EMAIL	CONT1	CONT2	CONT3	ADDR1	ADDR2	ADDR3	ADDR4	ADDR5	CUST	JOBSTATUS	NOTES	TERMS
-';
+  let iif = '!CUST	NAME	REFNUM	TIMESTAMP	BSTYPE	ACCNUM	CCARDNUM	ALTDPHONE	EMAIL	CONT1	CONT2	CONT3	ADDR1	ADDR2	ADDR3	ADDR4	ADDR5	CUST	JOBSTATUS	NOTES	TERMS';
   customers.forEach(c => {
     iif += `CUST	${c.company_name}	${c.qb_customer_id||''}			${c.qb_customer_id||''}		${c.billing_phone||''}	${c.billing_email||''}				${c.billing_address||''}	${c.billing_city||''}${c.billing_city&&c.billing_state?', ':''}	${c.billing_state||''}	${c.billing_zip||''}		TRUE		${c.internal_notes||''}	${c.credit_terms||'Net 30'}
 `;
