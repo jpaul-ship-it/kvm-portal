@@ -431,3 +431,22 @@ textarea { resize: vertical; }
 .pto-cal-grid { min-width: 0; }
 .pto-cal-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
 .pto-cal-day { min-height: 30px; min-width: 0; display: flex; align-items: center; justify-content: center; font-size: 12px; border-radius: 4px; cursor: pointer; transition: all .1s; color: var(--text); position: relative; user-select: none; }
+
+/* ══ DOCUMENT CARDS ══════════════════════════════════════════════════════ */
+.doc-type-tabs { display:flex; gap:2px; border-bottom:1px solid var(--border); margin-bottom:1.25rem; }
+.doc-grid { display:flex; flex-direction:column; gap:8px; }
+.doc-card { display:flex; align-items:flex-start; gap:14px; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; transition:border-color .12s; }
+.doc-card:hover { border-color:var(--border2); }
+.doc-card-icon { font-size:24px; flex-shrink:0; width:36px; text-align:center; margin-top:2px; }
+.doc-card-info { flex:1; min-width:0; }
+.doc-card-name { font-family:'Oswald',sans-serif; font-size:15px; font-weight:600; color:var(--white); letter-spacing:.02em; margin-bottom:5px; }
+.doc-card-meta { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:3px; }
+.doc-card-actions { display:flex; flex-direction:column; gap:6px; flex-shrink:0; }
+@media (max-width:580px) { .doc-card { flex-wrap:wrap; } .doc-card-actions { flex-direction:row; } }
+
+/* ══ TIMECLOCK ═══════════════════════════════════════════════════════════ */
+#clockPanel { text-align: center; }
+#clockInForm, #clockOutForm { text-align: left; }
+#clockStatusDisplay { padding: 1.5rem 0 .75rem; }
+.clock-btn-in  { background: var(--green) !important; border-color: var(--green) !important; }
+.clock-btn-out { background: var(--danger) !important; border-color: var(--danger) !important; }

@@ -73,7 +73,9 @@ function setupUI() {
   $('topName').textContent=u.first_name;
   if(u.is_admin){
     $('adminSection').style.display='block';
-    ['btnNewAnn','btnNewNews','btnNewOncall','btnAutoSchedule','btnLoadSchedule'].forEach(id=>{ const el=$(id); if(el) el.style.display='inline-flex'; });
+    ['btnNewAnn','btnNewNews','btnNewOncall','btnAutoSchedule','btnLoadSchedule','btnUploadPolicy'].forEach(id=>{ const el=$(id); if(el) el.style.display='inline-flex'; });
+  const allDocsSection = $('allDocsSection');
+  if (allDocsSection) allDocsSection.style.display = 'block';
     updatePtoBadge();
   }
 }
@@ -95,7 +97,7 @@ function showPage(name, el) {
   if(pg) pg.classList.add('active');
   if(el) el.classList.add('active');
   $('sidebar').classList.remove('open');
-  const map={dashboard:renderDashboard,announcements:renderAnnouncements,news:renderNews,oncall:renderOncall,directory:renderDirectory,pto:renderPto,ptoCalendar:renderPtoCalendar,adminUsers:renderAdminUsers,adminPto:renderAdminPto,adminBlackout:renderBlackouts,adminRotation:renderRotation,adminSettings:loadSettings};
+  const map={dashboard:renderDashboard,announcements:renderAnnouncements,news:renderNews,oncall:renderOncall,directory:renderDirectory,pto:renderPto,ptoCalendar:renderPtoCalendar,myDocs:renderMyDocs,policies:renderPolicies,timeclock:initTimeclock,adminTimeclock:loadAdminTimecards,adminAlerts:renderAlerts,adminAttendance:initAdminAttendance,adminUsers:renderAdminUsers,adminPto:renderAdminPto,adminBlackout:renderBlackouts,adminRotation:renderRotation,adminSettings:loadSettings};
   if(map[name]) map[name]();
 }
 
@@ -108,7 +110,13 @@ async function renderDashboard() {
     const today=new Date().toISOString().split('T')[0];
     const cur=oncall.filter(o=>o.start_date<=today&&o.end_date>=today);
     const pct=Math.round(me.pto_left/Math.max(me.pto_total,1)*100);
-    $('dashStats').innerHTML=`
+    // Load attendance for dashboard
+let myAttendance = null;
+try { myAttendance = await api('GET','/api/attendance/my'); } catch(e){}
+const tardiesQ = myAttendance ? myAttendance.thisQEvents.filter(e=>e.event_type==='tardy').length : 0;
+const callinsQ = myAttendance ? myAttendance.thisQCallins.length : 0;
+const hasPerfect = myAttendance && myAttendance.recognition && myAttendance.recognition.length > 0;
+$('dashStats').innerHTML=`
       <div class="stat-card"><div class="stat-label">PTO Remaining</div><div class="stat-value" style="color:${pct<20?'var(--danger)':pct<50?'var(--amber)':'var(--green)'}">${me.pto_left}</div><div class="stat-sub">of ${me.pto_total} days this year</div></div>
       <div class="stat-card"><div class="stat-label">On-Call Now</div><div class="stat-value">${cur.length}</div><div class="stat-sub">active across both divisions</div></div>
       <div class="stat-card"><div class="stat-label">Announcements</div><div class="stat-value">${ann.length}</div><div class="stat-sub">total posts</div></div>`;
@@ -1207,4 +1215,929 @@ async function loadGcalSettings() {
     const s = await api('GET', '/api/settings');
     if (s.gcal_id && $('gcalId')) $('gcalId').value = s.gcal_id;
   } catch(e) {}
+}
+
+// ─── DOCUMENTS ────────────────────────────────────────────────────────────────
+let docFilter = 'all';
+let policyFilter = 'all';
+
+const DOC_TYPE_ICONS = { certification:'🏅', must_card:'🪪', license:'📋', other:'📄' };
+const DOC_TYPE_LABELS = { certification:'Certification', must_card:'MUST Card', license:'License', other:'Other' };
+const POLICY_CAT_ICONS = { safety:'⛑️', hr:'👔', operations:'🔧', training:'📚', other:'📄' };
+
+function setDocFilter(f, el) {
+  docFilter = f;
+  document.querySelectorAll('#page-myDocs .doc-type-tabs .tab').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  renderMyDocs();
+}
+
+function setPolicyFilter(f, el) {
+  policyFilter = f;
+  document.querySelectorAll('#page-policies .doc-type-tabs .tab').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  renderPolicies();
+}
+
+function fmtFileSize(bytes) {
+  if (!bytes) return '—';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024*1024) return Math.round(bytes/1024) + ' KB';
+  return (bytes/1024/1024).toFixed(1) + ' MB';
+}
+
+function expiryBadge(expiry) {
+  if (!expiry) return '';
+  const d = new Date(expiry + 'T00:00:00');
+  const today = new Date();
+  const days = Math.round((d - today) / 86400000);
+  if (days < 0) return '<span class="badge badge-red">EXPIRED</span>';
+  if (days <= 30) return `<span class="badge badge-amber">EXPIRES SOON</span>`;
+  return `<span class="badge badge-green">Valid</span>`;
+}
+
+async function renderMyDocs() {
+  try {
+    const docs = await api('GET', '/api/docs/my');
+    const filtered = docFilter === 'all' ? docs : docs.filter(d => d.doc_type === docFilter);
+
+    const el = $('myDocsList');
+    if (!filtered.length) {
+      el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📄</div>No documents uploaded yet. Click "+ Upload Document" to add your certifications and MUST cards.</div>';
+    } else {
+      el.innerHTML = `<div class="doc-grid">${filtered.map(d => `
+        <div class="doc-card">
+          <div class="doc-card-icon">${DOC_TYPE_ICONS[d.doc_type]||'📄'}</div>
+          <div class="doc-card-info">
+            <div class="doc-card-name">${d.doc_name}</div>
+            <div class="doc-card-meta">
+              <span class="badge badge-amber" style="font-size:9px">${DOC_TYPE_LABELS[d.doc_type]||d.doc_type}</span>
+              ${d.expiry_date ? `<span style="font-size:11px;color:var(--text-muted)">Expires: ${fmtDate(d.expiry_date)}</span>` : ''}
+              ${expiryBadge(d.expiry_date)}
+            </div>
+            ${d.notes ? `<div style="font-size:11px;color:var(--text-muted);margin-top:3px">${d.notes}</div>` : ''}
+            <div style="font-size:11px;color:var(--text-faint);margin-top:4px">${d.file_name} &middot; ${fmtFileSize(d.file_size)} &middot; ${fmtDate(d.uploaded_at)}</div>
+          </div>
+          <div class="doc-card-actions">
+            <a href="/api/docs/${d.id}/download" class="btn btn-ghost btn-sm" target="_blank">&#8595; Download</a>
+            <button class="btn btn-danger btn-sm" onclick="deleteDoc(${d.id})">Delete</button>
+          </div>
+        </div>`).join('')}</div>`;
+    }
+
+    // Admin: show all employees docs
+    if (currentUser.is_admin) renderAllDocs();
+  } catch(e) { console.error(e); }
+}
+
+async function renderAllDocs() {
+  try {
+    const docs = await api('GET', '/api/docs/all');
+    const q = ($('docEmpSearch') && $('docEmpSearch').value || '').toLowerCase();
+    const filtered = q ? docs.filter(d => d.user_name.toLowerCase().includes(q)) : docs;
+
+    // Group by employee
+    const byEmp = {};
+    filtered.forEach(d => { if (!byEmp[d.user_name]) byEmp[d.user_name] = []; byEmp[d.user_name].push(d); });
+
+    const el = $('allDocsList');
+    if (!Object.keys(byEmp).length) { el.innerHTML = '<div class="empty-state">No employee documents found.</div>'; return; }
+
+    el.innerHTML = Object.entries(byEmp).map(([name, empDocs]) => `
+      <div style="margin-bottom:1rem">
+        <div style="font-family:Oswald,sans-serif;font-size:13px;font-weight:600;color:var(--amber);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">${name}</div>
+        <div class="doc-grid">${empDocs.map(d => `
+          <div class="doc-card">
+            <div class="doc-card-icon">${DOC_TYPE_ICONS[d.doc_type]||'📄'}</div>
+            <div class="doc-card-info">
+              <div class="doc-card-name">${d.doc_name}</div>
+              <div class="doc-card-meta">${expiryBadge(d.expiry_date)}${d.expiry_date?'<span style="font-size:11px;color:var(--text-muted)"> '+fmtDate(d.expiry_date)+'</span>':''}</div>
+              <div style="font-size:11px;color:var(--text-faint)">${d.file_name} &middot; ${fmtFileSize(d.file_size)}</div>
+            </div>
+            <div class="doc-card-actions">
+              <a href="/api/docs/${d.id}/download" class="btn btn-ghost btn-sm" target="_blank">&#8595;</a>
+              <button class="btn btn-danger btn-sm" onclick="deleteDoc(${d.id})">✕</button>
+            </div>
+          </div>`).join('')}
+        </div>
+      </div>`).join('');
+  } catch(e) { console.error(e); }
+}
+
+async function uploadDocument() {
+  const name = $('docName').value.trim();
+  const type = $('docType').value;
+  const expiry = $('docExpiry').value;
+  const notes = $('docNotes').value;
+  const file = $('docFile').files[0];
+
+  if (!name) return showToast('Enter a document name.', 'error');
+  if (!file) return showToast('Select a file to upload.', 'error');
+  if (file.size > 5 * 1024 * 1024) return showToast('File too large. Max 5MB.', 'error');
+
+  const prog = $('docUploadProgress');
+  prog.style.display = 'block';
+  prog.textContent = 'Reading file...';
+
+  try {
+    const base64 = await fileToBase64(file);
+    prog.textContent = 'Uploading...';
+    await api('POST', '/api/docs', {
+      doc_name: name, doc_type: type, expiry_date: expiry, notes,
+      file_name: file.name, file_data: base64, file_type: file.type, file_size: file.size
+    });
+    closeModal('uploadDocModal');
+    prog.style.display = 'none';
+    ['docName','docExpiry','docNotes'].forEach(id => $(id).value = '');
+    $('docFile').value = '';
+    showToast('Document uploaded!', 'success');
+    renderMyDocs();
+  } catch(e) {
+    prog.style.display = 'none';
+    showToast('Upload failed: ' + e.message, 'error');
+  }
+}
+
+async function deleteDoc(id) {
+  if (!confirm('Delete this document?')) return;
+  await api('DELETE', '/api/docs/' + id);
+  showToast('Document deleted.');
+  renderMyDocs();
+}
+
+// ─── POLICIES ─────────────────────────────────────────────────────────────────
+async function renderPolicies() {
+  try {
+    const policies = await api('GET', '/api/policies');
+    const filtered = policyFilter === 'all' ? policies : policies.filter(p => p.category === policyFilter);
+
+    const el = $('policiesList');
+    if (!filtered.length) {
+      el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📚</div>' + (currentUser.is_admin ? 'No policy documents yet. Click "+ Add Document" to upload.' : 'No policy documents have been published yet.') + '</div>';
+      return;
+    }
+
+    // Group by category
+    const byCat = {};
+    filtered.forEach(p => { if (!byCat[p.category]) byCat[p.category] = []; byCat[p.category].push(p); });
+
+    el.innerHTML = Object.entries(byCat).map(([cat, items]) => `
+      <div style="margin-bottom:1.5rem">
+        <div class="dept-header" style="margin-top:0;margin-bottom:.75rem">
+          <h3>${POLICY_CAT_ICONS[cat]||'📄'} ${cat.charAt(0).toUpperCase()+cat.slice(1)}</h3>
+          <span style="font-size:11px;color:var(--text-muted)">${items.length} document${items.length!==1?'s':''}</span>
+        </div>
+        <div class="doc-grid">${items.map(p => `
+          <div class="doc-card">
+            <div class="doc-card-icon">${POLICY_CAT_ICONS[p.category]||'📄'}</div>
+            <div class="doc-card-info">
+              <div class="doc-card-name">${p.title}</div>
+              ${p.description ? `<div style="font-size:12px;color:var(--text-muted);margin-top:3px">${p.description}</div>` : ''}
+              <div style="font-size:11px;color:var(--text-faint);margin-top:4px">${p.file_name} &middot; ${fmtFileSize(p.file_size)} &middot; Added by ${p.uploaded_by}</div>
+            </div>
+            <div class="doc-card-actions">
+              <a href="/api/policies/${p.id}/download" class="btn btn-ghost btn-sm" target="_blank">&#8595; Download</a>
+              ${currentUser.is_admin ? `<button class="btn btn-danger btn-sm" onclick="deletePolicy(${p.id})">Delete</button>` : ''}
+            </div>
+          </div>`).join('')}
+        </div>
+      </div>`).join('');
+  } catch(e) { console.error(e); }
+}
+
+async function uploadPolicy() {
+  const title = $('policyName').value.trim();
+  const category = $('policyCategory').value;
+  const description = $('policyDesc').value;
+  const file = $('policyFile').files[0];
+
+  if (!title) return showToast('Enter a document title.', 'error');
+  if (!file) return showToast('Select a file to upload.', 'error');
+  if (file.size > 10 * 1024 * 1024) return showToast('File too large. Max 10MB.', 'error');
+
+  const prog = $('policyUploadProgress');
+  prog.style.display = 'block'; prog.textContent = 'Uploading...';
+
+  try {
+    const base64 = await fileToBase64(file);
+    await api('POST', '/api/policies', {
+      title, category, description,
+      file_name: file.name, file_data: base64, file_type: file.type, file_size: file.size
+    });
+    closeModal('uploadPolicyModal');
+    prog.style.display = 'none';
+    ['policyName','policyDesc'].forEach(id => $(id).value = '');
+    $('policyFile').value = '';
+    showToast('Policy document uploaded!', 'success');
+    renderPolicies();
+  } catch(e) {
+    prog.style.display = 'none';
+    showToast('Upload failed: ' + e.message, 'error');
+  }
+}
+
+async function deletePolicy(id) {
+  if (!confirm('Delete this policy document?')) return;
+  await api('DELETE', '/api/policies/' + id);
+  showToast('Document deleted.');
+  renderPolicies();
+}
+
+// ─── FILE UTILITY ─────────────────────────────────────────────────────────────
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+// ─── TIMECLOCK ────────────────────────────────────────────────────────────────
+const SHOP_LAT = 42.55514;
+const SHOP_LNG = -82.866313;
+const GEOFENCE_RADIUS_M = 152.4; // 500 feet in meters
+const GEOFENCE_CHECK_INTERVAL = 300000; // 5 minutes
+const ALERT_COOLDOWN = 600000; // 10 min between alerts
+
+let clockedInEntry  = null;
+let elapsedTimer    = null;
+let geofenceWatcher = null;
+let lastAlertTime   = {};
+let geofenceInterval = null;
+
+function haversineDistance(lat1, lng1, lat2, lng2) {
+  const R = 6371000; // meters
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function isAtShop(lat, lng) {
+  return haversineDistance(lat, lng, SHOP_LAT, SHOP_LNG) <= GEOFENCE_RADIUS_M;
+}
+
+function fmtMinutes(mins) {
+  if (!mins) return '0:00';
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${h}:${String(m).padStart(2,'0')}`;
+}
+
+function fmtTime(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' });
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+
+function getWeekStart(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().split('T')[0];
+}
+
+function getCurrentWeekValue() {
+  const ws = getWeekStart(new Date().toISOString().split('T')[0]);
+  const [y, m, d] = ws.split('-');
+  // ISO week for input[type=week]
+  const jan4 = new Date(parseInt(y), 0, 4);
+  const weekNum = Math.ceil(((new Date(ws) - jan4) / 86400000 + jan4.getDay() + 1) / 7);
+  return `${y}-W${String(weekNum).padStart(2,'0')}`;
+}
+
+async function initTimeclock() {
+  // Load current status
+  try {
+    const s = await api('GET', '/api/timeclock/status');
+    clockedInEntry = s.clocked_in ? s.entry : null;
+    updateClockUI();
+    if (s.clocked_in) startElapsedTimer();
+  } catch(e) { console.error(e); }
+
+  // Set default week
+  const wkEl = $('myTimecardWeek');
+  if (wkEl && !wkEl.value) wkEl.value = getCurrentWeekValue();
+  loadMyTimecard();
+
+  // Start geofence monitoring
+  startGeofenceMonitor();
+}
+
+function updateClockUI() {
+  const icon    = $('clockStatusIcon');
+  const text    = $('clockStatusText');
+  const inTime  = $('clockInTime');
+  const inForm  = $('clockInForm');
+  const outForm = $('clockOutForm');
+
+  if (clockedInEntry) {
+    icon.textContent  = '🟢';
+    text.textContent  = 'CLOCKED IN';
+    text.style.color  = 'var(--green)';
+    inTime.textContent = 'Since: ' + fmtDateTime(clockedInEntry.clock_in) + (clockedInEntry.job_name ? ' — ' + clockedInEntry.job_name : '');
+    inForm.style.display  = 'none';
+    outForm.style.display = 'block';
+  } else {
+    icon.textContent  = '⏸️';
+    text.textContent  = 'NOT CLOCKED IN';
+    text.style.color  = 'var(--text-muted)';
+    inTime.textContent = '';
+    $('clockElapsed').textContent = '';
+    inForm.style.display  = 'block';
+    outForm.style.display = 'none';
+    if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+  }
+}
+
+function startElapsedTimer() {
+  if (elapsedTimer) clearInterval(elapsedTimer);
+  const update = () => {
+    if (!clockedInEntry) return;
+    const mins = Math.floor((Date.now() - new Date(clockedInEntry.clock_in)) / 60000);
+    const el = $('clockElapsed');
+    if (el) el.textContent = fmtMinutes(mins) + ' elapsed';
+  };
+  update();
+  elapsedTimer = setInterval(update, 30000);
+}
+
+function toggleClockType() {
+  const type = $('clockTypeSelect').value;
+  $('jobFields').style.display    = type === 'field' ? 'block' : 'none';
+  $('unionFields').style.display  = type === 'union' ? 'block' : 'none';
+}
+
+async function getCurrentPosition() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error('GPS not available on this device'));
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
+      err => reject(new Error('Location access denied. Please allow location access in your browser settings.')),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  });
+}
+
+async function doClockin() {
+  const type = $('clockTypeSelect').value;
+  const locEl = $('locationStatus');
+  locEl.style.display = 'block';
+  locEl.textContent = '📍 Getting your location...';
+
+  try {
+    const pos = await getCurrentPosition();
+    const atShop = isAtShop(pos.lat, pos.lng);
+
+    // Enforce geofence for shop clock-ins
+    if (type === 'shop' && !atShop) {
+      locEl.textContent = '⚠️ You must be at the KVM shop to use Shop clock-in. You appear to be ' + Math.round(haversineDistance(pos.lat, pos.lng, SHOP_LAT, SHOP_LNG) * 3.281) + ' feet away. Use Field or Union clock-in instead.';
+      return;
+    }
+
+    locEl.textContent = '✓ Location confirmed. Clocking in...';
+
+    const payload = {
+      latitude: pos.lat, longitude: pos.lng,
+      clock_type: type,
+      job_name:   type === 'field' ? ($('clockJobName').value || '') : '',
+      customer_name: type === 'field' ? ($('clockCustomer').value || '') : '',
+      notes:      $('clockNotes').value || '',
+      is_union:   type === 'union',
+      is_offsite: type !== 'shop'
+    };
+
+    const result = await api('POST', '/api/timeclock/in', payload);
+    clockedInEntry = { ...payload, id: result.id, clock_in: result.clock_in };
+    locEl.style.display = 'none';
+    ['clockJobName','clockCustomer','clockNotes'].forEach(id => { const el=$(id); if(el) el.value=''; });
+    updateClockUI();
+    startElapsedTimer();
+    showToast('Clocked in at ' + fmtTime(result.clock_in), 'success');
+  } catch(e) {
+    locEl.textContent = '❌ ' + e.message;
+  }
+}
+
+async function doClockout() {
+  try {
+    let pos = null;
+    try { pos = await getCurrentPosition(); } catch(e) {}
+    const payload = { notes: $('clockOutNotes').value || '' };
+    if (pos) { payload.latitude = pos.lat; payload.longitude = pos.lng; }
+    const result = await api('POST', '/api/timeclock/out', payload);
+    clockedInEntry = null;
+    if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+    $('clockElapsed').textContent = '';
+    updateClockUI();
+    const hrs = (result.total_minutes / 60).toFixed(2);
+    showToast(`Clocked out. Total: ${hrs} hours`, 'success');
+    loadMyTimecard();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+// ─── GEOFENCE MONITOR ─────────────────────────────────────────────────────────
+function startGeofenceMonitor() {
+  if (!navigator.geolocation) return;
+  let wasAtShop = null;
+  let enteredAt = null;
+
+  const check = () => {
+    navigator.geolocation.getCurrentPosition(async pos => {
+      const atShop = isAtShop(pos.coords.latitude, pos.coords.longitude);
+      const geo = $('geofenceCard');
+      const geoStatus = $('geofenceStatus');
+      if (geo) geo.style.display = 'block';
+
+      const distFt = Math.round(haversineDistance(pos.coords.latitude, pos.coords.longitude, SHOP_LAT, SHOP_LNG) * 3.281);
+      if (geoStatus) {
+        geoStatus.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:6px 0">
+          <span style="font-size:20px">${atShop ? '🟢' : '🔵'}</span>
+          <div>
+            <div style="font-size:13px;font-weight:500;color:var(--white)">${atShop ? 'You are at the KVM shop' : 'You are away from the shop'}</div>
+            <div style="font-size:11px;color:var(--text-muted)">${distFt} feet from shop &middot; GPS accuracy: ±${Math.round(pos.coords.accuracy)} ft</div>
+          </div>
+        </div>`;
+      }
+
+      const now = Date.now();
+
+      if (wasAtShop === false && atShop) {
+        // Just arrived at shop
+        enteredAt = now;
+        wasAtShop = true;
+        // After 5 min check if not clocked in
+        setTimeout(async () => {
+          const s = await api('GET', '/api/timeclock/status').catch(()=>null);
+          if (s && !s.clocked_in) {
+            const key = 'entered';
+            if (!lastAlertTime[key] || now - lastAlertTime[key] > ALERT_COOLDOWN) {
+              lastAlertTime[key] = now;
+              showGeofenceAlert('entered');
+              api('POST', '/api/timeclock/alert', { alert_type: 'entered_without_clockin', latitude: pos.coords.latitude, longitude: pos.coords.longitude }).catch(()=>{});
+            }
+          }
+        }, GEOFENCE_CHECK_INTERVAL);
+      }
+
+      if (wasAtShop === true && !atShop) {
+        // Just left shop
+        wasAtShop = false;
+        setTimeout(async () => {
+          const s = await api('GET', '/api/timeclock/status').catch(()=>null);
+          if (s && s.clocked_in) {
+            const key = 'left';
+            if (!lastAlertTime[key] || now - lastAlertTime[key] > ALERT_COOLDOWN) {
+              lastAlertTime[key] = now;
+              showGeofenceAlert('left');
+              api('POST', '/api/timeclock/alert', { alert_type: 'left_without_clockout', latitude: pos.coords.latitude, longitude: pos.coords.longitude }).catch(()=>{});
+            }
+          }
+        }, GEOFENCE_CHECK_INTERVAL);
+      }
+
+      if (wasAtShop === null) wasAtShop = atShop;
+    }, () => {}, { enableHighAccuracy: true, maximumAge: 120000 });
+  };
+
+  check();
+  geofenceInterval = setInterval(check, 60000); // check every minute
+}
+
+function showGeofenceAlert(type) {
+  if (type === 'entered') {
+    if (confirm('⚠️ You have been at the KVM shop for 5 minutes but are not clocked in. Would you like to clock in now?')) {
+      showPage('timeclock', document.querySelector('.nav-item[data-page="timeclock"]'));
+    }
+  } else if (type === 'left') {
+    if (confirm('⚠️ You have left the KVM shop but are still clocked in. Would you like to clock out now?')) {
+      doClockout();
+    }
+  }
+}
+
+// ─── MY TIMECARD ──────────────────────────────────────────────────────────────
+async function loadMyTimecard() {
+  const wkEl = $('myTimecardWeek');
+  if (!wkEl || !wkEl.value) return;
+  // Convert week input (2026-W14) to Monday date
+  const [yr, wk] = wkEl.value.split('-W');
+  const jan4 = new Date(parseInt(yr), 0, 4);
+  const weekStart = new Date(jan4.getTime() + (parseInt(wk) - 1) * 7 * 86400000);
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+  const ws = weekStart.toISOString().split('T')[0];
+
+  try {
+    const entries = await api('GET', `/api/timeclock/my?week=${ws}`);
+    const body = $('myTimecardBody');
+    const summary = $('myTimecardSummary');
+
+    if (!entries.length) {
+      body.innerHTML = '<div class="empty-state">No time entries for this week.</div>';
+      summary.innerHTML = '';
+      return;
+    }
+
+    let totalMins = 0;
+    body.innerHTML = `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Date</th><th>Type</th><th>In</th><th>Out</th><th>Hours</th><th>Job</th></tr></thead>
+      <tbody>${entries.map(e => {
+        totalMins += e.total_minutes || 0;
+        const typeLabel = e.clock_type === 'shop' ? '🏭 Shop' : e.clock_type === 'union' ? '🤝 Union' : '📍 Field';
+        return `<tr>
+          <td>${new Date(e.clock_in).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</td>
+          <td>${typeLabel}</td>
+          <td>${fmtTime(e.clock_in)}</td>
+          <td>${e.clock_out ? fmtTime(e.clock_out) : '<span class="badge badge-green">Active</span>'}</td>
+          <td><strong>${((e.total_minutes||0)/60).toFixed(2)}</strong></td>
+          <td style="font-size:12px;color:var(--text-muted)">${e.job_name||'—'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`;
+
+    const ot = Math.max(0, totalMins - 2400);
+    summary.innerHTML = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem">
+      <div class="stat-card"><div class="stat-label">Regular Hours</div><div class="stat-value">${(Math.min(totalMins,2400)/60).toFixed(2)}</div></div>
+      <div class="stat-card"><div class="stat-label">Overtime</div><div class="stat-value" style="color:${ot>0?'var(--danger)':'var(--green)'}">${(ot/60).toFixed(2)}</div></div>
+      <div class="stat-card"><div class="stat-label">Total Hours</div><div class="stat-value" style="color:var(--amber)">${(totalMins/60).toFixed(2)}</div></div>
+    </div>`;
+  } catch(e) { console.error(e); }
+}
+
+// ─── ADMIN TIMECARDS ──────────────────────────────────────────────────────────
+async function loadAdminTimecards() {
+  const wkEl = $('adminTimecardWeek');
+  if (!wkEl) return;
+  if (!wkEl.value) wkEl.value = getCurrentWeekValue();
+
+  const [yr, wk] = wkEl.value.split('-W');
+  const jan4 = new Date(parseInt(yr), 0, 4);
+  const weekStart = new Date(jan4.getTime() + (parseInt(wk)-1) * 7 * 86400000);
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+  const ws = weekStart.toISOString().split('T')[0];
+
+  try {
+    const [entries, summary] = await Promise.all([
+      api('GET', `/api/timeclock/all?week=${ws}`),
+      api('GET', `/api/timeclock/summary?week=${ws}`)
+    ]);
+
+    // Summary cards
+    const sumEl = $('adminTimecardSummary');
+    const totalEmp = summary.summary.length;
+    const totalHrs = summary.summary.reduce((a,u) => a + parseFloat(u.total_hours), 0);
+    const otCount  = summary.summary.filter(u => parseFloat(u.overtime_hours) > 0).length;
+    sumEl.innerHTML = `<div class="card-header" style="margin-bottom:.75rem"><span class="card-title">Week of ${ws}</span></div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem">
+        <div class="stat-card"><div class="stat-label">Employees</div><div class="stat-value">${totalEmp}</div><div class="stat-sub">with entries</div></div>
+        <div class="stat-card"><div class="stat-label">Total Hours</div><div class="stat-value" style="color:var(--amber)">${totalHrs.toFixed(1)}</div></div>
+        <div class="stat-card"><div class="stat-label">OT Employees</div><div class="stat-value" style="color:${otCount>0?'var(--danger)':'var(--green)'}">${otCount}</div><div class="stat-sub">over 40 hrs</div></div>
+      </div>`;
+
+    // Group entries by user
+    const byUser = {};
+    entries.forEach(e => {
+      if (!byUser[e.user_name]) byUser[e.user_name] = { entries: [], total: 0, uid: e.user_id };
+      byUser[e.user_name].entries.push(e);
+      byUser[e.user_name].total += e.total_minutes || 0;
+    });
+
+    const bodyEl = $('adminTimecardBody');
+    bodyEl.innerHTML = Object.entries(byUser).map(([name, data]) => {
+      const hrs = (data.total/60).toFixed(2);
+      const ot  = Math.max(0, data.total - 2400);
+      return `<div class="card" style="margin-bottom:.75rem">
+        <div class="card-header">
+          <span style="font-family:Oswald,sans-serif;font-size:15px;font-weight:600;color:var(--amber)">${name}</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            ${ot>0?`<span class="badge badge-red">OT: ${(ot/60).toFixed(2)} hrs</span>`:''}
+            <span class="badge badge-amber">${hrs} hrs total</span>
+          </div>
+        </div>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Date</th><th>Type</th><th>In</th><th>Out</th><th>Hours</th><th>Job</th><th>Actions</th></tr></thead>
+          <tbody>${data.entries.map(e => `<tr>
+            <td>${new Date(e.clock_in).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</td>
+            <td>${e.clock_type}${e.is_union?' (Union)':''}</td>
+            <td>${fmtTime(e.clock_in)}</td>
+            <td>${e.clock_out?fmtTime(e.clock_out):'<span class="badge badge-green">Active</span>'}</td>
+            <td><strong>${((e.total_minutes||0)/60).toFixed(2)}</strong></td>
+            <td style="font-size:12px;color:var(--text-muted)">${e.job_name||'—'}</td>
+            <td><button class="btn btn-ghost btn-sm" onclick="openEditTimeEntry(${e.id},'${e.clock_in}','${e.clock_out||''}','${e.job_name||''}')">Edit</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteTimeEntry(${e.id})">✕</button></td>
+          </tr>`).join('')}</tbody>
+        </table></div>
+      </div>`;
+    }).join('') || '<div class="empty-state">No time entries for this week.</div>';
+  } catch(e) { console.error(e); }
+}
+
+async function sendTimecardEmails() {
+  const wkEl = $('adminTimecardWeek');
+  const [yr, wk] = (wkEl && wkEl.value ? wkEl.value : getCurrentWeekValue()).split('-W');
+  const jan4 = new Date(parseInt(yr), 0, 4);
+  const weekStart = new Date(jan4.getTime() + (parseInt(wk)-1) * 7 * 86400000);
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+  const ws = weekStart.toISOString().split('T')[0];
+  if (!confirm(`Send timecard emails for week of ${ws} to all employees with time entries?`)) return;
+  try {
+    const r = await api('POST', '/api/timeclock/send-timecards', { week: ws });
+    showToast(`Sent ${r.sent} of ${r.total} timecard emails!`, 'success');
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+function openEditTimeEntry(id, clockIn, clockOut, jobName) {
+  const newIn  = prompt('Clock In time (YYYY-MM-DDTHH:MM):', clockIn ? clockIn.slice(0,16) : '');
+  if (newIn === null) return;
+  const newOut = prompt('Clock Out time (YYYY-MM-DDTHH:MM):', clockOut ? clockOut.slice(0,16) : '');
+  if (newOut === null) return;
+  const newJob = prompt('Job Name:', jobName || '');
+  api('PUT', '/api/timeclock/' + id, { clock_in: newIn + ':00', clock_out: newOut ? newOut + ':00' : null, job_name: newJob })
+    .then(() => { showToast('Entry updated.', 'success'); loadAdminTimecards(); })
+    .catch(e => showToast(e.message, 'error'));
+}
+
+async function deleteTimeEntry(id) {
+  if (!confirm('Delete this time entry?')) return;
+  await api('DELETE', '/api/timeclock/' + id);
+  showToast('Entry deleted.');
+  loadAdminTimecards();
+}
+
+// ─── GEO ALERTS ───────────────────────────────────────────────────────────────
+async function renderAlerts() {
+  try {
+    const alerts = await api('GET', '/api/timeclock/alerts');
+    const badge = $('alertsBadge');
+    if (badge) { badge.textContent = alerts.length; badge.style.display = alerts.length ? 'inline-block' : 'none'; }
+    const el = $('alertsList');
+    if (!el) return;
+    if (!alerts.length) { el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">✅</div>No unresolved geofence alerts.</div>'; return; }
+    el.innerHTML = alerts.map(a => `
+      <div class="card" style="margin-bottom:.75rem;border-left:3px solid ${a.alert_type.includes('without_clockin')?'var(--amber)':'var(--danger)'}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-family:Oswald,sans-serif;font-size:15px;font-weight:600;color:var(--white)">${a.user_name}</div>
+            <div style="font-size:13px;color:var(--text-muted);margin-top:2px">
+              ${a.alert_type === 'entered_without_clockin' ? '🏭 Arrived at shop without clocking in' : '🚗 Left shop without clocking out'}
+            </div>
+            <div style="font-size:11px;color:var(--text-faint);margin-top:4px">${fmtDateTime(a.created_at)}</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="resolveAlert(${a.id})">Resolve ✓</button>
+        </div>
+      </div>`).join('');
+  } catch(e) { console.error(e); }
+}
+
+async function resolveAlert(id) {
+  await api('PUT', '/api/timeclock/alerts/' + id + '/resolve', {});
+  showToast('Alert resolved.');
+  renderAlerts();
+}
+
+// ─── ADMIN ATTENDANCE ─────────────────────────────────────────────────────────
+let attendanceTab = 'callins';
+
+async function initAdminAttendance() {
+  if (!allUsers.length) allUsers = await api('GET', '/api/users');
+  // Populate employee selects
+  const empOpts = allUsers.filter(u=>!u.is_admin).map(u=>`<option value="${u.id}">${displayName(u)}</option>`).join('');
+  ['callinEmpSelect','attEventEmp'].forEach(id=>{ const el=$(id); if(el) el.innerHTML=empOpts; });
+  // Default date to today
+  ['callinDate','attEventDate'].forEach(id=>{ const el=$(id); if(el && !el.value) el.value=new Date().toISOString().split('T')[0]; });
+  // Set quarter/year
+  const now = new Date();
+  const qMap = {0:'Q1',1:'Q1',2:'Q1',3:'Q2',4:'Q2',5:'Q2',6:'Q3',7:'Q3',8:'Q3',9:'Q4',10:'Q4',11:'Q4'};
+  setAttendanceTab(attendanceTab, document.querySelector('#page-adminAttendance .tab'));
+}
+
+function setAttendanceTab(tab, el) {
+  attendanceTab = tab;
+  document.querySelectorAll('#page-adminAttendance .tab-bar .tab').forEach(t=>t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  loadAttendanceContent();
+}
+
+async function loadAttendanceContent() {
+  const el = $('attendanceContent');
+  if (!el) return;
+  el.innerHTML = '<div class="empty-state">Loading...</div>';
+
+  try {
+    const { events, callins } = await api('GET', '/api/attendance/all');
+
+    if (attendanceTab === 'callins') {
+      if (!callins.length) { el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📞</div>No call-ins recorded yet.</div>'; return; }
+      el.innerHTML = `<div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Employee</th><th>Date</th><th>Type</th><th>Notes</th><th>Logged By</th><th>Notified</th><th>Actions</th></tr></thead>
+        <tbody>${callins.map(c=>`<tr>
+          <td><strong>${c.user_name}</strong></td>
+          <td>${fmtDate(c.call_in_date)}</td>
+          <td><span class="badge ${c.call_in_type==='No Call No Show'?'badge-red':c.call_in_type==='Sick'?'badge-blue':'badge-amber'}">${c.call_in_type}</span></td>
+          <td style="font-size:12px;color:var(--text-muted)">${c.notes||'—'}</td>
+          <td style="font-size:12px;color:var(--text-muted)">${c.logged_by}</td>
+          <td>${c.notified?'<span class="badge badge-green">Sent</span>':'<span class="badge badge-gray">No</span>'}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="deleteCallin(${c.id})">✕</button></td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+
+    } else if (attendanceTab === 'tardies') {
+      const tardies = events.filter(e=>e.event_type==='tardy');
+      if (!tardies.length) { el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">⏰</div>No tardies recorded yet.</div>'; return; }
+      // Group by employee
+      const byEmp = {};
+      tardies.forEach(t=>{ if(!byEmp[t.user_name]) byEmp[t.user_name]=[]; byEmp[t.user_name].push(t); });
+      el.innerHTML = Object.entries(byEmp).sort((a,b)=>b[1].length-a[1].length).map(([name,list])=>`
+        <div class="card" style="margin-bottom:.75rem">
+          <div class="card-header">
+            <span style="font-family:Oswald,sans-serif;font-size:15px;font-weight:600;color:var(--white)">${name}</span>
+            <span class="badge ${list.length>=5?'badge-red':list.length>=3?'badge-amber':'badge-gray'}">${list.length} tardy${list.length!==1?'ies':''}</span>
+          </div>
+          <div class="table-wrap"><table class="data-table">
+            <thead><tr><th>Date</th><th>Minutes Late</th><th>Notes</th><th>Actions</th></tr></thead>
+            <tbody>${list.map(t=>`<tr>
+              <td>${fmtDate(t.event_date)}</td>
+              <td style="color:var(--amber);font-weight:600">${t.minutes_late} min late</td>
+              <td style="font-size:12px;color:var(--text-muted)">${t.notes||'—'}</td>
+              <td><button class="btn btn-danger btn-sm" onclick="deleteAttEvent(${t.id})">✕</button></td>
+            </tr>`).join('')}</tbody>
+          </table></div>
+        </div>`).join('');
+
+    } else if (attendanceTab === 'report') {
+      openQuarterlyReport();
+    }
+  } catch(e) { el.innerHTML = '<div class="empty-state">Error loading attendance.</div>'; }
+}
+
+async function saveCallin() {
+  const user_id = $('callinEmpSelect').value;
+  const call_in_date = $('callinDate').value;
+  const call_in_type = $('callinType').value;
+  const notes = $('callinNotes').value;
+  if (!user_id || !call_in_date) return showToast('Select employee and date.','error');
+  try {
+    await api('POST', '/api/attendance/callin', { user_id, call_in_date, call_in_type, notes });
+    closeModal('callinModal');
+    $('callinNotes').value = '';
+    showToast(`Call-in logged for ${call_in_type}. Employee notified.`, 'success');
+    loadAttendanceContent();
+  } catch(e) { showToast(e.message,'error'); }
+}
+
+async function saveAttendanceEvent() {
+  const user_id = $('attEventEmp').value;
+  const event_date = $('attEventDate').value;
+  const event_type = $('attEventType').value;
+  const minutes_late = parseInt($('attEventMins').value)||0;
+  const notes = $('attEventNotes').value;
+  if (!user_id || !event_date) return showToast('Select employee and date.','error');
+  try {
+    await api('POST', '/api/attendance/event', { user_id, event_date, event_type, minutes_late, notes });
+    closeModal('attendanceEventModal');
+    showToast('Attendance event logged.', 'success');
+    loadAttendanceContent();
+  } catch(e) { showToast(e.message,'error'); }
+}
+
+async function deleteCallin(id) {
+  if (!confirm('Delete this call-in record?')) return;
+  await api('DELETE', '/api/attendance/callin/' + id);
+  loadAttendanceContent();
+}
+
+async function deleteAttEvent(id) {
+  if (!confirm('Delete this attendance event?')) return;
+  await api('DELETE', '/api/attendance/' + id);
+  loadAttendanceContent();
+}
+
+function openQuarterlyReport() {
+  const now = new Date();
+  const qMap = ['Q1','Q1','Q1','Q2','Q2','Q2','Q3','Q3','Q3','Q4','Q4','Q4'];
+  const rq = $('reportQuarter');
+  const ry = $('reportYear');
+  if (rq) rq.value = qMap[now.getMonth()];
+  if (ry) ry.value = now.getFullYear();
+  openModal('quarterlyReportModal');
+}
+
+async function loadQuarterlyReport() {
+  const quarter = $('reportQuarter').value;
+  const year    = $('reportYear').value;
+  const el = $('quarterlyReportContent');
+  el.innerHTML = '<div class="empty-state">Loading...</div>';
+  try {
+    const data = await api('GET', `/api/attendance/report?quarter=${quarter}&year=${year}`);
+    const perfect = data.report.filter(u=>u.is_perfect);
+    const withIssues = data.report.filter(u=>!u.is_perfect).sort((a,b)=>(b.tardies+b.callins)-(a.tardies+a.callins));
+
+    let html = '';
+
+    // Perfect attendance section
+    if (perfect.length) {
+      html += `<div style="background:var(--amber-bg2);border:1px solid var(--amber-dim);border-radius:var(--radius);padding:1rem;margin-bottom:1rem">
+        <div style="font-family:Oswald,sans-serif;font-size:14px;font-weight:700;color:var(--amber);margin-bottom:.5rem">&#127942; PERFECT ATTENDANCE — ${quarter} ${year}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">${perfect.map(u=>`<span class="badge badge-amber" style="font-size:12px;padding:4px 10px">${u.name}</span>`).join('')}</div>
+      </div>`;
+    }
+
+    // Summary table
+    html += `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Employee</th><th>Role</th><th>Tardies</th><th>Call-Ins</th><th>NCNS</th><th>Absences</th><th>Early Dep.</th><th>Status</th></tr></thead>
+      <tbody>${data.report.map(u=>`<tr>
+        <td><strong>${u.name}</strong></td>
+        <td style="font-size:12px;color:var(--text-muted)">${u.role||'—'}</td>
+        <td><span class="${u.tardies>=5?'badge badge-red':u.tardies>=3?'badge badge-amber':'badge badge-gray'}">${u.tardies}</span></td>
+        <td><span class="${u.callins>=3?'badge badge-red':u.callins>=1?'badge badge-amber':'badge badge-gray'}">${u.callins}</span></td>
+        <td><span class="${u.ncns>0?'badge badge-red':'badge badge-gray'}">${u.ncns}</span></td>
+        <td><span class="badge badge-gray">${u.absences}</span></td>
+        <td><span class="badge badge-gray">${u.early_departures}</span></td>
+        <td>${u.is_perfect?'<span class="badge badge-amber">&#127942; Perfect</span>':u.tardies>=5||u.ncns>0?'<span class="badge badge-red">Needs Review</span>':u.tardies>=3||u.callins>=3?'<span class="badge badge-amber">Monitor</span>':'<span class="badge badge-green">Good</span>'}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = '<div class="empty-state">Error loading report.</div>'; }
+}
+
+async function runPerfectAttendanceCheck() {
+  try {
+    await api('POST', '/api/attendance/perfect-check', {});
+    showToast('Perfect attendance checked. Any new recognitions announced!', 'success');
+  } catch(e) { showToast(e.message,'error'); }
+}
+
+// ─── EXCEL EXPORT BUTTON ──────────────────────────────────────────────────────
+async function exportTimecardExcel() {
+  const wkEl = $('adminTimecardWeek');
+  const wkVal = wkEl && wkEl.value ? wkEl.value : getCurrentWeekValue();
+  const [yr, wk] = wkVal.split('-W');
+  const jan4 = new Date(parseInt(yr), 0, 4);
+  const weekStart = new Date(jan4.getTime() + (parseInt(wk)-1) * 7 * 86400000);
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+  const ws = weekStart.toISOString().split('T')[0];
+  window.open('/api/timeclock/export?week=' + ws, '_blank');
+}
+
+// ─── DAILY ATTENDANCE EMAIL TEST ──────────────────────────────────────────────
+async function testDailyEmail(group) {
+  const resultEl = $('dailyEmailResult');
+  resultEl.className = 'alert alert-warning';
+  resultEl.textContent = 'Sending ' + (group === 'office' ? 'Office' : 'Technician') + ' attendance email...';
+  resultEl.style.display = 'block';
+  try {
+    await api('POST', '/api/attendance/daily-email', { group });
+    resultEl.className = 'alert alert-success';
+    resultEl.textContent = '✓ Daily attendance email sent! Check admin inboxes.';
+  } catch(e) {
+    resultEl.className = 'alert alert-danger';
+    resultEl.textContent = '✗ Failed: ' + e.message;
+  }
+}
+
+// ─── EMPLOYEE SELF CALL-IN ────────────────────────────────────────────────────
+function openSelfCallin() {
+  // Default to today
+  const today = new Date().toISOString().split('T')[0];
+  $('selfCallinDate').value = today;
+  $('selfCallinNotes').value = '';
+  $('selfCallinResult').style.display = 'none';
+  openModal('selfCallinModal');
+}
+
+async function submitSelfCallin() {
+  const call_in_date = $('selfCallinDate').value;
+  const call_in_type = $('selfCallinType').value;
+  const notes        = $('selfCallinNotes').value.trim();
+  const resultEl     = $('selfCallinResult');
+
+  if (!call_in_date) return showToast('Select a date.', 'error');
+
+  // Confirm — this notifies manager
+  if (!confirm(`Submit a ${call_in_type} call-in for ${fmtDate(call_in_date)}? Your manager will be notified immediately.`)) return;
+
+  try {
+    const r = await api('POST', '/api/attendance/my-callin', { call_in_date, call_in_type, notes });
+    resultEl.className = 'alert alert-success';
+    resultEl.textContent = '✓ ' + r.message;
+    resultEl.style.display = 'block';
+    // Auto-close after 2.5 seconds
+    setTimeout(() => {
+      closeModal('selfCallinModal');
+      // Refresh dashboard if visible
+      const dash = $('page-dashboard');
+      if (dash && dash.classList.contains('active')) renderDashboard();
+    }, 2500);
+  } catch(e) {
+    resultEl.className = 'alert alert-danger';
+    resultEl.textContent = '✗ ' + e.message;
+    resultEl.style.display = 'block';
+  }
 }
