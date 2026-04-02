@@ -1,6 +1,7 @@
 const express = require('express');
 const session = require('express-session');
-const FileStore = require('session-file-store')(session);
+let FileStore;
+try { FileStore = require('session-file-store')(session); } catch(e) { FileStore = null; }
 const bcrypt = require('bcryptjs');
 const path = require('path');
 const fs = require('fs');
@@ -443,15 +444,21 @@ app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 app.use(express.static(path.join(__dirname,'public')));
 app.use(cors({origin:['http://kvmdoor.com','https://kvmdoor.com','http://www.kvmdoor.com','https://www.kvmdoor.com'],credentials:true}));
 const SESSION_DIR = path.join(DATA_DIR, 'sessions');
-if (!require('fs').existsSync(SESSION_DIR)) require('fs').mkdirSync(SESSION_DIR, {recursive:true});
-app.use(session({
-  store: new FileStore({ path: SESSION_DIR, ttl: 86400, retries: 0, logFn: ()=>{} }),
+if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, {recursive:true});
+const sessionConfig = {
   secret: 'kvm-door-v3-2024',
   resave: false,
   saveUninitialized: false,
   rolling: true,
   cookie: { maxAge: 24*60*60*1000 }
-}));
+};
+if (FileStore) {
+  sessionConfig.store = new FileStore({ path: SESSION_DIR, ttl: 86400, retries: 0, logFn: ()=>{} });
+  console.log('Using file-based session store');
+} else {
+  console.log('session-file-store not available, using memory store');
+}
+app.use(session(sessionConfig));
 
 // ─── ROLE CONSTANTS ───────────────────────────────────────────────────────────
 const ADMIN_ROLES   = ['global_admin','admin'];

@@ -647,7 +647,34 @@ async function submitPto() {
 async function renderAdminUsers() {
   try {
     allUsers=await api('GET','/api/users');
-    $('usersTbody').innerHTML=allUsers.map(u=>{
+    
+    // Apply search + department + role filters
+    const searchQ = ($('empSearchInput') && $('empSearchInput').value || '').toLowerCase();
+    const deptF   = ($('empDeptFilter')  && $('empDeptFilter').value)  || '';
+    const roleF   = ($('empRoleFilter')  && $('empRoleFilter').value)  || '';
+    let filtered  = allUsers;
+    if (searchQ) filtered = filtered.filter(u =>
+      (u.first_name||'').toLowerCase().includes(searchQ) ||
+      (u.last_name||'').toLowerCase().includes(searchQ) ||
+      (u.username||'').toLowerCase().includes(searchQ)
+    );
+    if (deptF) filtered = filtered.filter(u => (u.department||'') === deptF);
+    if (roleF) filtered = filtered.filter(u => (u.role_type||'technician') === roleF);
+
+    const countEl = document.querySelector('#page-adminUsers .emp-count');
+    if (!countEl) {
+      const div = document.createElement('div');
+      div.className = 'emp-count';
+      div.style.cssText = 'font-size:12px;color:var(--text-faint);padding:.25rem 0 .75rem';
+      const tbody = document.querySelector('#usersTbody');
+      if (tbody && tbody.parentElement && tbody.parentElement.parentElement) {
+        tbody.parentElement.parentElement.insertBefore(div, tbody.parentElement);
+      }
+    }
+    const empCount = document.querySelector('#page-adminUsers .emp-count');
+    if (empCount) empCount.textContent = filtered.length + ' of ' + allUsers.length + ' employees';
+
+    $('usersTbody').innerHTML=filtered.map(u=>{
       const pct=Math.round(u.pto_left/Math.max(u.pto_total,1)*100);
       const cls=pct<20?'low':pct<50?'warn':'';
       const name=displayName(u);
@@ -767,7 +794,18 @@ async function openEditUser(id) {
   $('editLast').value      = u.last_name  || '';
   $('editUsername').value  = u.username   || '';
   $('editRole').value      = u.role       || '';
-  $('editDept').value      = u.department || '';
+  // Set department dropdown
+  const editDeptEl = $('editDept');
+  if (editDeptEl) {
+    editDeptEl.value = u.department || '';
+    // If value not in options, add it temporarily
+    if (editDeptEl.value !== (u.department||'') && u.department) {
+      const opt = document.createElement('option');
+      opt.value = u.department; opt.textContent = u.department;
+      editDeptEl.appendChild(opt);
+      editDeptEl.value = u.department;
+    }
+  }
   $('editPhone').value     = u.phone      || '';
   $('editEmail').value     = u.email      || '';
   $('editPtoTotal').value  = u.pto_total  ?? 10;
@@ -2922,5 +2960,91 @@ async function runQBImport() {
   } catch(e) {
     resultEl.className = 'alert alert-danger';
     resultEl.textContent = '✗ ' + e.message;
+  }
+}
+
+// ─── DAILY ATTENDANCE BRIEF ───────────────────────────────────────────────────
+async function loadAttendanceBrief() {
+  const role = currentUser.role_type || 'technician';
+  const isManager = ['global_admin','admin','manager'].includes(role);
+  const briefEl = $('dailyAttendanceBrief');
+  if (!briefEl || !isManager) return;
+  briefEl.style.display = 'block';
+
+  // Set date
+  const now = new Date();
+  const dateEl = $('attendanceBriefDate');
+  if (dateEl) dateEl.textContent = now.toLocaleDateString('en-US', {
+    weekday:'long', month:'long', day:'numeric', year:'numeric'
+  });
+
+  await refreshAttendanceBrief();
+}
+
+async function refreshAttendanceBrief() {
+  const gridEl = $('attendanceBriefGrid');
+  if (!gridEl) return;
+  gridEl.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:.5rem 0">Loading...</div>';
+
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    if (!allUsers.length) allUsers = await api('GET', '/api/users');
+
+    // Get today's clock-ins
+    const clockedIn = await api('GET', `/api/timeclock/all?week=${today}`).catch(()=>[]);
+    const clockedIds = new Set(clockedIn.filter(e => e.clock_in && e.clock_in.startsWith(today)).map(e => e.user_id));
+
+    // Get today's call-ins
+    let callins = [];
+    try {
+      const attData = await api('GET', '/api/attendance/all');
+      callins = (attData.callins || []).filter(c => c.call_in_date === today);
+    } catch(e) {}
+    const callinIds = new Set(callins.map(c => c.user_id));
+
+    // Get approved time off today
+    let timeoff = [];
+    try {
+      const allPto = await api('GET', '/api/pto/all-approved');
+      timeoff = allPto.filter(r => r.start_date <= today && r.end_date >= today);
+    } catch(e) {}
+    const timeoffIds = new Set(timeoff.map(r => r.user_id));
+
+    // Only field/active employees (non-admin)
+    const employees = allUsers.filter(u => !['global_admin','admin'].includes(u.role_type||''));
+
+    const inGroup      = employees.filter(u => clockedIds.has(u.id) && !callinIds.has(u.id));
+    const callinGroup  = employees.filter(u => callinIds.has(u.id));
+    const timeoffGroup = employees.filter(u => timeoffIds.has(u.id) && !callinIds.has(u.id));
+    const unknownGroup = employees.filter(u => !clockedIds.has(u.id) && !callinIds.has(u.id) && !timeoffIds.has(u.id));
+
+    const makeChip = (u, color) => {
+      const ac = u.avatar_color || avatarBg(u.first_name+(u.last_name||''));
+      return `<div class="att-chip"><div class="att-chip-avatar" style="background:${ac}22;color:${ac}">${initials(u.first_name,u.last_name||'')}</div><span>${u.first_name}${u.last_name?' '+u.last_name.charAt(0)+'.':''}</span></div>`;
+    };
+
+    gridEl.innerHTML = `
+      <div class="att-col att-col-in">
+        <div class="att-col-header"><span class="att-dot" style="background:#27ae60"></span>Clocked In <span class="att-count">${inGroup.length}</span></div>
+        <div class="att-chips">${inGroup.map(u=>makeChip(u,'#27ae60')).join('')||'<span class="att-none">None yet</span>'}</div>
+      </div>
+      <div class="att-col att-col-off">
+        <div class="att-col-header"><span class="att-dot" style="background:#e67e22"></span>Called In <span class="att-count">${callinGroup.length}</span></div>
+        <div class="att-chips">${callinGroup.map(u => {
+          const ci = callins.find(c=>c.user_id===u.id);
+          return `<div class="att-chip"><div class="att-chip-avatar" style="background:#e67e2222;color:#e67e22">${initials(u.first_name,u.last_name||'')}</div><span>${u.first_name} <em style="font-size:10px;color:var(--text-faint)">${ci?ci.call_in_type:''}</em></span></div>`;
+        }).join('')||'<span class="att-none">None</span>'}</div>
+      </div>
+      <div class="att-col att-col-pto">
+        <div class="att-col-header"><span class="att-dot" style="background:#3498db"></span>Scheduled Off <span class="att-count">${timeoffGroup.length}</span></div>
+        <div class="att-chips">${timeoffGroup.map(u=>makeChip(u,'#3498db')).join('')||'<span class="att-none">None</span>'}</div>
+      </div>
+      <div class="att-col att-col-unknown">
+        <div class="att-col-header"><span class="att-dot" style="background:#888"></span>Not Checked In <span class="att-count">${unknownGroup.length}</span></div>
+        <div class="att-chips">${unknownGroup.map(u=>makeChip(u,'#888')).join('')||'<span class="att-none">All accounted for ✓</span>'}</div>
+      </div>`;
+  } catch(e) {
+    gridEl.innerHTML = '<div style="color:var(--text-muted);font-size:13px">Could not load attendance data.</div>';
+    console.error(e);
   }
 }
