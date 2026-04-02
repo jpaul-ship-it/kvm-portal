@@ -695,7 +695,24 @@ async function saveSmtpSettings() {
     currentUser=await api('GET','/api/me');
     $('loginScreen').style.display='none'; $('mainApp').style.display='block';
     setupUI(); await loadBlackouts(); ptoViewYear=new Date().getFullYear(); ptoViewMonth=new Date().getMonth();
-    showPage('dashboard',document.querySelector('.nav-item[data-page="dashboard"]'));
+    // Handle PWA shortcuts
+    const startPage = window._pwaStartPage;
+    const startAction = window._pwaStartAction;
+    if (startPage) {
+      const navEl = document.querySelector('.nav-item[data-page="' + startPage + '"]');
+      showPage(startPage, navEl);
+    } else if (startAction === 'callin') {
+      showPage('dashboard', document.querySelector('.nav-item[data-page="dashboard"]'));
+      setTimeout(() => openSelfCallin(), 500);
+    } else {
+      showPage('dashboard', document.querySelector('.nav-item[data-page="dashboard"]'));
+    }
+    // Request notification permission after login (politely)
+    setTimeout(async () => {
+      if (typeof requestNotificationPermission === 'function') {
+        await requestNotificationPermission();
+      }
+    }, 3000);
   } catch(e){ $('loginScreen').style.display='flex'; }
 })();
 
@@ -1712,15 +1729,65 @@ function startGeofenceMonitor() {
 
 function showGeofenceAlert(type) {
   if (type === 'entered') {
-    if (confirm('⚠️ You have been at the KVM shop for 5 minutes but are not clocked in. Would you like to clock in now?')) {
-      showPage('timeclock', document.querySelector('.nav-item[data-page="timeclock"]'));
+    // Try push notification first (works in background on Android)
+    if (window.showLocalNotification) {
+      window.showLocalNotification(
+        '⏱️ KVM — Don\'t forget to clock in!',
+        'You have been at the KVM shop. Tap to clock in now.',
+        '/?page=timeclock'
+      );
+    }
+    // Also show in-app prompt if app is visible
+    if (document.visibilityState === 'visible') {
+      if (confirm('⚠️ You have been at the KVM shop for 5 minutes but are not clocked in. Clock in now?')) {
+        showPage('timeclock', document.querySelector('.nav-item[data-page="timeclock"]'));
+      }
     }
   } else if (type === 'left') {
-    if (confirm('⚠️ You have left the KVM shop but are still clocked in. Would you like to clock out now?')) {
-      doClockout();
+    if (window.showLocalNotification) {
+      window.showLocalNotification(
+        '⏱️ KVM — Don\'t forget to clock out!',
+        'You have left the KVM shop and are still clocked in. Tap to clock out.',
+        '/?page=timeclock'
+      );
+    }
+    if (document.visibilityState === 'visible') {
+      if (confirm('⚠️ You have left the KVM shop but are still clocked in. Clock out now?')) {
+        doClockout();
+      }
     }
   }
 }
+
+// Expose geofence check globally so service worker can trigger it
+window.runGeofenceCheck = () => {
+  navigator.geolocation && navigator.geolocation.getCurrentPosition(async pos => {
+    const atShop = isAtShop(pos.coords.latitude, pos.coords.longitude);
+    const s = await api('GET', '/api/timeclock/status').catch(()=>null);
+    if (!s) return;
+    const now = Date.now();
+    if (atShop && !s.clocked_in) {
+      const key = 'bg-entered';
+      if (!lastAlertTime[key] || now - lastAlertTime[key] > ALERT_COOLDOWN) {
+        lastAlertTime[key] = now;
+        if (window.showLocalNotification) {
+          window.showLocalNotification('⏱️ Clock In Reminder', 'You are at KVM. Don\'t forget to clock in!', '/?page=timeclock');
+        }
+        api('POST', '/api/timeclock/alert', { alert_type: 'entered_without_clockin', latitude: pos.coords.latitude, longitude: pos.coords.longitude }).catch(()=>{});
+      }
+    }
+    if (!atShop && s.clocked_in) {
+      const key = 'bg-left';
+      if (!lastAlertTime[key] || now - lastAlertTime[key] > ALERT_COOLDOWN) {
+        lastAlertTime[key] = now;
+        if (window.showLocalNotification) {
+          window.showLocalNotification('⏱️ Clock Out Reminder', 'You have left KVM. Don\'t forget to clock out!', '/?page=timeclock');
+        }
+        api('POST', '/api/timeclock/alert', { alert_type: 'left_without_clockout', latitude: pos.coords.latitude, longitude: pos.coords.longitude }).catch(()=>{});
+      }
+    }
+  }, ()=>{}, { enableHighAccuracy: true, maximumAge: 60000 });
+};
 
 // ─── MY TIMECARD ──────────────────────────────────────────────────────────────
 async function loadMyTimecard() {

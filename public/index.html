@@ -2,8 +2,36 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>KVM Door Systems — Employee Portal</title>
+
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="/manifest.json" />
+
+  <!-- Theme color (browser chrome color) -->
+  <meta name="theme-color" content="#F5A623" />
+  <meta name="background-color" content="#0a0a0a" />
+
+  <!-- iOS PWA meta tags -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="KVM Portal" />
+  <link rel="apple-touch-icon" href="/icons/icon-152.png" />
+  <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152.png" />
+  <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png" />
+
+  <!-- iOS splash screens (iPhone/iPad) -->
+  <meta name="apple-touch-fullscreen" content="yes" />
+
+  <!-- Android / general -->
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-96.png" />
+
+  <!-- App description -->
+  <meta name="description" content="KVM Door Systems Employee Portal — Time clock, scheduling, PTO, and more" />
+  <meta name="application-name" content="KVM Portal" />
+  <meta name="mobile-web-app-capable" content="yes" />
+
   <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body>
@@ -972,8 +1000,150 @@
   </div>
 </div>
 
+
+<!-- PWA Install Banner -->
+<div id="pwaInstallBanner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:400;background:var(--bg-card);border-top:2px solid var(--amber);padding:12px 16px;display:none;align-items:center;gap:12px;box-shadow:0 -4px 20px rgba(0,0,0,0.4)">
+  <img src="/icons/icon-72.png" style="width:40px;height:40px;border-radius:10px" alt="KVM" />
+  <div style="flex:1">
+    <div style="font-family:Oswald,sans-serif;font-size:14px;font-weight:600;color:var(--white)">Install KVM Portal</div>
+    <div style="font-size:11px;color:var(--text-muted)">Add to your home screen for quick access</div>
+  </div>
+  <button class="btn btn-primary btn-sm" onclick="installPWA()" style="flex-shrink:0">Install</button>
+  <button class="btn btn-ghost btn-sm" onclick="dismissInstallBanner()" style="flex-shrink:0">&#x2715;</button>
+</div>
+
 <div id="toast" class="toast"></div>
 <script src="/js/app.js"></script>
+
+<script>
+// ─── SERVICE WORKER REGISTRATION ─────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      console.log('[PWA] Service worker registered:', reg.scope);
+
+      // Listen for messages from service worker (geofence checks)
+      navigator.serviceWorker.addEventListener('message', event => {
+        if (event.data && event.data.type === 'GEOFENCE_CHECK') {
+          // Trigger a geofence check in the app
+          if (typeof window.runGeofenceCheck === 'function') window.runGeofenceCheck();
+        }
+      });
+
+      // Register for periodic background sync (Android)
+      if ('periodicSync' in reg) {
+        try {
+          await reg.periodicSync.register('geofence-check', { minInterval: 5 * 60 * 1000 });
+          console.log('[PWA] Periodic sync registered');
+        } catch(e) {
+          console.log('[PWA] Periodic sync not available:', e.message);
+        }
+      }
+    } catch(e) {
+      console.log('[PWA] Service worker registration failed:', e);
+    }
+  });
+}
+
+// ─── PUSH NOTIFICATION PERMISSION ────────────────────────────────────────────
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) return false;
+  if (Notification.permission === 'granted') return true;
+  if (Notification.permission === 'denied') return false;
+  const result = await Notification.requestPermission();
+  return result === 'granted';
+}
+
+// Show a local notification (works on Android PWA, limited on iOS)
+async function showLocalNotification(title, body, url) {
+  if (!('serviceWorker' in navigator)) return;
+  const granted = await requestNotificationPermission();
+  if (!granted) return;
+  const reg = await navigator.serviceWorker.ready;
+  reg.showNotification(title, {
+    body,
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-72.png',
+    vibrate: [200, 100, 200],
+    tag: 'kvm-geofence',
+    requireInteraction: true,
+    data: { url: url || '/' }
+  });
+}
+
+// Expose globally so geofence monitor can use it
+window.showLocalNotification = showLocalNotification;
+
+// ─── PWA INSTALL PROMPT ───────────────────────────────────────────────────────
+let deferredInstallPrompt = null;
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  // Show install banner after 30 seconds if not dismissed
+  setTimeout(() => {
+    const banner = document.getElementById('pwaInstallBanner');
+    if (banner && deferredInstallPrompt) banner.style.display = 'flex';
+  }, 30000);
+});
+
+window.addEventListener('appinstalled', () => {
+  deferredInstallPrompt = null;
+  const banner = document.getElementById('pwaInstallBanner');
+  if (banner) banner.style.display = 'none';
+  console.log('[PWA] App installed!');
+});
+
+function installPWA() {
+  if (!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  deferredInstallPrompt.userChoice.then(choice => {
+    deferredInstallPrompt = null;
+    const banner = document.getElementById('pwaInstallBanner');
+    if (banner) banner.style.display = 'none';
+  });
+}
+
+function dismissInstallBanner() {
+  const banner = document.getElementById('pwaInstallBanner');
+  if (banner) banner.style.display = 'none';
+  sessionStorage.setItem('pwa-banner-dismissed', '1');
+}
+
+// ─── iOS INSTALL INSTRUCTIONS ─────────────────────────────────────────────────
+// iOS doesn't support beforeinstallprompt — show manual instructions
+function isIOS() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+}
+function isInStandaloneMode() {
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+}
+
+if (isIOS() && !isInStandaloneMode() && !sessionStorage.getItem('ios-install-dismissed')) {
+  setTimeout(() => {
+    const banner = document.getElementById('pwaInstallBanner');
+    if (banner) {
+      banner.querySelector('.btn-primary').outerHTML = '<span style="font-size:11px;color:var(--amber)">Tap Share &#8679; → Add to Home Screen</span>';
+      banner.style.display = 'flex';
+    }
+  }, 5000);
+}
+
+// ─── HANDLE URL SHORTCUTS ─────────────────────────────────────────────────────
+// Handle shortcuts from manifest (e.g. ?page=timeclock, ?action=callin)
+window.addEventListener('DOMContentLoaded', () => {
+  const params = new URLSearchParams(window.location.search);
+  const page = params.get('page');
+  const action = params.get('action');
+  if (page || action) {
+    // Will be handled after login in init()
+    window._pwaStartPage = page;
+    window._pwaStartAction = action;
+  }
+});
+</script>
+
 </body>
 </html>
 <script>

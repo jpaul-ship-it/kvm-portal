@@ -450,3 +450,52 @@ textarea { resize: vertical; }
 #clockStatusDisplay { padding: 1.5rem 0 .75rem; }
 .clock-btn-in  { background: var(--green) !important; border-color: var(--green) !important; }
 .clock-btn-out { background: var(--danger) !important; border-color: var(--danger) !important; }
+
+/* ══ PWA / MOBILE OPTIMIZATIONS ══════════════════════════════════════════ */
+/* Safe area insets for iPhone notch and home bar */
+body {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+.topbar {
+  padding-top: max(0px, env(safe-area-inset-top));
+  height: calc(var(--topbar-h) + env(safe-area-inset-top));
+}
+.app-layout {
+  padding-top: calc(var(--topbar-h) + env(safe-area-inset-top));
+}
+.sidebar {
+  top: calc(var(--topbar-h) + env(safe-area-inset-top));
+  padding-bottom: env(safe-area-inset-bottom);
+}
+#pwaInstallBanner {
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+/* Larger touch targets on mobile */
+@media (max-width: 768px) {
+  .nav-item { padding: 12px 1rem; }
+  .btn { padding: 9px 16px; }
+  .btn-sm { padding: 6px 12px; font-size: 13px; }
+  .tab { padding: 10px 14px; }
+  input, select, textarea { font-size: 16px !important; } /* prevents iOS zoom on focus */
+  .modal { padding: 1.25rem; }
+  .data-table th, .data-table td { padding: 8px 8px; font-size: 12px; }
+}
+
+/* Standalone (installed PWA) mode adjustments */
+@media (display-mode: standalone) {
+  .topbar { padding-top: max(12px, env(safe-area-inset-top)); }
+}
+
+/* Prevent text selection on UI elements */
+.nav-item, .btn, .tab, .topbar-brand { user-select: none; -webkit-user-select: none; }
+
+/* Smooth scrolling */
+* { -webkit-overflow-scrolling: touch; }
+.sidebar, .main-content, .modal { scroll-behavior: smooth; }
+
+/* Better tap highlight */
+* { -webkit-tap-highlight-color: rgba(245, 166, 35, 0.15); }
