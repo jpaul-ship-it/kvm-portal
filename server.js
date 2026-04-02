@@ -433,13 +433,23 @@ const requireAuth = (req,res,next) => {
   if (!req.session.userId) return res.status(401).json({error:'Not authenticated'});
   next();
 };
+
 const requireAdmin = (req,res,next) => {
   if (!req.session.userId) return res.status(401).json({error:'Not authenticated'});
-  // Always re-verify admin status from DB so session loss doesn't cause false denials
-  const u = get('SELECT is_admin FROM users WHERE id=?',[req.session.userId]);
-  if (!u || !u.is_admin) return res.status(403).json({error:'Admin only'});
-  req.session.isAdmin = true; // refresh session flag
+  const u = get('SELECT is_admin, role_type FROM users WHERE id=?',[req.session.userId]);
+  if (!u) return res.status(401).json({error:'Not authenticated'});
+  if (!u.is_admin && u.role_type !== 'admin') return res.status(403).json({error:'Admin only'});
+  req.session.isAdmin = true;
   next();
+};
+
+// Manager OR admin can edit limited employee fields
+const requireManager = (req,res,next) => {
+  if (!req.session.userId) return res.status(401).json({error:'Not authenticated'});
+  const u = get('SELECT is_admin, role_type FROM users WHERE id=?',[req.session.userId]);
+  if (!u) return res.status(403).json({error:'Access denied'});
+  if (u.is_admin || ['manager','admin'].includes(u.role_type||'')) return next();
+  return res.status(403).json({error:'Manager access required'});
 };
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
