@@ -669,7 +669,7 @@ function filterEmployeeTable() {
     (u.last_name||'').toLowerCase().includes(searchQ) ||
     (u.username||'').toLowerCase().includes(searchQ)
   );
-  if (deptF) filtered = filtered.filter(u => (u.department||'') === deptF);
+  if (deptF) filtered = filtered.filter(u => (u.department||'') === deptF || (u.department||'').toLowerCase().includes(deptF.toLowerCase()));
   renderEmployeeRows(filtered);
 }
 
@@ -690,7 +690,6 @@ function renderEmployeeRows(filtered) {
         <td style="white-space:nowrap">${u.id!==1 ? `<button class="btn btn-ghost btn-sm" onclick="openEditUser(${u.id})">Edit</button> <button class="btn btn-ghost btn-sm" onclick="openResetPw(${u.id},'${(u.first_name+' '+u.last_name).trim()}')">Reset PW</button> <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id})">Remove</button>` : '<span style="font-size:11px;color:var(--text-faint)">Protected</span>'}</td>
       </tr>`;
     }).join('');
-  } catch(e){ console.error(e); }
 }
 async function saveUser() {
   const first_name=$('addFirst').value.trim(),last_name=$('addLast').value.trim();
