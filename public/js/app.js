@@ -788,7 +788,7 @@ async function openEditUser(id) {
 
   // Lock admin-only fields for managers
   const limitedMode = !['global_admin','admin'].includes(currentUser.role_type||'') && currentUser.role_type === 'manager';
-  ['editUsername','editIsAdmin','editPtoTotal','editPtoLeft','editHireDate'].forEach(fid => {
+  ['editUsername','editRoleType','editPtoTotal','editPtoLeft','editHireDate'].forEach(fid => {
     const el = $(fid);
     if (el) { el.disabled = limitedMode; el.style.opacity = limitedMode ? '0.4' : '1'; el.title = limitedMode ? 'Admin only' : ''; }
   });
@@ -807,18 +807,18 @@ async function saveEditUser() {
   if (!first_name || !username) return showToast('First name and username are required.', 'error');
 
   try {
+    const newRoleType = $('editRoleType') ? $('editRoleType').value : 'technician';
     await api('PUT', '/api/users/' + id, {
       first_name,
       last_name:    $('editLast').value.trim(),
-      role_type:    $('editRoleType') ? $('editRoleType').value : 'technician',
+      role_type:    newRoleType,
       username,
       role:         $('editRole').value,
       department:   $('editDept').value,
-      oncall_dept:  $('editOncallDept').value,
-      oncall_role:  $('editOncallRole').value,
+      oncall_dept:  $('editOncallDept') ? $('editOncallDept').value : '',
+      oncall_role:  $('editOncallRole') ? $('editOncallRole').value : '',
       phone:        $('editPhone').value,
       email:        $('editEmail').value,
-      is_admin:     $('editIsAdmin').value === 'true',
       pto_total:    parseInt($('editPtoTotal').value) || 10,
       pto_left:     parseInt($('editPtoLeft').value)  || 10,
       hire_date:    $('editHireDate').value || '',
@@ -2171,7 +2171,42 @@ async function loadQuarterlyReport() {
     </table></div>`;
 
     el.innerHTML = html;
+    const printBtn = $('btnPrintReport');
+    if (printBtn) printBtn.style.display = 'inline-flex';
   } catch(e) { el.innerHTML = '<div class="empty-state">Error loading report.</div>'; }
+}
+
+function printQuarterlyReport() {
+  const quarter = $('reportQuarter') ? $('reportQuarter').value : '';
+  const year    = $('reportYear') ? $('reportYear').value : '';
+  const content = $('quarterlyReportContent');
+  if (!content || !content.innerHTML) return showToast('Generate the report first.','error');
+  const win = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html><html><head><title>KVM Attendance Report — ${quarter} ${year}</title>
+  <style>
+    body { font-family: Arial, sans-serif; color: #000; margin: 20px; }
+    h1 { color: #000; font-size: 18px; margin-bottom: 4px; }
+    h2 { font-size: 14px; color: #333; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
+    th { background: #f0f0f0; padding: 8px; text-align: left; border: 1px solid #ccc; font-weight: bold; }
+    td { padding: 7px 8px; border: 1px solid #ddd; }
+    tr:nth-child(even) td { background: #f9f9f9; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }
+    .perfect { background: #fff3cd; color: #856404; border: 1px solid #ffc107; }
+    .review  { background: #f8d7da; color: #842029; border: 1px solid #f5c2c7; }
+    .monitor { background: #fff3cd; color: #664d03; border: 1px solid #ffda6a; }
+    .good    { background: #d1e7dd; color: #0f5132; border: 1px solid #a3cfbb; }
+    .perfect-block { background: #fff3cd; border: 2px solid #ffc107; border-radius: 6px; padding: 12px; margin-bottom: 16px; }
+    @media print { body { margin: 10px; } button { display: none !important; } }
+  </style></head><body>
+  <div style="display:flex;align-items:center;gap:16px;border-bottom:2px solid #000;padding-bottom:12px;margin-bottom:16px">
+    <div><h1>KVM DOOR SYSTEMS</h1><h2>Quarterly Attendance Report — ${quarter} ${year}</h2></div>
+    <div style="margin-left:auto;font-size:11px;color:#666">Generated: ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
+  </div>
+  ${content.innerHTML}
+  <script>window.onload=()=>window.print();</script>
+  </body></html>`);
+  win.document.close();
 }
 
 async function runPerfectAttendanceCheck() {

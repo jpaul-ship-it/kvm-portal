@@ -798,7 +798,16 @@
     <div class="form-row">
       <div class="form-group"><label>Hire Date</label><input type="date" id="addHireDate" /></div>
       <div class="form-group"><label>Access Level</label>
-        <select id="addIsAdmin"><option value="false">Employee</option><option value="true">Admin (full access)</option></select>
+        <select id="addIsAdmin" style="display:none"><option value="false">Employee</option></select>
+        <select id="addRoleTypeMain" onchange="document.getElementById('addRoleType').value=this.value">
+          <option value="technician">Technician (field employee)</option>
+          <option value="dispatcher">Dispatcher</option>
+          <option value="sales">Sales</option>
+          <option value="billing">Billing</option>
+          <option value="manager">Manager</option>
+          <option value="admin">Admin</option>
+          <option value="global_admin">Global Admin</option>
+        </select>
       </div>
     </div>
     <div class="form-row">
@@ -873,15 +882,19 @@
           <option value="Helper">Helper</option>
         </select>
       </div>
-    <div id="editAdminOnlyNote" class="alert alert-warning" style="display:none;font-size:12px;margin-bottom:.5rem">&#128274; Manager mode — hire date, PTO, username and access level are admin-only.</div>
-      <div class="form-group"><label>Access Level</label>
-        <select id="editIsAdmin">
-          <option value="false">Employee</option>
-          <option value="true">Admin (full access)</option>
-        </select>
-      </div>
+    <div id="editAdminOnlyNote" class="alert alert-warning" style="display:none;font-size:12px;margin-bottom:.5rem">&#128274; Manager mode — hire date, PTO, and username are admin-only.</div>
+    <div class="form-group"><label>Role</label>
+      <select id="editRoleType">
+        <option value="technician">Technician (field employee)</option>
+        <option value="dispatcher">Dispatcher</option>
+        <option value="sales">Sales</option>
+        <option value="billing">Billing</option>
+        <option value="manager">Manager</option>
+        <option value="admin">Admin</option>
+        <option value="global_admin">Global Admin (JohnPaul only)</option>
+      </select>
     </div>
-      <div class="form-group"><label>Role Type</label><select id="editRoleType"><option value="technician">Technician</option><option value="manager">Manager</option><option value="billing">Billing</option><option value="sales">Sales</option><option value="dispatcher">Dispatcher</option><option value="admin">Admin</option></select></div>
+    <input type="hidden" id="editIsAdmin" value="false" />
     <div class="form-row">
       <div class="form-group"><label>Phone</label><input type="tel" id="editPhone" /></div>
       <div class="form-group"><label>Email</label><input type="email" id="editEmail" /></div>
