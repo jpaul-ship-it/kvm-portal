@@ -324,8 +324,9 @@ async function initDb() {
   // Add role_type column for new permission system
   try { db.run(`ALTER TABLE users ADD COLUMN role_type TEXT DEFAULT 'technician'`); saveDb(); } catch(e){}
   // Set role_type for existing users
-  try { db.run(`UPDATE users SET role_type='global_admin' WHERE username='admin' AND (role_type IS NULL OR role_type='' OR role_type='admin')`); saveDb(); } catch(e){}
-  try { db.run(`UPDATE users SET role_type='admin' WHERE is_admin=1 AND username!='admin' AND (role_type IS NULL OR role_type='')`); saveDb(); } catch(e){}
+  // Fix ALL users based on is_admin flag - runs every startup to keep roles in sync
+  try { db.run(`UPDATE users SET role_type='global_admin' WHERE is_admin=1`); saveDb(); } catch(e){}
+  try { db.run(`UPDATE users SET role_type='technician' WHERE is_admin=0 AND (role_type IS NULL OR role_type='')`); saveDb(); } catch(e){}
   // Set role_type='technician' for non-admin users with NULL role_type
   try { db.run(`UPDATE users SET role_type='technician' WHERE is_admin=0 AND (role_type IS NULL OR role_type='')`); saveDb(); } catch(e){}
   ['oncall_dept','oncall_role','paired_with','hire_date'].forEach(col => {
@@ -486,14 +487,33 @@ app.post('/api/login',(req,res)=>{
   const {username,password}=req.body;
   const user=get('SELECT * FROM users WHERE username=?',[username]);
   if(!user||!bcrypt.compareSync(password,user.password)) return res.status(401).json({error:'Invalid username or password'});
-  req.session.userId=user.id;
-  res.json({id:user.id,username:user.username,first_name:user.first_name,last_name:user.last_name,role:user.role,department:user.department,role_type:user.role_type||'technician',avatar_color:user.avatar_color});
+  req.session.userId = user.id;
+  // Auto-fix role_type based on is_admin flag
+  let loginRole = user.role_type || 'technician';
+  if (user.is_admin && !['global_admin','admin'].includes(loginRole)) {
+    loginRole = 'global_admin';
+    run("UPDATE users SET role_type='global_admin' WHERE id=?", [user.id]);
+  } else if (!user.is_admin && (!user.role_type || user.role_type === '')) {
+    loginRole = 'technician';
+    run("UPDATE users SET role_type='technician' WHERE id=?", [user.id]);
+  }
+  res.json({id:user.id, username:user.username, first_name:user.first_name, last_name:user.last_name, role:user.role, department:user.department, role_type:loginRole, avatar_color:user.avatar_color});
 });
 app.post('/api/logout',(req,res)=>{req.session.destroy();res.json({ok:true});});
 app.get('/api/me',requireAuth,(req,res)=>{
   const u=get('SELECT id,username,first_name,last_name,role,department,oncall_dept,oncall_role,phone,email,is_admin,role_type,pto_total,pto_left,avatar_color,hire_date FROM users WHERE id=?',[req.session.userId]);
   if(!u) return res.status(404).json({error:'Not found'});
-  res.json({...u,is_admin:!!u.is_admin});
+  // Auto-fix: if is_admin=1 but role_type isn't admin-level, correct it
+  let role_type = u.role_type || 'technician';
+  if (u.is_admin && !['global_admin','admin'].includes(role_type)) {
+    role_type = 'global_admin';
+    run("UPDATE users SET role_type='global_admin' WHERE id=?", [u.id]);
+  }
+  if (!u.is_admin && (!u.role_type || u.role_type === '')) {
+    role_type = 'technician';
+    run("UPDATE users SET role_type='technician' WHERE id=?", [u.id]);
+  }
+  res.json({...u, role_type, is_admin:!!u.is_admin});
 });
 
 // ─── USERS ────────────────────────────────────────────────────────────────────
@@ -1976,6 +1996,19 @@ app.post('/api/customers/import/qb-iif', requireAdmin, (req, res) => {
   });
   
   res.json({ ok: true, imported, skipped, errors });
+});
+
+
+// One-time role fix — sets all is_admin users to global_admin
+app.post('/api/fix-roles', requireAuth, (req, res) => {
+  // Only allow if the current user is already is_admin in the DB
+  const u = get('SELECT is_admin FROM users WHERE id=?', [req.session.userId]);
+  if (!u || !u.is_admin) return res.status(403).json({ error: 'Only original admin users can run this fix' });
+  const result1 = db.run("UPDATE users SET role_type='global_admin' WHERE is_admin=1");
+  const result2 = db.run("UPDATE users SET role_type='technician' WHERE is_admin=0 AND (role_type IS NULL OR role_type='' OR role_type='admin')");
+  saveDb();
+  const admins = all("SELECT username, role_type FROM users WHERE role_type='global_admin'");
+  res.json({ ok: true, global_admins: admins });
 });
 
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
