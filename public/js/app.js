@@ -66,30 +66,33 @@ async function doLogout() {
 document.addEventListener('keydown', e => { if(e.key==='Enter'&&$('loginScreen').style.display!=='none') doLogin(); });
 
 function setupUI() {
-  const u=currentUser;
-  const av=$('topAvatar');
-  av.textContent=initials(u.first_name,u.last_name);
-  av.style.background=u.avatar_color||avatarBg(u.first_name+u.last_name);
-  $('topName').textContent=u.first_name;
-  if(u.is_admin){
-    $('adminSection').style.display='block';
-    ['btnNewAnn','btnNewNews','btnNewOncall','btnAutoSchedule','btnLoadSchedule','btnUploadPolicy'].forEach(id=>{ const el=$(id); if(el) el.style.display='inline-flex'; });
-  // Managers can access Manage Employees (limited) and Attendance
-  if (currentUser.role_type === 'manager' || currentUser.is_admin) {
-    const adminSection = $('adminSection');
-    if (adminSection) adminSection.style.display = 'block';
+  const u = currentUser;
+  const role = u.role_type || 'technician';
+  const isAdmin   = ['global_admin','admin'].includes(role);
+  const isManager = ['global_admin','admin','manager'].includes(role);
+
+  // Topbar
+  const av = $('topAvatar');
+  if (av) { av.textContent = initials(u.first_name, u.last_name); av.style.background = u.avatar_color || avatarBg(u.first_name+u.last_name); }
+  if ($('topName')) $('topName').textContent = u.first_name;
+
+  // Admin sidebar section — managers and above only
+  const adminSection = $('adminSection');
+  if (adminSection) adminSection.style.display = isManager ? 'block' : 'none';
+
+  // Admin action buttons — admins only
+  if (isAdmin) {
+    ['btnNewAnn','btnNewNews','btnNewOncall','btnAutoSchedule','btnLoadSchedule','btnUploadPolicy'].forEach(id => {
+      const el = $(id); if (el) el.style.display = 'inline-flex';
+    });
+    const allDocsSection = $('allDocsSection');
+    if (allDocsSection) allDocsSection.style.display = 'block';
   }
-  // Show customer nav for roles with field access
-  const fieldRoles = ['admin','manager','billing','sales','dispatcher'];
-  if (currentUser.is_admin || fieldRoles.includes(currentUser.role_type||'')) {
-    document.querySelectorAll('.nav-item[data-page="customers"]').forEach(el => el.style.display='flex');
-  } else {
-    document.querySelectorAll('.nav-item[data-page="customers"]').forEach(el => el.style.display='none');
-  }
-  const allDocsSection = $('allDocsSection');
-  if (allDocsSection) allDocsSection.style.display = 'block';
-    updatePtoBadge();
-  }
+
+  // All employees see customers
+  document.querySelectorAll('.nav-item[data-page="customers"]').forEach(el => el.style.display='flex');
+
+  updatePtoBadge();
 }
 
 async function updatePtoBadge() {
@@ -109,7 +112,7 @@ function showPage(name, el) {
   if(pg) pg.classList.add('active');
   if(el) el.classList.add('active');
   $('sidebar').classList.remove('open');
-  const map={dashboard:renderDashboard,customers:loadCustomers,customerDetail:loadCustomerDetail,announcements:renderAnnouncements,news:renderNews,oncall:renderOncall,directory:renderDirectory,pto:renderPto,ptoCalendar:renderPtoCalendar,myDocs:renderMyDocs,policies:renderPolicies,timeclock:initTimeclock,adminTimeclock:loadAdminTimecards,adminAlerts:renderAlerts,adminAttendance:initAdminAttendance,adminUsers:renderAdminUsers,adminPto:renderAdminPto,adminBlackout:renderBlackouts,adminRotation:renderRotation,adminSettings:loadSettings};
+  const map={dashboard:renderDashboard,customers:loadCustomers,customerDetail:loadCustomerDetail,myTimecards:renderMyTimecards,announcements:renderAnnouncements,news:renderNews,oncall:renderOncall,directory:renderDirectory,pto:renderPto,ptoCalendar:renderPtoCalendar,myDocs:renderMyDocs,policies:renderPolicies,timeclock:initTimeclock,adminTimeclock:loadAdminTimecards,adminAlerts:renderAlerts,adminAttendance:initAdminAttendance,adminUsers:renderAdminUsers,adminPto:renderAdminPto,adminBlackout:renderBlackouts,adminRotation:renderRotation,adminSettings:loadSettings};
   if(map[name]) map[name]();
 }
 
@@ -158,7 +161,7 @@ $('dashStats').innerHTML=`
 function annItemHTML(a, showDelete) {
   const cls=a.priority==='urgent'?'urgent':a.priority==='info'?'info':'';
   const bc=a.priority==='urgent'?'badge-red':a.priority==='info'?'badge-blue':'badge-gray';
-  return `<div class="ann-item ${cls}"><div class="ann-item-head"><span class="ann-title">${a.title}</span><span class="badge ${bc}">${a.priority}</span>${showDelete&&currentUser.is_admin?`<button class="btn btn-danger btn-sm" style="margin-left:auto" onclick="deleteAnnouncement(${a.id})">Delete</button>`:''}</div><div class="ann-body">${a.body}</div><div class="ann-meta">${a.author_name} &middot; ${fmtDate(a.created_at)}</div></div>`;
+  return `<div class="ann-item ${cls}"><div class="ann-item-head"><span class="ann-title">${a.title}</span><span class="badge ${bc}">${a.priority}</span>${showDelete&&['global_admin','admin'].includes(currentUser.role_type||'')?`<button class="btn btn-danger btn-sm" style="margin-left:auto" onclick="deleteAnnouncement(${a.id})">Delete</button>`:''}</div><div class="ann-body">${a.body}</div><div class="ann-meta">${a.author_name} &middot; ${fmtDate(a.created_at)}</div></div>`;
 }
 async function renderAnnouncements() {
   try { const d=await api('GET','/api/announcements'); $('annList').innerHTML=d.length?d.map(a=>annItemHTML(a,true)).join(''):'<div class="empty-state"><div class="empty-state-icon">📢</div>No announcements yet.</div>'; } catch(e){}
@@ -173,7 +176,7 @@ async function deleteAnnouncement(id) { if(!confirm('Delete?'))return; await api
 // ─── NEWS ─────────────────────────────────────────────────────────────────────
 const catIcons={'Project Update':'📋','Safety':'⛑️','HR':'👔','Recognition':'🏆','General':'📰'};
 function newsItemHTML(n,showDelete) {
-  return `<div class="news-item"><div class="news-icon">${catIcons[n.category]||'📰'}</div><div style="flex:1"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div class="news-title">${n.title}</div>${showDelete&&currentUser.is_admin?`<button class="btn btn-danger btn-sm" onclick="deleteNews(${n.id})">Delete</button>`:''}</div><div class="news-body">${n.body}</div><div class="news-meta"><span class="badge badge-green">${n.category}</span> &middot; ${n.author_name} &middot; ${fmtDate(n.created_at)}</div></div></div>`;
+  return `<div class="news-item"><div class="news-icon">${catIcons[n.category]||'📰'}</div><div style="flex:1"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div class="news-title">${n.title}</div>${showDelete&&['global_admin','admin'].includes(currentUser.role_type||'')?`<button class="btn btn-danger btn-sm" onclick="deleteNews(${n.id})">Delete</button>`:''}</div><div class="news-body">${n.body}</div><div class="news-meta"><span class="badge badge-green">${n.category}</span> &middot; ${n.author_name} &middot; ${fmtDate(n.created_at)}</div></div></div>`;
 }
 async function renderNews() {
   try { const d=await api('GET','/api/news'); $('newsList').innerHTML=d.length?d.map(n=>newsItemHTML(n,true)).join(''):'<div class="empty-state"><div class="empty-state-icon">📰</div>No news yet.</div>'; } catch(e){}
@@ -242,7 +245,7 @@ async function renderOncall() {
               <div class="oncall-chip-name">${o.name}</div>
               <div class="oncall-chip-phone">${o.phone}</div>
             </div>
-            ${currentUser.is_admin?`<button class="btn btn-ghost btn-sm" style="padding:2px 7px;font-size:11px" onclick="openSwapOncall(${o.id},'${o.name}','${o.department}')">Swap</button><button class="btn btn-danger btn-sm" style="padding:2px 7px;font-size:11px" onclick="deleteOncall(${o.id})">✕</button>`:''}
+            ${['global_admin','admin'].includes(currentUser.role_type||'')?`<button class="btn btn-ghost btn-sm" style="padding:2px 7px;font-size:11px" onclick="openSwapOncall(${o.id},'${o.name}','${o.department}')">Swap</button><button class="btn btn-danger btn-sm" style="padding:2px 7px;font-size:11px" onclick="deleteOncall(${o.id})">✕</button>`:''}
           </div>`;
         });
         html += '</div></div>';
@@ -264,7 +267,7 @@ async function openOncallModal() {
     u.oncall_dept === 'Automatic Door Division' || u.oncall_dept === 'Both Divisions'
   );
   // Fallback: if no dept assigned, show all non-admin
-  const fallback = allUsers.filter(u => !u.is_admin);
+  const fallback = allUsers.filter(u => !['global_admin','admin'].includes(u.role_type||''));
 
   const makeOpts = (list) => (list.length ? list : fallback)
     .map(u => `<option value="${u.id}" data-name="${displayName(u)}" data-role="${u.role}" data-phone="${u.phone||''}">${displayName(u)}${u.oncall_role?' — '+u.oncall_role:''}</option>`)
@@ -330,9 +333,9 @@ async function openSwapOncall(id, currentName, dept) {
   const relevant = allUsers.filter(u => {
     if (dept === 'Overhead Door Division') return u.oncall_dept === 'Overhead Door Division' || u.oncall_dept === 'Both Divisions';
     if (dept === 'Automatic Door Division') return u.oncall_dept === 'Automatic Door Division' || u.oncall_dept === 'Both Divisions';
-    return !u.is_admin;
+    return !['global_admin','admin'].includes(u.role_type||'');
   });
-  const list = relevant.length ? relevant : allUsers.filter(u => !u.is_admin);
+  const list = relevant.length ? relevant : allUsers.filter(u => !['global_admin','admin'].includes(u.role_type||''));
   $('swapOncallNewEmp').innerHTML = list
     .map(u => `<option value="${u.id}">${displayName(u)} — ${u.role||u.department}</option>`)
     .join('');
@@ -581,7 +584,9 @@ async function renderDirectory() {
       const ac=u.avatar_color||avatarBg(u.first_name+u.last_name);
       const name=displayName(u);
       const deptBadge=u.oncall_dept?`<span class="badge ${deptColors[u.oncall_dept]||'badge-amber'}" style="font-size:9px;margin-top:4px">${u.oncall_dept.replace(' Division','')}</span>`:'';
-      return `<div class="dir-card">${currentUser.is_admin ? `<div style="display:flex;justify-content:flex-end;margin-bottom:6px;gap:6px"><button class="btn btn-ghost btn-sm" onclick="openEditUser(${u.id})">Edit</button><button class="btn btn-ghost btn-sm" onclick="openResetPw(${u.id},'${(u.first_name+' '+u.last_name).trim()}')">Reset PW</button></div>` : ''}<div class="dir-card-top"><div class="avatar" style="width:44px;height:44px;font-size:15px;background:${ac}">${initials(u.first_name,u.last_name)}</div><div><div style="font-weight:500;font-size:13.5px;font-family:Oswald,sans-serif">${name}</div><div style="font-size:11px;color:var(--text-muted)">${u.role||'—'}</div>${deptBadge}</div></div><div class="dir-info" style="margin-top:8px"><div>📞 ${u.phone||'—'}</div><div>✉ ${u.email||'—'}</div><div>🏢 ${u.department||'—'}</div>${u.hire_date?'<div>📅 Hired: '+fmtDate(u.hire_date)+'</div>':''}</div></div>`;
+      const dirRole = currentUser.role_type||'technician';
+    const dirIsManager = ['global_admin','admin','manager'].includes(dirRole);
+    return `<div class="dir-card"><div class="dir-card-top"><div class="avatar" style="width:44px;height:44px;font-size:15px;background:${ac}">${initials(u.first_name,u.last_name)}</div><div><div style="font-weight:500;font-size:13.5px;font-family:Oswald,sans-serif">${name}</div><div style="font-size:11px;color:var(--text-muted)">${u.role||'—'}</div>${deptBadge}</div></div><div class="dir-info" style="margin-top:8px"><div>📞 ${u.phone||'—'}</div><div>✉ ${u.email||'—'}</div><div>🏢 ${u.department||'—'}</div>${dirIsManager&&u.hire_date?'<div class="dir-hire-date">📅 Hired: '+fmtDate(u.hire_date)+'</div>':''}</div></div>`;
     }).join(''):'<div class="empty-state" style="grid-column:1/-1">No employees found.</div>';
   } catch(e){ console.error(e); }
 }
@@ -782,7 +787,7 @@ async function openEditUser(id) {
   if ($('editRoleType')) $('editRoleType').value = u.role_type || 'technician';
 
   // Lock admin-only fields for managers
-  const limitedMode = !currentUser.is_admin && currentUser.role_type === 'manager';
+  const limitedMode = !['global_admin','admin'].includes(currentUser.role_type||'') && currentUser.role_type === 'manager';
   ['editUsername','editIsAdmin','editPtoTotal','editPtoLeft','editHireDate'].forEach(fid => {
     const el = $(fid);
     if (el) { el.disabled = limitedMode; el.style.opacity = limitedMode ? '0.4' : '1'; el.title = limitedMode ? 'Admin only' : ''; }
@@ -795,7 +800,7 @@ async function openEditUser(id) {
 
 async function saveEditUser() {
   const id = $('editUserId').value;
-  const isAdmin = currentUser.is_admin;
+  const isAdmin = ['global_admin','admin'].includes(currentUser.role_type||'');
   const limitedMode = !isAdmin && currentUser.role_type === 'manager';
   const first_name = $('editFirst').value.trim();
   const username   = $('editUsername').value.trim();
@@ -1092,14 +1097,24 @@ async function renderPtoCalendar() {
   // Show loading state
   gridEl.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);font-size:13px">Loading calendar...</div>';
 
-  // Load ALL approved PTO (admin sees all, employees see their own)
+  // Load ALL approved PTO
   let allPto = [];
-  try { 
-    allPto = await api('GET', '/api/pto/all-approved'); 
-  } catch(e) {
-    try { allPto = await api('GET', '/api/pto'); } catch(e2) {}
-  }
+  try { allPto = await api('GET', '/api/pto/all-approved'); } catch(e) {}
   const approved = allPto.filter(r => r.status === 'approved');
+  
+  // Also load call-ins and add to calendar
+  let callinEvents = [];
+  try {
+    const myCallin = await api('GET', '/api/attendance/my-callins');
+    myCallin.callins.forEach(c => {
+      callinEvents.push({
+        start_date: c.call_in_date, end_date: c.call_in_date,
+        days: 1, type: c.call_in_type, status: 'approved',
+        user_id: currentUser.id, user_name: currentUser.first_name + ' ' + (currentUser.last_name||'')
+      });
+    });
+  } catch(e) {}
+  const allEvents = [...approved, ...callinEvents];
 
   // Load all users for color mapping
   if (!allUsers.length) { try { allUsers = await api('GET', '/api/users'); } catch(e) {} }
@@ -1115,7 +1130,7 @@ async function renderPtoCalendar() {
 
     // Build a map of date -> approved requests
     const dayMap = {};
-    approved.forEach(r => {
+    allEvents.forEach(r => {
       let cur = new Date(r.start_date + 'T00:00:00');
       const end = new Date(r.end_date + 'T00:00:00');
       while (cur <= end) {
@@ -1152,7 +1167,7 @@ async function renderPtoCalendar() {
     // List view below calendar
     const monthStart = `${ptoViewYear}-${String(ptoViewMonth+1).padStart(2,'0')}-01`;
     const monthEnd   = `${ptoViewYear}-${String(ptoViewMonth+1).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
-    const inMonth = approved.filter(r => r.start_date <= monthEnd && r.end_date >= monthStart);
+    const inMonth = allEvents.filter(r => r.start_date <= monthEnd && r.end_date >= monthStart);
     inMonth.sort((a,b) => a.start_date.localeCompare(b.start_date));
     listEl.innerHTML = inMonth.length
       ? `<table class="data-table"><thead><tr><th>Employee</th><th>Dates</th><th>Days</th><th>Type</th></tr></thead><tbody>`
@@ -1328,7 +1343,7 @@ async function renderMyDocs() {
     }
 
     // Admin: show all employees docs
-    if (currentUser.is_admin) renderAllDocs();
+    if (['global_admin','admin'].includes(currentUser.role_type||'')) renderAllDocs();
   } catch(e) { console.error(e); }
 }
 
@@ -1415,7 +1430,7 @@ async function renderPolicies() {
 
     const el = $('policiesList');
     if (!filtered.length) {
-      el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📚</div>' + (currentUser.is_admin ? 'No policy documents yet. Click "+ Add Document" to upload.' : 'No policy documents have been published yet.') + '</div>';
+      el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📚</div>' + (['global_admin','admin'].includes(currentUser.role_type||'') ? 'No policy documents yet. Click "+ Add Document" to upload.' : 'No policy documents have been published yet.') + '</div>';
       return;
     }
 
@@ -1439,7 +1454,7 @@ async function renderPolicies() {
             </div>
             <div class="doc-card-actions">
               <a href="/api/policies/${p.id}/download" class="btn btn-ghost btn-sm" target="_blank">&#8595; Download</a>
-              ${currentUser.is_admin ? `<button class="btn btn-danger btn-sm" onclick="deletePolicy(${p.id})">Delete</button>` : ''}
+              ${['global_admin','admin'].includes(currentUser.role_type||'') ? `<button class="btn btn-danger btn-sm" onclick="deletePolicy(${p.id})">Delete</button>` : ''}
             </div>
           </div>`).join('')}
         </div>
@@ -1999,7 +2014,7 @@ let attendanceTab = 'callins';
 async function initAdminAttendance() {
   if (!allUsers.length) allUsers = await api('GET', '/api/users');
   // Populate employee selects
-  const empOpts = allUsers.filter(u=>!u.is_admin).map(u=>`<option value="${u.id}">${displayName(u)}</option>`).join('');
+  const empOpts = allUsers.filter(u=>!['global_admin','admin'].includes(u.role_type||'')).map(u=>`<option value="${u.id}">${displayName(u)}</option>`).join('');
   ['callinEmpSelect','attEventEmp'].forEach(id=>{ const el=$(id); if(el) el.innerHTML=empOpts; });
   // Default date to today
   ['callinDate','attEventDate'].forEach(id=>{ const el=$(id); if(el && !el.value) el.value=new Date().toISOString().split('T')[0]; });
@@ -2765,4 +2780,112 @@ async function deletePartnerDoc(id) {
 function exportQBIIF() {
   window.open('/api/customers/export/qb-iif', '_blank');
   showToast('QB IIF file downloading. Import into QuickBooks Desktop via File → Utilities → Import → IIF Files.', 'success');
+}
+
+// ─── MY TIMECARDS PAGE ────────────────────────────────────────────────────────
+async function renderMyTimecards() {
+  const wkEl = $('myTcWeekPicker');
+  if (wkEl && !wkEl.value) wkEl.value = getCurrentWeekValue();
+  await loadMyTimecardPage();
+}
+
+async function loadMyTimecardPage() {
+  const wkEl = $('myTcWeekPicker');
+  if (!wkEl || !wkEl.value) return;
+  const [yr, wk] = wkEl.value.split('-W');
+  const jan4 = new Date(parseInt(yr), 0, 4);
+  const weekStart = new Date(jan4.getTime() + (parseInt(wk)-1)*7*86400000);
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+  const ws = weekStart.toISOString().split('T')[0];
+
+  try {
+    const entries = await api('GET', `/api/timeclock/my?week=${ws}`);
+    const body = $('myTcBody');
+    const summary = $('myTcSummary');
+    if (!entries.length) {
+      body.innerHTML = '<div class="empty-state">No time entries for this week.</div>';
+      summary.innerHTML = '';
+      return;
+    }
+    let totalMins = 0;
+    body.innerHTML = `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Date</th><th>Type</th><th>Clock In</th><th>Clock Out</th><th>Hours</th><th>Job</th></tr></thead>
+      <tbody>${entries.map(e => {
+        totalMins += e.total_minutes || 0;
+        const typeLabel = e.clock_type==='shop'?'🏭 Shop':e.clock_type==='union'?'🤝 Union':'📍 Field';
+        return `<tr>
+          <td>${new Date(e.clock_in).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</td>
+          <td>${typeLabel}</td><td>${fmtTime(e.clock_in)}</td>
+          <td>${e.clock_out?fmtTime(e.clock_out):'<span class="badge badge-green">Active</span>'}</td>
+          <td><strong>${((e.total_minutes||0)/60).toFixed(2)}</strong></td>
+          <td style="font-size:12px;color:var(--text-muted)">${e.job_name||'—'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`;
+    const ot = Math.max(0, totalMins-2400);
+    summary.innerHTML = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem">
+      <div class="stat-card"><div class="stat-label">Regular</div><div class="stat-value">${(Math.min(totalMins,2400)/60).toFixed(2)} hrs</div></div>
+      <div class="stat-card"><div class="stat-label">Overtime</div><div class="stat-value" style="color:${ot>0?'var(--danger)':'var(--green)'}">${(ot/60).toFixed(2)} hrs</div></div>
+      <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value" style="color:var(--amber)">${(totalMins/60).toFixed(2)} hrs</div></div>
+    </div>`;
+  } catch(e) { console.error(e); }
+}
+
+// ─── ACHIEVEMENTS ─────────────────────────────────────────────────────────────
+async function openAwardAchievement() {
+  if (!allUsers.length) try { allUsers = await api('GET','/api/users'); } catch(e){}
+  $('achEmployee').innerHTML = allUsers.map(u=>`<option value="${u.id}">${displayName(u)}</option>`).join('');
+  $('achTitle').value = '';
+  $('achDesc').value = '';
+  openModal('achievementModal');
+}
+
+async function saveAchievement() {
+  const user_id = $('achEmployee').value;
+  const title   = $('achTitle').value.trim();
+  const icon    = $('achIcon').value;
+  const description = $('achDesc').value;
+  if (!title) return showToast('Enter an achievement title.','error');
+  try {
+    await api('POST','/api/achievements',{user_id,title,description,icon});
+    closeModal('achievementModal');
+    showToast('Achievement awarded! 🏆','success');
+  } catch(e) { showToast(e.message,'error'); }
+}
+
+// Load achievements on dashboard
+async function loadMyAchievements() {
+  try {
+    const achievements = await api('GET','/api/achievements/my');
+    const el = $('myAchievements');
+    if (!el || !achievements.length) return;
+    el.innerHTML = `<div class="card-header" style="margin-bottom:.75rem"><span class="card-title">&#127942; My Achievements</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        ${achievements.map(a=>`<div style="background:var(--amber-bg2);border:1px solid var(--amber-dim);border-radius:8px;padding:10px 14px;display:flex;align-items:flex-start;gap:10px">
+          <span style="font-size:24px">${a.icon}</span>
+          <div><div style="font-family:Oswald,sans-serif;font-size:14px;font-weight:600;color:var(--amber)">${a.title}</div>
+          ${a.description?`<div style="font-size:12px;color:var(--text-muted)">${a.description}</div>`:''}
+          <div style="font-size:10px;color:var(--text-faint);margin-top:3px">Awarded by ${a.awarded_by} &middot; ${fmtDate(a.awarded_at)}</div></div>
+        </div>`).join('')}
+      </div>`;
+  } catch(e) {}
+}
+
+// ─── QB BULK IMPORT ───────────────────────────────────────────────────────────
+async function runQBImport() {
+  const content = $('qbImportContent').value.trim();
+  if (!content) return showToast('Paste your IIF file contents first.','error');
+  const resultEl = $('qbImportResult');
+  resultEl.className = 'alert alert-warning';
+  resultEl.textContent = 'Importing...';
+  resultEl.style.display = 'block';
+  try {
+    const r = await api('POST','/api/customers/import/qb-iif',{iif_content: content});
+    resultEl.className = 'alert alert-success';
+    resultEl.textContent = `✓ Import complete: ${r.imported} customers added, ${r.skipped} already existed.${r.errors.length?' Some errors: '+r.errors.join(', '):''}`;
+    if (r.imported > 0) loadCustomers();
+  } catch(e) {
+    resultEl.className = 'alert alert-danger';
+    resultEl.textContent = '✗ ' + e.message;
+  }
 }

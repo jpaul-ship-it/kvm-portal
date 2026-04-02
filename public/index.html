@@ -129,6 +129,10 @@
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg>
         Time Clock
       </div>
+      <div class="nav-item" data-page="myTimecards" onclick="showPage('myTimecards',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm2 10a1 1 0 10-2 0 1 1 0 002 0zm2-3a1 1 0 011 1v3a1 1 0 11-2 0v-3a1 1 0 011-1zm2-1a1 1 0 10-2 0 1 1 0 002 0z" clip-rule="evenodd"/></svg>
+        My Timecards
+      </div>
       <div id="adminSection" style="display:none">
         <div class="nav-group-label">Admin</div>
         <div class="nav-item" data-page="adminUsers" onclick="showPage('adminUsers',this)">
@@ -241,7 +245,8 @@
         <div id="ptoBalanceCard" class="card" style="margin-bottom:1.25rem"></div>
         <div class="card">
           <div class="card-header"><span class="card-title">My Requests</span></div>
-          <div id="myPtoList"></div>
+          <div id="myAttendanceSummary"></div>
+        <div id="myPtoList"></div>
         </div>
       </div>
 
@@ -342,7 +347,12 @@
         </div>
 
         <div class="card">
-          <div class="card-header"><span class="card-title">Daily Attendance Emails</span></div>
+          <div class="card">
+          <div class="card-header"><span class="card-title">QuickBooks Customer Import</span></div>
+          <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">Bulk import your existing QB customer list into the portal. Existing customers are skipped automatically.</p>
+          <button class="btn btn-ghost" onclick="openModal('qbImportModal')">&#8659; Import from QB IIF File</button>
+        </div>
+        <div class="card-header"><span class="card-title">Daily Attendance Emails</span></div>
           <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">
             Sent automatically Monday–Friday. <strong style="color:var(--text)">7:00 AM</strong> — Field Technicians &nbsp;|&nbsp; <strong style="color:var(--text)">9:00 AM</strong> — Office Staff.<br/>
             Office departments: Management, Executives, Office Staff, Sales. All others are treated as field technicians.
@@ -534,6 +544,7 @@
             <button class="btn btn-ghost" onclick="openModal('attendanceEventModal')">+ Log Event</button>
             <button class="btn btn-ghost" onclick="openQuarterlyReport()">&#128202; Quarterly Report</button>
             <button class="btn btn-ghost" onclick="runPerfectAttendanceCheck()">&#127942; Check Perfect Attendance</button>
+            <button class="btn btn-ghost" onclick="openAwardAchievement()">&#127942; Award Achievement</button>
           </div>
         </div>
         <div class="tab-bar">
@@ -604,6 +615,17 @@
           <button class="tab" onclick="setCustTab('docs',this)">Documents</button>
         </div>
         <div id="custDetailContent"></div>
+      </div>
+
+
+      <!-- MY TIMECARDS -->
+      <div class="page" id="page-myTimecards">
+        <div class="page-header">
+          <div><h1 class="page-title">MY TIMECARDS</h1><p class="page-sub">Your personal time history</p></div>
+          <input type="week" id="myTcWeekPicker" onchange="loadMyTimecardPage()" style="padding:5px 10px;font-size:13px" />
+        </div>
+        <div id="myTcBody"></div>
+        <div id="myTcSummary" style="margin-top:1rem"></div>
       </div>
 
 <!-- ═══ MODALS ═══ -->
@@ -1305,6 +1327,52 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('partnerDocModal')">Cancel</button>
       <button class="btn btn-primary" onclick="savePartnerDoc()">Upload</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══ AWARD ACHIEVEMENT ═══ -->
+<div class="modal-overlay" id="achievementModal" onclick="closeOnOverlay(event,'achievementModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">🏆 Award Achievement</span><button class="modal-close" onclick="closeModal('achievementModal')">&#x2715;</button></div>
+    <div class="form-group"><label>Employee</label><select id="achEmployee"></select></div>
+    <div class="form-row">
+      <div class="form-group"><label>Icon</label>
+        <select id="achIcon">
+          <option value="🏆">🏆 Achievement</option><option value="⭐">⭐ Star</option>
+          <option value="🎯">🎯 On Target</option><option value="💪">💪 Hard Work</option>
+          <option value="📞">📞 No Callbacks</option><option value="⏰">⏰ Perfect Attendance</option>
+          <option value="🔧">🔧 Top Tech</option><option value="🤝">🤝 Team Player</option>
+          <option value="🚀">🚀 Above &amp; Beyond</option><option value="🛡️">🛡️ Safety First</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:2"><label>Title</label><input type="text" id="achTitle" placeholder="e.g. No Callbacks — Q1 2026" /></div>
+    </div>
+    <div class="form-group"><label>Description</label><textarea id="achDesc" rows="2" placeholder="Details about this achievement..."></textarea></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('achievementModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveAchievement()">Award</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ QB BULK IMPORT ═══ -->
+<div class="modal-overlay" id="qbImportModal" onclick="closeOnOverlay(event,'qbImportModal')">
+  <div class="modal modal-lg">
+    <div class="modal-header"><span class="modal-title">&#8659; Import Customers from QuickBooks</span><button class="modal-close" onclick="closeModal('qbImportModal')">&#x2715;</button></div>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem">
+      Export your customer list from QuickBooks Desktop as an IIF file, then paste the contents below.<br/>
+      In QB Desktop: <strong>File → Utilities → Export → Lists to IIF Files → Customers</strong>
+    </p>
+    <div class="form-group">
+      <label>Paste IIF File Contents</label>
+      <textarea id="qbImportContent" rows="10" placeholder="Paste the contents of your QB IIF export file here..." style="font-family:monospace;font-size:11px"></textarea>
+    </div>
+    <div id="qbImportResult" style="display:none;margin-bottom:.75rem"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('qbImportModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="runQBImport()">Import Customers</button>
     </div>
   </div>
 </div>

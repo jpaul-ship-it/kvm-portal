@@ -1,5 +1,6 @@
 const express = require('express');
 const session = require('express-session');
+const FileStore = require('session-file-store')(session);
 const bcrypt = require('bcryptjs');
 const path = require('path');
 const fs = require('fs');
@@ -152,6 +153,17 @@ async function initDb() {
     week_start TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now'))
   )`);
+  db.run(`CREATE TABLE IF NOT EXISTS achievements (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    user_name TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    icon TEXT DEFAULT '🏆',
+    awarded_by TEXT NOT NULL,
+    awarded_at TEXT DEFAULT (datetime('now'))
+  )`);
+
   db.run(`CREATE TABLE IF NOT EXISTS geofence_alerts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -311,8 +323,9 @@ async function initDb() {
   // Migrate: add new columns if upgrading
   // Add role_type column for new permission system
   try { db.run(`ALTER TABLE users ADD COLUMN role_type TEXT DEFAULT 'technician'`); saveDb(); } catch(e){}
-  // Set role_type='admin' for existing admin users that have NULL role_type
-  try { db.run(`UPDATE users SET role_type='admin' WHERE is_admin=1 AND (role_type IS NULL OR role_type='')`); saveDb(); } catch(e){}
+  // Set role_type for existing users
+  try { db.run(`UPDATE users SET role_type='global_admin' WHERE username='admin' AND (role_type IS NULL OR role_type='' OR role_type='admin')`); saveDb(); } catch(e){}
+  try { db.run(`UPDATE users SET role_type='admin' WHERE is_admin=1 AND username!='admin' AND (role_type IS NULL OR role_type='')`); saveDb(); } catch(e){}
   // Set role_type='technician' for non-admin users with NULL role_type
   try { db.run(`UPDATE users SET role_type='technician' WHERE is_admin=0 AND (role_type IS NULL OR role_type='')`); saveDb(); } catch(e){}
   ['oncall_dept','oncall_role','paired_with','hire_date'].forEach(col => {
@@ -331,6 +344,7 @@ async function initDb() {
   try { db.run(`CREATE TABLE IF NOT EXISTS attendance (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, user_name TEXT NOT NULL, event_date TEXT NOT NULL, event_type TEXT NOT NULL, minutes_late INTEGER DEFAULT 0, notes TEXT DEFAULT '', logged_by TEXT DEFAULT 'system', quarter TEXT DEFAULT '', year INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')))`); saveDb(); } catch(e){}
   try { db.run(`CREATE TABLE IF NOT EXISTS callins (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, user_name TEXT NOT NULL, call_in_date TEXT NOT NULL, call_in_type TEXT NOT NULL DEFAULT 'Sick', notes TEXT DEFAULT '', notified INTEGER DEFAULT 0, logged_by TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')))`); saveDb(); } catch(e){}
   try { db.run(`CREATE TABLE IF NOT EXISTS attendance_recognition (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, user_name TEXT NOT NULL, quarter TEXT NOT NULL, year INTEGER NOT NULL, announced INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')))`); saveDb(); } catch(e){}
+  try { db.run(`CREATE TABLE IF NOT EXISTS achievements (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, user_name TEXT NOT NULL, title TEXT NOT NULL, description TEXT DEFAULT '', icon TEXT DEFAULT '🏆', awarded_by TEXT NOT NULL, awarded_at TEXT DEFAULT (datetime('now')))`); saveDb(); } catch(e){}
   // Create timeclock tables if upgrading
   try { db.run(`CREATE TABLE IF NOT EXISTS timeclock (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, user_name TEXT NOT NULL, clock_type TEXT NOT NULL DEFAULT 'shop', status TEXT NOT NULL DEFAULT 'in', clock_in TEXT, clock_out TEXT, latitude_in REAL, longitude_in REAL, latitude_out REAL, longitude_out REAL, job_name TEXT DEFAULT '', customer_name TEXT DEFAULT '', notes TEXT DEFAULT '', is_union INTEGER DEFAULT 0, is_offsite INTEGER DEFAULT 0, total_minutes INTEGER DEFAULT 0, week_start TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')))`); saveDb(); } catch(e){}
   try { db.run(`CREATE TABLE IF NOT EXISTS geofence_alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, user_name TEXT NOT NULL, alert_type TEXT NOT NULL, latitude REAL, longitude REAL, resolved INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')))`); saveDb(); } catch(e){}
@@ -427,7 +441,26 @@ app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 app.use(express.static(path.join(__dirname,'public')));
 app.use(cors({origin:['http://kvmdoor.com','https://kvmdoor.com','http://www.kvmdoor.com','https://www.kvmdoor.com'],credentials:true}));
-app.use(session({secret:'kvm-door-v3-2024',resave:true,saveUninitialized:false,rolling:true,cookie:{maxAge:24*60*60*1000}}));
+const SESSION_DIR = path.join(DATA_DIR, 'sessions');
+if (!require('fs').existsSync(SESSION_DIR)) require('fs').mkdirSync(SESSION_DIR, {recursive:true});
+app.use(session({
+  store: new FileStore({ path: SESSION_DIR, ttl: 86400, retries: 0, logFn: ()=>{} }),
+  secret: 'kvm-door-v3-2024',
+  resave: false,
+  saveUninitialized: false,
+  rolling: true,
+  cookie: { maxAge: 24*60*60*1000 }
+}));
+
+// ─── ROLE CONSTANTS ───────────────────────────────────────────────────────────
+const ADMIN_ROLES   = ['global_admin','admin'];
+const MANAGER_ROLES = ['global_admin','admin','manager'];
+const FIELD_ROLES   = ['global_admin','admin','manager','billing','sales','dispatcher'];
+
+function getUserRole(userId) {
+  const u = get('SELECT role_type FROM users WHERE id=?', [userId]);
+  return u ? (u.role_type || 'technician') : null;
+}
 
 const requireAuth = (req,res,next) => {
   if (!req.session.userId) return res.status(401).json({error:'Not authenticated'});
@@ -436,20 +469,16 @@ const requireAuth = (req,res,next) => {
 
 const requireAdmin = (req,res,next) => {
   if (!req.session.userId) return res.status(401).json({error:'Not authenticated'});
-  const u = get('SELECT is_admin, role_type FROM users WHERE id=?',[req.session.userId]);
-  if (!u) return res.status(401).json({error:'Not authenticated'});
-  if (!u.is_admin && u.role_type !== 'admin') return res.status(403).json({error:'Admin only'});
-  req.session.isAdmin = true;
+  const role = getUserRole(req.session.userId);
+  if (!role || !ADMIN_ROLES.includes(role)) return res.status(403).json({error:'Admin access required'});
   next();
 };
 
-// Manager OR admin can edit limited employee fields
 const requireManager = (req,res,next) => {
   if (!req.session.userId) return res.status(401).json({error:'Not authenticated'});
-  const u = get('SELECT is_admin, role_type FROM users WHERE id=?',[req.session.userId]);
-  if (!u) return res.status(403).json({error:'Access denied'});
-  if (u.is_admin || ['manager','admin'].includes(u.role_type||'')) return next();
-  return res.status(403).json({error:'Manager access required'});
+  const role = getUserRole(req.session.userId);
+  if (!role || !MANAGER_ROLES.includes(role)) return res.status(403).json({error:'Manager access required'});
+  next();
 };
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
@@ -457,8 +486,8 @@ app.post('/api/login',(req,res)=>{
   const {username,password}=req.body;
   const user=get('SELECT * FROM users WHERE username=?',[username]);
   if(!user||!bcrypt.compareSync(password,user.password)) return res.status(401).json({error:'Invalid username or password'});
-  req.session.userId=user.id; req.session.isAdmin=!!user.is_admin;
-  res.json({id:user.id,username:user.username,first_name:user.first_name,last_name:user.last_name,role:user.role,department:user.department,is_admin:!!user.is_admin,avatar_color:user.avatar_color});
+  req.session.userId=user.id;
+  res.json({id:user.id,username:user.username,first_name:user.first_name,last_name:user.last_name,role:user.role,department:user.department,role_type:user.role_type||'technician',avatar_color:user.avatar_color});
 });
 app.post('/api/logout',(req,res)=>{req.session.destroy();res.json({ok:true});});
 app.get('/api/me',requireAuth,(req,res)=>{
@@ -480,9 +509,8 @@ app.post('/api/users',requireAdmin,(req,res)=>{
   res.json({id});
 });
 app.put('/api/users/:id', requireManager, (req, res) => {
-  const callerUser = get('SELECT is_admin, role_type FROM users WHERE id=?', [req.session.userId]);
-  const isAdmin = callerUser && callerUser.is_admin;
-  const isManager = callerUser && callerUser.role_type === 'manager';
+  const callerRole = getUserRole(req.session.userId);
+  const isAdmin = ADMIN_ROLES.includes(callerRole||'');
 
   if (isAdmin) {
     // Full edit — admin can change everything
@@ -497,8 +525,8 @@ app.put('/api/users/:id', requireManager, (req, res) => {
     const {first_name,last_name,role,department,oncall_dept,oncall_role,phone,email} = req.body;
     if (!first_name) return res.status(400).json({error:'First name is required'});
     // Managers cannot edit other managers or admins
-    const target = get('SELECT is_admin, role_type FROM users WHERE id=?', [req.params.id]);
-    if (target && (target.is_admin || target.role_type === 'manager')) {
+    const target = get('SELECT role_type FROM users WHERE id=?', [req.params.id]);
+    if (target && MANAGER_ROLES.includes(target.role_type||'')) {
       return res.status(403).json({error:'Managers cannot edit other managers or admin accounts'});
     }
     const {role_type:mgr_role_type} = req.body;
@@ -601,6 +629,15 @@ app.delete('/api/blackouts/:id',requireAdmin,(req,res)=>{run('DELETE FROM blacko
 // All approved PTO for calendar view (all users can see approved time off)
 app.get('/api/pto/all-approved', requireAuth, (req, res) => {
   res.json(all("SELECT * FROM pto_requests WHERE status='approved' ORDER BY start_date"));
+});
+
+// Call-ins as time-off events (for calendar and employee view)
+app.get('/api/attendance/my-callins', requireAuth, (req, res) => {
+  const callins = all('SELECT * FROM callins WHERE user_id=? ORDER BY call_in_date DESC', [req.session.userId]);
+  const tardies = all("SELECT * FROM attendance WHERE user_id=? AND event_type='tardy' ORDER BY event_date DESC", [req.session.userId]);
+  const total_callins = callins.length;
+  const total_tardies = tardies.length;
+  res.json({ callins, tardies, total_callins, total_tardies });
 });
 
 app.get('/api/pto',requireAuth,(req,res)=>{
@@ -981,7 +1018,7 @@ const cron = require('node-cron');
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const SHIFT_START_HOUR   = 6;   // 6:00 AM
 const SHIFT_START_MIN    = 0;
-const TARDY_GRACE_MINS   = 15;  // grace period before tardy
+const TARDY_GRACE_MINS   = 20;  // 20 minutes late = tardy
 const CALLIN_TYPES = ['Sick','Personal','No Call No Show','FMLA','Bereavement','Union Leave','Approved Absence'];
 
 function getQuarter(dateStr) {
@@ -1512,23 +1549,16 @@ app.get('/api/attendance/my-callins', requireAuth, (req, res) => {
 
 // ─── PERMISSION HELPER ────────────────────────────────────────────────────────
 function canAccessCustomers(req) {
-  const u = get('SELECT role_type, is_admin FROM users WHERE id=?', [req.session.userId]);
-  if (!u) return false;
-  // Admins always have access
-  if (u.is_admin) return true;
-  // Check role_type for non-admins
-  return ['admin','billing','sales','dispatcher','manager'].includes(u.role_type||'');
+  const role = getUserRole(req.session.userId);
+  return !!role; // all authenticated users can view customers
 }
 function requireCustomerAccess(req, res, next) {
   if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' });
-  // Re-verify from DB every time
-  const u = get('SELECT is_admin, role_type FROM users WHERE id=?', [req.session.userId]);
-  if (!u) return res.status(401).json({ error: 'Not authenticated' });
-  if (u.is_admin) return next(); // admins always pass
-  if (!['admin','billing','sales','dispatcher','manager'].includes(u.role_type||'')) {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-  next();
+  const role = getUserRole(req.session.userId);
+  if (!role) return res.status(401).json({ error: 'Not authenticated' });
+  if (FIELD_ROLES.includes(role)) return next();
+  // Technicians can still VIEW customers (read-only enforced on frontend)
+  return next();
 }
 
 // ─── JOB NUMBER GENERATOR ─────────────────────────────────────────────────────
@@ -1877,6 +1907,75 @@ app.get('/reset-admin', (req, res) => {
     '</body></html>'
   ].join('');
   res.send(html);
+});
+
+
+// ─── ACHIEVEMENTS ────────────────────────────────────────────────────────────
+app.get('/api/achievements/my', requireAuth, (req, res) => {
+  res.json(all('SELECT * FROM achievements WHERE user_id=? ORDER BY awarded_at DESC', [req.session.userId]));
+});
+
+app.get('/api/achievements/user/:id', requireManager, (req, res) => {
+  res.json(all('SELECT * FROM achievements WHERE user_id=? ORDER BY awarded_at DESC', [req.params.id]));
+});
+
+app.get('/api/achievements/all', requireAdmin, (req, res) => {
+  res.json(all('SELECT * FROM achievements ORDER BY awarded_at DESC'));
+});
+
+app.post('/api/achievements', requireManager, (req, res) => {
+  const { user_id, title, description, icon } = req.body;
+  if (!user_id || !title) return res.status(400).json({ error: 'Missing fields' });
+  const user = get('SELECT first_name, last_name FROM users WHERE id=?', [user_id]);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const awarder = get('SELECT first_name, last_name FROM users WHERE id=?', [req.session.userId]);
+  const user_name = user.first_name + (user.last_name ? ' ' + user.last_name : '');
+  const awarded_by = awarder.first_name + (awarder.last_name ? ' ' + awarder.last_name : '');
+  const id = runGetId('INSERT INTO achievements (user_id,user_name,title,description,icon,awarded_by) VALUES (?,?,?,?,?,?)',
+    [user_id, user_name, title, description||'', icon||'🏆', awarded_by]);
+  res.json({ id });
+});
+
+app.delete('/api/achievements/:id', requireAdmin, (req, res) => {
+  run('DELETE FROM achievements WHERE id=?', [req.params.id]);
+  res.json({ ok: true });
+});
+
+// ─── MY TIMECARDS (for employees to see their own) ────────────────────────────
+app.get('/api/timeclock/my-history', requireAuth, (req, res) => {
+  const weeks = all('SELECT DISTINCT week_start FROM timeclock WHERE user_id=? ORDER BY week_start DESC LIMIT 12', [req.session.userId]);
+  const entries = all('SELECT * FROM timeclock WHERE user_id=? ORDER BY clock_in DESC LIMIT 200', [req.session.userId]);
+  res.json({ weeks, entries });
+});
+
+
+// ─── QB DESKTOP BULK IMPORT ───────────────────────────────────────────────────
+app.post('/api/customers/import/qb-iif', requireAdmin, (req, res) => {
+  const { iif_content } = req.body;
+  if (!iif_content) return res.status(400).json({ error: 'No IIF content provided' });
+  
+  const lines = iif_content.split('\n').filter(l => l.trim());
+  let imported = 0, skipped = 0;
+  const errors = [];
+  
+  lines.forEach(line => {
+    const parts = line.split('\t');
+    if (!parts[0] || parts[0].trim() !== 'CUST') return;
+    const name = (parts[1]||'').trim();
+    if (!name) return;
+    
+    // Check if already exists
+    const existing = get("SELECT id FROM customers WHERE company_name=?", [name]);
+    if (existing) { skipped++; return; }
+    
+    try {
+      runGetId(`INSERT INTO customers (company_name, qb_customer_id, billing_phone, billing_email, billing_address, billing_city, billing_state, billing_zip, credit_terms, status) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [name, parts[2]||'', parts[7]||'', parts[8]||'', parts[12]||'', parts[13]||'', parts[14]||'', parts[15]||'', parts[20]||'Net 30', 'active']);
+      imported++;
+    } catch(e) { errors.push(name + ': ' + e.message); }
+  });
+  
+  res.json({ ok: true, imported, skipped, errors });
 });
 
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
