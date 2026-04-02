@@ -293,8 +293,8 @@ function seedDatabase() {
 }
 
 // ─── MIDDLEWARE ───────────────────────────────────────────────────────────────
-app.use(express.json());
-app.use(express.urlencoded({extended:true}));
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 app.use(express.static(path.join(__dirname,'public')));
 app.use(cors({origin:['http://kvmdoor.com','https://kvmdoor.com','http://www.kvmdoor.com','https://www.kvmdoor.com'],credentials:true}));
 app.use(session({secret:'kvm-door-v3-2024',resave:true,saveUninitialized:false,rolling:true,cookie:{maxAge:24*60*60*1000}}));
