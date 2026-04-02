@@ -1559,8 +1559,8 @@ app.get('/api/customers/search', requireCustomerAccess, (req, res) => {
 
 app.get('/api/customers/export/qb-iif', requireAdmin, (req, res) => {
   const customers = all("SELECT * FROM customers WHERE status='active' ORDER BY company_name");
-  let iif = '!CUST	NAME	REFNUM	TIMESTAMP	BSTYPE	ACCNUM	CCARDNUM	ALTDPHONE	EMAIL	CONT1	CONT2	CONT3	ADDR1	ADDR2	ADDR3	ADDR4	ADDR5	CUST	JOBSTATUS	NOTES	TERMS
-';
+  const IIF_COLS = ['!CUST','NAME','REFNUM','TIMESTAMP','BSTYPE','ACCNUM','CCARDNUM','ALTDPHONE','EMAIL','CONT1','CONT2','CONT3','ADDR1','ADDR2','ADDR3','ADDR4','ADDR5','CUST','JOBSTATUS','NOTES','TERMS'];
+  let iif = IIF_COLS.join('\t') + '\n';
   customers.forEach(c => {
     iif += `CUST	${c.company_name}	${c.qb_customer_id||''}			${c.qb_customer_id||''}		${c.billing_phone||''}	${c.billing_email||''}				${c.billing_address||''}	${c.billing_city||''}${c.billing_city&&c.billing_state?', ':''}	${c.billing_state||''}	${c.billing_zip||''}		TRUE		${c.internal_notes||''}	${c.credit_terms||'Net 30'}
 `;
@@ -1587,7 +1587,7 @@ cron.schedule('0 17 * * 1-5', async () => {
   }
 
   // Build IIF content for changed customers only
-  let iif = '!CUST\tNAME\tREFNUM\tTIMESTAMP\tBSTYPE\tACCNUM\tCCARDNUM\tALTDPHONE\tEMAIL\tCONT1\tCONT2\tCONT3\tADDR1\tADDR2\tADDR3\tADDR4\tADDR5\tCUST\tJOBSTATUS\tNOTES\tTERMS\n';
+  let iif = ['!CUST','NAME','REFNUM','TIMESTAMP','BSTYPE','ACCNUM','CCARDNUM','ALTDPHONE','EMAIL','CONT1','CONT2','CONT3','ADDR1','ADDR2','ADDR3','ADDR4','ADDR5','CUST','JOBSTATUS','NOTES','TERMS'].join('\t') + '\n';
   changed.forEach(c => {
     iif += 'CUST\t' + [c.company_name, c.qb_customer_id||'', '', '', '', c.qb_customer_id||'', '', c.billing_phone||'', c.billing_email||'', '', '', '',
       c.billing_address||'', (c.billing_city&&c.billing_state)?c.billing_city+', ':c.billing_city||'', c.billing_state||'', c.billing_zip||'', '',
@@ -1824,48 +1824,49 @@ app.post('/api/emergency-reset', (req, res) => {
 
 // Reset page HTML
 app.get('/reset-admin', (req, res) => {
-  res.send(\`<!DOCTYPE html>
-<html>
-<head><title>KVM Admin Reset</title>
-<style>body{font-family:Arial;background:#0a0a0a;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
-.box{background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:2rem;width:100%;max-width:380px}
-h2{color:#F5A623;margin:0 0 1.5rem;font-size:20px}
-label{display:block;font-size:12px;color:#888;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em}
-input{width:100%;padding:10px;background:#111;border:1px solid #333;border-radius:4px;color:#fff;font-size:14px;margin-bottom:1rem;box-sizing:border-box}
-button{width:100%;padding:12px;background:#F5A623;color:#000;border:none;border-radius:4px;font-size:15px;font-weight:700;cursor:pointer}
-.msg{margin-top:1rem;padding:10px;border-radius:4px;font-size:13px}
-.ok{background:#1a3a1a;border:1px solid #27ae60;color:#27ae60}
-.err{background:#3a1a1a;border:1px solid #c0392b;color:#ff6b6b}
-</style></head>
-<body><div class="box">
-<h2>🔑 KVM Admin Password Reset</h2>
-<label>Reset Token (from Render environment)</label>
-<input type="password" id="tok" placeholder="Enter RESET_TOKEN value" />
-<label>New Password</label>
-<input type="password" id="pw" placeholder="Minimum 6 characters" />
-<label>Confirm Password</label>
-<input type="password" id="pw2" placeholder="Repeat password" />
-<button onclick="doReset()">Reset Admin Password</button>
-<div id="msg"></div>
-</div>
-<script>
-async function doReset() {
-  const tok=document.getElementById('tok').value;
-  const pw=document.getElementById('pw').value;
-  const pw2=document.getElementById('pw2').value;
-  const msg=document.getElementById('msg');
-  if(pw!==pw2){msg.className='msg err';msg.textContent='Passwords do not match';return;}
-  if(pw.length<6){msg.className='msg err';msg.textContent='Password too short';return;}
-  msg.className='msg';msg.textContent='Resetting...';
-  try {
-    const r=await fetch('/api/emergency-reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:tok,new_password:pw})});
-    const d=await r.json();
-    if(d.ok){msg.className='msg ok';msg.textContent='✓ Password reset for user: '+d.username+'. You can now log in.';}
-    else{msg.className='msg err';msg.textContent=d.error||'Reset failed';}
-  } catch(e){msg.className='msg err';msg.textContent='Error: '+e.message;}
-}
-</script>
-</body></html>\`);
+  const html = [
+    '<!DOCTYPE html><html><head><title>KVM Admin Reset</title>',
+    '<style>',
+    'body{font-family:Arial;background:#0a0a0a;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}',
+    '.box{background:#1a1a1a;border:1px solid #333;border-radius:8px;padding:2rem;width:100%;max-width:380px}',
+    'h2{color:#F5A623;margin:0 0 1.5rem;font-size:20px}',
+    'label{display:block;font-size:12px;color:#888;margin-bottom:4px;text-transform:uppercase;letter-spacing:.05em}',
+    'input{width:100%;padding:10px;background:#111;border:1px solid #333;border-radius:4px;color:#fff;font-size:14px;margin-bottom:1rem;box-sizing:border-box}',
+    'button{width:100%;padding:12px;background:#F5A623;color:#000;border:none;border-radius:4px;font-size:15px;font-weight:700;cursor:pointer}',
+    '.msg{margin-top:1rem;padding:10px;border-radius:4px;font-size:13px}',
+    '.ok{background:#1a3a1a;border:1px solid #27ae60;color:#27ae60}',
+    '.err{background:#3a1a1a;border:1px solid #c0392b;color:#ff6b6b}',
+    '</style></head><body><div class="box">',
+    '<h2>&#128273; KVM Admin Password Reset</h2>',
+    '<label>Reset Token (from Render environment)</label>',
+    '<input type="password" id="tok" placeholder="Enter RESET_TOKEN value" />',
+    '<label>New Password</label>',
+    '<input type="password" id="pw" placeholder="Minimum 6 characters" />',
+    '<label>Confirm Password</label>',
+    '<input type="password" id="pw2" placeholder="Repeat password" />',
+    '<button onclick="doReset()">Reset Admin Password</button>',
+    '<div id="msg"></div>',
+    '</div>',
+    '<script>',
+    'async function doReset() {',
+    '  var tok=document.getElementById("tok").value;',
+    '  var pw=document.getElementById("pw").value;',
+    '  var pw2=document.getElementById("pw2").value;',
+    '  var msg=document.getElementById("msg");',
+    '  if(pw!==pw2){msg.className="msg err";msg.textContent="Passwords do not match";return;}',
+    '  if(pw.length<6){msg.className="msg err";msg.textContent="Password too short";return;}',
+    '  msg.className="msg";msg.textContent="Resetting...";',
+    '  try {',
+    '    var r=await fetch("/api/emergency-reset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token:tok,new_password:pw})});',
+    '    var d=await r.json();',
+    '    if(d.ok){msg.className="msg ok";msg.textContent="Password reset for: "+d.username+". You can now log in.";}',
+    '    else{msg.className="msg err";msg.textContent=d.error||"Reset failed";}',
+    '  } catch(e){msg.className="msg err";msg.textContent="Error: "+e.message;}',
+    '}',
+    '</script>',
+    '</body></html>'
+  ].join('');
+  res.send(html);
 });
 
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
