@@ -311,10 +311,13 @@ async function initDb() {
   // Migrate: add new columns if upgrading
   // Add role_type column for new permission system
   try { db.run(`ALTER TABLE users ADD COLUMN role_type TEXT DEFAULT 'technician'`); saveDb(); } catch(e){}
+<<<<<<< HEAD
   // Set role_type='admin' for existing admin users that have NULL role_type
   try { db.run(`UPDATE users SET role_type='admin' WHERE is_admin=1 AND (role_type IS NULL OR role_type='')`); saveDb(); } catch(e){}
   // Set role_type='technician' for non-admin users with NULL role_type
   try { db.run(`UPDATE users SET role_type='technician' WHERE is_admin=0 AND (role_type IS NULL OR role_type='')`); saveDb(); } catch(e){}
+=======
+>>>>>>> ac34596ee9355b610ce0ecb931e259ba64816473
   ['oncall_dept','oncall_role','paired_with','hire_date'].forEach(col => {
     try { db.run(`ALTER TABLE users ADD COLUMN ${col} TEXT DEFAULT ''`); saveDb(); } catch(e){}
   });
@@ -469,6 +472,20 @@ app.post('/api/users',requireAdmin,(req,res)=>{
     [username,bcrypt.hashSync(password,10),first_name,last_name||'',role||'',department||'',oncall_dept||'',oncall_role||'',paired_with||0,phone||'',email||'',is_admin?1:0,role_type||'technician',pto_total||10,pto_left||10,avatar_color||'#7a5010',hire_date||'']);
   res.json({id});
 });
+<<<<<<< HEAD
+=======
+function requireManager(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  if (req.user.role !== 'manager') {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  next();
+}
+>>>>>>> ac34596ee9355b610ce0ecb931e259ba64816473
 app.put('/api/users/:id', requireManager, (req, res) => {
   const callerUser = get('SELECT is_admin, role_type FROM users WHERE id=?', [req.session.userId]);
   const isAdmin = callerUser && callerUser.is_admin;
@@ -1503,6 +1520,7 @@ app.get('/api/attendance/my-callins', requireAuth, (req, res) => {
 // ─── PERMISSION HELPER ────────────────────────────────────────────────────────
 function canAccessCustomers(req) {
   const u = get('SELECT role_type, is_admin FROM users WHERE id=?', [req.session.userId]);
+<<<<<<< HEAD
   if (!u) return false;
   // Admins always have access
   if (u.is_admin) return true;
@@ -1518,6 +1536,13 @@ function requireCustomerAccess(req, res, next) {
   if (!['admin','billing','sales','dispatcher','manager'].includes(u.role_type||'')) {
     return res.status(403).json({ error: 'Access denied' });
   }
+=======
+  return u && (u.is_admin || ['admin','billing','sales','dispatcher','manager'].includes(u.role_type));
+}
+function requireCustomerAccess(req, res, next) {
+  if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' });
+  if (!canAccessCustomers(req)) return res.status(403).json({ error: 'Access denied' });
+>>>>>>> ac34596ee9355b610ce0ecb931e259ba64816473
   next();
 }
 
@@ -1550,6 +1575,7 @@ app.get('/api/customers', requireCustomerAccess, (req, res) => {
   res.json(all(sql, params));
 });
 
+<<<<<<< HEAD
 // Search customers (must be BEFORE /:id route)
 app.get('/api/customers/search', requireCustomerAccess, (req, res) => {
   const q = req.query.q || '';
@@ -1620,6 +1646,8 @@ cron.schedule('0 17 * * 1-5', async () => {
 
 // QB sync status
 
+=======
+>>>>>>> ac34596ee9355b610ce0ecb931e259ba64816473
 app.get('/api/customers/:id', requireCustomerAccess, (req, res) => {
   const c = get('SELECT * FROM customers WHERE id=?', [req.params.id]);
   if (!c) return res.status(404).json({ error: 'Customer not found' });
@@ -1785,7 +1813,71 @@ app.delete('/api/customers/:cid/docs/:id', requireAdmin, (req, res) => {
 });
 
 // ─── QB DESKTOP IIF EXPORT ────────────────────────────────────────────────────
+<<<<<<< HEAD
 
+=======
+app.get('/api/customers/export/qb-iif', requireAdmin, (req, res) => {
+  const customers = all("SELECT * FROM customers WHERE status='active' ORDER BY company_name");
+  let iif = '!CUST	NAME	REFNUM	TIMESTAMP	BSTYPE	ACCNUM	CCARDNUM	ALTDPHONE	EMAIL	CONT1	CONT2	CONT3	ADDR1	ADDR2	ADDR3	ADDR4	ADDR5	CUST	JOBSTATUS	NOTES	TERMS';
+  customers.forEach(c => {
+    iif += `CUST	${c.company_name}	${c.qb_customer_id||''}			${c.qb_customer_id||''}		${c.billing_phone||''}	${c.billing_email||''}				${c.billing_address||''}	${c.billing_city||''}${c.billing_city&&c.billing_state?', ':''}	${c.billing_state||''}	${c.billing_zip||''}		TRUE		${c.internal_notes||''}	${c.credit_terms||'Net 30'}
+`;
+  });
+  // Log the sync
+  runGetId('INSERT INTO qb_sync_log (sync_type,records_synced,status,notes) VALUES (?,?,?,?)',
+    ['customer_export', customers.length, 'success', 'Manual IIF export']);
+  res.setHeader('Content-Type', 'text/plain');
+  res.setHeader('Content-Disposition', 'attachment; filename="KVM_Customers_QB_' + new Date().toISOString().split('T')[0] + '.iif"');
+  res.send(iif);
+});
+
+// Daily QB sync at 5 PM — generate IIF and email to admins
+cron.schedule('0 17 * * 1-5', async () => {
+  console.log('  Running daily QB customer sync...');
+  const changed = all("SELECT * FROM customers WHERE status='active' AND updated_at > datetime('now','-1 day') ORDER BY company_name");
+  if (!changed.length) { console.log('  No customer changes today'); return; }
+
+  const settings = getSettings();
+  if (!settings.smtp_host || !settings.smtp_user || !settings.smtp_pass) {
+    runGetId('INSERT INTO qb_sync_log (sync_type,records_synced,status,notes) VALUES (?,?,?,?)',
+      ['auto_sync', changed.length, 'skipped', 'Email not configured — download IIF manually from portal']);
+    return;
+  }
+
+  // Build IIF content for changed customers only
+  let iif = '!CUST\tNAME\tREFNUM\tTIMESTAMP\tBSTYPE\tACCNUM\tCCARDNUM\tALTDPHONE\tEMAIL\tCONT1\tCONT2\tCONT3\tADDR1\tADDR2\tADDR3\tADDR4\tADDR5\tCUST\tJOBSTATUS\tNOTES\tTERMS\n';
+  changed.forEach(c => {
+    iif += 'CUST\t' + [c.company_name, c.qb_customer_id||'', '', '', '', c.qb_customer_id||'', '', c.billing_phone||'', c.billing_email||'', '', '', '',
+      c.billing_address||'', (c.billing_city&&c.billing_state)?c.billing_city+', ':c.billing_city||'', c.billing_state||'', c.billing_zip||'', '',
+      'TRUE', '', c.internal_notes||'', c.credit_terms||'Net 30'].join('\t') + '\n';
+  });
+
+  const adminEmails = all("SELECT email FROM users WHERE (is_admin=1 OR role_type='manager') AND email!=''").map(u=>u.email);
+  const uniqueEmails = [...new Set(adminEmails)];
+  if (!uniqueEmails.length) return;
+
+  try {
+    const transporter = nodemailer.createTransport({ host:settings.smtp_host, port:parseInt(settings.smtp_port)||587, secure:false, auth:{user:settings.smtp_user, pass:settings.smtp_pass}, tls:{rejectUnauthorized:false} });
+    const dateStr = new Date().toISOString().split('T')[0];
+    await transporter.sendMail({
+      from: '"KVM Door Systems" <' + settings.smtp_user + '>',
+      to: uniqueEmails.join(','),
+      subject: 'Daily QB Customer Sync — ' + changed.length + ' update' + (changed.length!==1?'s':'') + ' — ' + dateStr,
+      html: '<div style="font-family:Arial,sans-serif"><div style="background:#0d0d0d;padding:20px;border-bottom:3px solid #F5A623"><span style="color:#fff;font-size:18px;font-weight:bold;letter-spacing:3px">KVM DOOR SYSTEMS</span></div><div style="padding:24px"><h2 style="color:#F5A623">QuickBooks Daily Sync</h2><p>' + changed.length + ' customer record' + (changed.length!==1?'s were':'was') + ' updated today. The IIF file is attached.</p><p><strong>To import:</strong> Open QuickBooks Desktop → File → Utilities → Import → IIF Files → select the attached file.</p><hr/><ul>' + changed.map(c => '<li>' + c.company_name + (c.qb_customer_id?' (QB: '+c.qb_customer_id+')':'') + '</li>').join('') + '</ul></div></div>',
+      attachments: [{ filename: 'KVM_QB_Sync_' + dateStr + '.iif', content: iif, contentType: 'text/plain' }]
+    });
+    runGetId('INSERT INTO qb_sync_log (sync_type,records_synced,status,notes) VALUES (?,?,?,?)',
+      ['auto_sync', changed.length, 'success', 'IIF emailed to ' + uniqueEmails.length + ' recipient(s)']);
+    console.log('  QB sync IIF emailed:', changed.length, 'customers to', uniqueEmails.join(', '));
+  } catch(e) {
+    runGetId('INSERT INTO qb_sync_log (sync_type,records_synced,status,notes) VALUES (?,?,?,?)',
+      ['auto_sync', changed.length, 'error', e.message]);
+    console.error('  QB sync email error:', e.message);
+  }
+}, { timezone: 'America/Detroit' });
+
+// QB sync status
+>>>>>>> ac34596ee9355b610ce0ecb931e259ba64816473
 app.get('/api/qb/sync-log', requireAdmin, (req, res) => {
   res.json(all('SELECT * FROM qb_sync_log ORDER BY created_at DESC LIMIT 30'));
 });
@@ -1797,6 +1889,7 @@ app.get('/api/customers/search', requireCustomerAccess, (req, res) => {
   res.json(results);
 });
 
+<<<<<<< HEAD
 
 // ─── EMERGENCY ADMIN PASSWORD RESET ──────────────────────────────────────────
 // Only works if: called from localhost OR a secret token matches
@@ -1868,6 +1961,8 @@ async function doReset() {
 </body></html>\`);
 });
 
+=======
+>>>>>>> ac34596ee9355b610ce0ecb931e259ba64816473
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
 
 initDb().then(()=>{

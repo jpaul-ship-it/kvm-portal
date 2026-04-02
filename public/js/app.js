@@ -79,6 +79,7 @@ function setupUI() {
     const adminSection = $('adminSection');
     if (adminSection) adminSection.style.display = 'block';
   }
+<<<<<<< HEAD
   // Show customer nav for roles with field access
   const fieldRoles = ['admin','manager','billing','sales','dispatcher'];
   if (currentUser.is_admin || fieldRoles.includes(currentUser.role_type||'')) {
@@ -86,6 +87,8 @@ function setupUI() {
   } else {
     document.querySelectorAll('.nav-item[data-page="customers"]').forEach(el => el.style.display='none');
   }
+=======
+>>>>>>> ac34596ee9355b610ce0ecb931e259ba64816473
   const allDocsSection = $('allDocsSection');
   if (allDocsSection) allDocsSection.style.display = 'block';
     updatePtoBadge();
@@ -2478,6 +2481,7 @@ function renderCustTab() {
 
 // ─── CUSTOMER CRUD ────────────────────────────────────────────────────────────
 async function openAddCustomer() {
+<<<<<<< HEAD
   try {
     if (!allUsers.length) allUsers = await api('GET', '/api/users');
   } catch(e) { allUsers = []; }
@@ -2498,6 +2502,18 @@ async function openAddCustomer() {
     spEl.innerHTML = '<option value="0">— Unassigned —</option>' + 
       allUsers.map(u=>`<option value="${u.id}">${displayName(u)}</option>`).join('');
   }
+=======
+  if (!allUsers.length) allUsers = await api('GET', '/api/users');
+  $('custModalId').value = '';
+  $('customerModalTitle').textContent = 'Add Customer';
+  ['custName','custQbId','custBillingAddr','custBillingCity','custBillingState','custBillingZip','custBillingPhone','custBillingFax','custBillingEmail','custInternalNotes','custTaxExemptNum'].forEach(id => { const el=$(id); if(el) el.value=''; });
+  ['custTaxExempt','custUnion','custCertPayroll'].forEach(id => { const el=$(id); if(el) el.checked=false; });
+  $('custType').value = 'General Contractor';
+  $('custTerms').value = 'Net 30';
+  // Populate salesperson dropdown
+  const spEl = $('custSalesperson');
+  spEl.innerHTML = '<option value="0">— Unassigned —</option>' + allUsers.filter(u=>!u.is_admin).map(u=>`<option value="${u.id}">${displayName(u)}</option>`).join('');
+>>>>>>> ac34596ee9355b610ce0ecb931e259ba64816473
   togglePartnerFields();
   openModal('customerModal');
 }
@@ -2561,7 +2577,11 @@ async function saveCustomer() {
     union_required: $('custUnion').checked,
     requires_certified_payroll: $('custCertPayroll').checked,
     partner_labor_rate_notes: $('custPartnerLaborNotes').value,
+<<<<<<< HEAD
     partner_billing_hours: parseInt(($('custPartnerBillingHours') && $('custPartnerBillingHours').value) || '48') || 48,
+=======
+    partner_billing_hours: parseInt($('custPartnerBillingHours').value) || 48,
+>>>>>>> ac34596ee9355b610ce0ecb931e259ba64816473
     partner_checkin_instructions: $('custPartnerCheckin').value,
     partner_work_order_instructions: $('custPartnerWOInstructions').value,
     partner_billing_notes: $('custPartnerBillingNotes').value,
