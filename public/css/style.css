@@ -499,3 +499,13 @@ body {
 
 /* Better tap highlight */
 * { -webkit-tap-highlight-color: rgba(245, 166, 35, 0.15); }
+
+/* ══ CUSTOMER DATABASE ═══════════════════════════════════════════════════ */
+.info-grid { display:flex; flex-direction:column; gap:0; }
+.info-row { display:flex; align-items:flex-start; padding:8px 0; border-bottom:1px solid var(--border); }
+.info-row:last-child { border-bottom:none; }
+.info-label { font-size:11px; font-weight:600; color:var(--text-faint); text-transform:uppercase; letter-spacing:.06em; min-width:120px; flex-shrink:0; padding-top:1px; }
+.info-val { font-size:13px; color:var(--text); flex:1; }
+.dept-header { display:flex; align-items:center; justify-content:space-between; padding:6px 0; border-bottom:2px solid var(--amber-dim); margin-bottom:.5rem; }
+.dept-header h3 { font-family:'Oswald',sans-serif; font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:.06em; color:var(--amber); margin:0; }
+.modal-section { font-family:'Oswald',sans-serif; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; color:var(--text-faint); padding:.5rem 0; margin:.75rem 0 .5rem; border-bottom:1px solid var(--border); }

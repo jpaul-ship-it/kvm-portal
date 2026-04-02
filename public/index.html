@@ -95,6 +95,11 @@
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M2 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 002 2H4a2 2 0 01-2-2V5zm3 1h6v4H5V6zm6 6H5v2h6v-2z" clip-rule="evenodd"/><path d="M15 7h1a2 2 0 012 2v5.5a1.5 1.5 0 01-3 0V7z"/></svg>
         Company News
       </div>
+      <div class="nav-group-label">Field</div>
+      <div class="nav-item" data-page="customers" onclick="showPage('customers',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>
+        Customers
+      </div>
       <div class="nav-group-label">Team</div>
       <div class="nav-item" data-page="oncall" onclick="showPage('oncall',this)">
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"/></svg>
@@ -539,6 +544,68 @@
         <div id="attendanceContent"></div>
       </div>
 
+
+      <!-- CUSTOMERS -->
+      <div class="page" id="page-customers">
+        <div class="page-header">
+          <div><h1 class="page-title">CUSTOMERS</h1><p class="page-sub">Customer database — all accounts, sites, and contacts</p></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-ghost" onclick="exportQBIIF()">&#8659; QB Export</button>
+            <button class="btn btn-primary" onclick="openAddCustomer()">+ Add Customer</button>
+          </div>
+        </div>
+
+        <!-- FILTERS -->
+        <div class="card" style="padding:.75rem 1rem;margin-bottom:1rem">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <input type="text" id="custSearch" placeholder="Search company name or city..." style="flex:1;min-width:200px" oninput="loadCustomers()" />
+            <select id="custTypeFilter" onchange="loadCustomers()" style="width:auto">
+              <option value="">All Types</option>
+              <option>General Contractor</option>
+              <option>Property Manager</option>
+              <option>End User / Building Owner</option>
+              <option>Municipality / Government</option>
+              <option>Industrial</option>
+              <option>Retail</option>
+              <option>Partner Door Company</option>
+            </select>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="custPartnerFilter" onchange="loadCustomers()" />
+              Partners only
+            </label>
+          </div>
+        </div>
+
+        <!-- CUSTOMER LIST -->
+        <div id="customersList"></div>
+      </div>
+
+      <!-- CUSTOMER DETAIL -->
+      <div class="page" id="page-customerDetail">
+        <div class="page-header">
+          <div style="display:flex;align-items:center;gap:12px">
+            <button class="btn btn-ghost btn-sm" onclick="showPage('customers',document.querySelector(\'.nav-item[data-page=\\\'customers\\\']\'))">&#8592; Back</button>
+            <div><h1 class="page-title" id="custDetailName">Customer</h1><p class="page-sub" id="custDetailType"></p></div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-ghost" id="custEditBtn" onclick="openEditCustomer()">&#9998; Edit</button>
+          </div>
+        </div>
+
+        <!-- PARTNER ALERT BANNER -->
+        <div id="partnerBanner" style="display:none" class="alert" style="margin-bottom:1rem;border-left:4px solid var(--amber)"></div>
+
+        <!-- TABS -->
+        <div class="tab-bar" style="margin-bottom:1rem">
+          <button class="tab active" onclick="setCustTab('overview',this)">Overview</button>
+          <button class="tab" onclick="setCustTab('sites',this)">Sites</button>
+          <button class="tab" onclick="setCustTab('contacts',this)">Contacts</button>
+          <button class="tab" onclick="setCustTab('equipment',this)">Equipment</button>
+          <button class="tab" onclick="setCustTab('docs',this)">Documents</button>
+        </div>
+        <div id="custDetailContent"></div>
+      </div>
+
 <!-- ═══ MODALS ═══ -->
 
 <!-- Announcement -->
@@ -713,6 +780,19 @@
       </div>
     </div>
     <div class="form-row">
+      <div class="form-group"><label>Role Type</label>
+        <select id="addRoleType">
+          <option value="technician">Technician</option>
+          <option value="manager">Manager</option>
+          <option value="billing">Billing</option>
+          <option value="sales">Sales</option>
+          <option value="dispatcher">Dispatcher</option>
+          <option value="admin">Admin</option>
+        </select>
+      </div>
+      <div class="form-group"></div>
+    </div>
+    <div class="form-row">
       <div class="form-group"><label>PTO Days / Year</label><input type="number" id="addPtoTotal" value="10" min="0" /></div>
       <div class="form-group"><label>PTO Days Remaining</label><input type="number" id="addPtoLeft" value="10" min="0" /></div>
     </div>
@@ -771,6 +851,7 @@
           <option value="Helper">Helper</option>
         </select>
       </div>
+    <div id="editAdminOnlyNote" class="alert alert-warning" style="display:none;font-size:12px;margin-bottom:.5rem">&#128274; Manager mode — hire date, PTO, username and access level are admin-only.</div>
       <div class="form-group"><label>Access Level</label>
         <select id="editIsAdmin">
           <option value="false">Employee</option>
@@ -778,6 +859,7 @@
         </select>
       </div>
     </div>
+      <div class="form-group"><label>Role Type</label><select id="editRoleType"><option value="technician">Technician</option><option value="manager">Manager</option><option value="billing">Billing</option><option value="sales">Sales</option><option value="dispatcher">Dispatcher</option><option value="admin">Admin</option></select></div>
     <div class="form-row">
       <div class="form-group"><label>Phone</label><input type="tel" id="editPhone" /></div>
       <div class="form-group"><label>Email</label><input type="email" id="editEmail" /></div>
@@ -1010,6 +1092,221 @@
   </div>
   <button class="btn btn-primary btn-sm" onclick="installPWA()" style="flex-shrink:0">Install</button>
   <button class="btn btn-ghost btn-sm" onclick="dismissInstallBanner()" style="flex-shrink:0">&#x2715;</button>
+</div>
+
+
+<!-- ═══ ADD/EDIT CUSTOMER ═══ -->
+<div class="modal-overlay" id="customerModal" onclick="closeOnOverlay(event,'customerModal')">
+  <div class="modal modal-xl" style="max-height:90vh;overflow-y:auto">
+    <div class="modal-header">
+      <span class="modal-title" id="customerModalTitle">Add Customer</span>
+      <button class="modal-close" onclick="closeModal('customerModal')">&#x2715;</button>
+    </div>
+    <input type="hidden" id="custModalId" />
+
+    <!-- BASIC INFO -->
+    <div class="modal-section">Basic Information</div>
+    <div class="form-row">
+      <div class="form-group" style="flex:2"><label>Company Name *</label><input type="text" id="custName" /></div>
+      <div class="form-group"><label>Customer Type</label>
+        <select id="custType" onchange="togglePartnerFields()">
+          <option>General Contractor</option>
+          <option>Property Manager</option>
+          <option>End User / Building Owner</option>
+          <option>Municipality / Government</option>
+          <option>Industrial</option>
+          <option>Retail</option>
+          <option>Partner Door Company</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>QB Customer ID</label><input type="text" id="custQbId" placeholder="From QuickBooks" /></div>
+      <div class="form-group"><label>Credit Terms</label>
+        <select id="custTerms">
+          <option>Net 30</option><option>Net 60</option><option>Net 90</option>
+          <option>Due on Receipt</option><option>Net 15</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Assigned Salesperson</label><select id="custSalesperson"><option value="0">— Unassigned —</option></select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="custTaxExempt" /> Tax Exempt</label></div>
+      <div class="form-group"><label>Tax Exempt #</label><input type="text" id="custTaxExemptNum" /></div>
+      <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="custUnion" /> Union Required</label></div>
+      <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="custCertPayroll" /> Certified Payroll</label></div>
+    </div>
+
+    <!-- BILLING ADDRESS -->
+    <div class="modal-section">Billing Address & Contact</div>
+    <div class="form-group"><label>Address</label><input type="text" id="custBillingAddr" /></div>
+    <div class="form-row">
+      <div class="form-group" style="flex:2"><label>City</label><input type="text" id="custBillingCity" /></div>
+      <div class="form-group"><label>State</label><input type="text" id="custBillingState" placeholder="MI" maxlength="2" /></div>
+      <div class="form-group"><label>ZIP</label><input type="text" id="custBillingZip" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Phone</label><input type="tel" id="custBillingPhone" /></div>
+      <div class="form-group"><label>Fax</label><input type="tel" id="custBillingFax" /></div>
+      <div class="form-group"><label>Billing Email</label><input type="email" id="custBillingEmail" /></div>
+    </div>
+
+    <!-- PARTNER FIELDS (shown only for Partner Door Company) -->
+    <div id="partnerFields" style="display:none">
+      <div class="modal-section" style="color:var(--amber)">&#9888; Partner Door Company Settings</div>
+      <div class="alert alert-warning" style="margin-bottom:.75rem;font-size:12px">
+        Jobs for this customer will generate a 48-hour billing alert for the billing team if not invoiced in time.
+        Pricing, quotes, and amounts must NEVER be discussed with their end customers.
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>48-Hr Billing Requirement</label>
+          <select id="custPartnerBillingHours">
+            <option value="48">48 hours (standard)</option>
+            <option value="24">24 hours</option>
+            <option value="72">72 hours</option>
+            <option value="10days">10 days</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Their Billing / Submission Email</label><input type="email" id="custPartnerBillingEmail" placeholder="e.g. pfgfax@dhpace.com" /></div>
+      </div>
+      <div class="form-group"><label>Labor Rate Notes</label><textarea id="custPartnerLaborNotes" rows="2" placeholder="e.g. Dock Leveler/EOD - $25, Dock Shelter - $0 visual inspection only"></textarea></div>
+      <div class="form-group"><label>Check-In / Dispatch Instructions (shown to tech on iPad)</label><textarea id="custPartnerCheckin" rows="3" placeholder="e.g. Technician must check in and check out with Distribution Center Manager or on-duty Manager."></textarea></div>
+      <div class="form-group"><label>Work Order Instructions (shown to tech)</label><textarea id="custPartnerWOInstructions" rows="3" placeholder="e.g. Signed service ticket must be completed for each visit. Before/after photos required..."></textarea></div>
+      <div class="form-group"><label>Billing Notes / Special Requirements</label><textarea id="custPartnerBillingNotes" rows="2" placeholder="e.g. Material and Labor must be itemized. No duplicate PO invoices..."></textarea></div>
+    </div>
+
+    <!-- INTERNAL NOTES -->
+    <div class="modal-section">Internal Notes</div>
+    <div class="form-group"><textarea id="custInternalNotes" rows="2" placeholder="Slow pay, key account, special requirements, etc..."></textarea></div>
+
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('customerModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveCustomer()">Save Customer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ADD SITE ═══ -->
+<div class="modal-overlay" id="siteModal" onclick="closeOnOverlay(event,'siteModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title" id="siteModalTitle">Add Site</span><button class="modal-close" onclick="closeModal('siteModal')">&#x2715;</button></div>
+    <input type="hidden" id="siteModalId" />
+    <div class="form-row">
+      <div class="form-group" style="flex:2"><label>Site Name</label><input type="text" id="siteName" placeholder="e.g. Kroger #1042 — 14 Mile & Mound" /></div>
+      <div class="form-group"><label>Store / Unit #</label><input type="text" id="siteStoreNum" /></div>
+    </div>
+    <div class="form-group"><label>Address</label><input type="text" id="siteAddr" /></div>
+    <div class="form-row">
+      <div class="form-group" style="flex:2"><label>City</label><input type="text" id="siteCity" /></div>
+      <div class="form-group"><label>State</label><input type="text" id="siteState" placeholder="MI" maxlength="2" /></div>
+      <div class="form-group"><label>ZIP</label><input type="text" id="siteZip" /></div>
+    </div>
+    <div class="form-group"><label>Site Notes</label><textarea id="siteNotes" rows="2" placeholder="Bay count, hours, access codes, etc..."></textarea></div>
+    <div class="form-group"><label>Access Instructions</label><textarea id="siteAccess" rows="2" placeholder="Gate code, who to call on arrival, etc..."></textarea></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('siteModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSite()">Save Site</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ADD CONTACT ═══ -->
+<div class="modal-overlay" id="contactModal" onclick="closeOnOverlay(event,'contactModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title" id="contactModalTitle">Add Contact</span><button class="modal-close" onclick="closeModal('contactModal')">&#x2715;</button></div>
+    <input type="hidden" id="contactModalId" />
+    <div class="form-row">
+      <div class="form-group"><label>First Name *</label><input type="text" id="contactFirst" /></div>
+      <div class="form-group"><label>Last Name</label><input type="text" id="contactLast" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Title</label><input type="text" id="contactTitle" placeholder="e.g. Facilities Manager" /></div>
+      <div class="form-group"><label>Associated Site</label><select id="contactSite"><option value="0">— All locations (corporate contact) —</option></select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Phone</label><input type="tel" id="contactPhone" /></div>
+      <div class="form-group"><label>Alt Phone</label><input type="tel" id="contactPhone2" /></div>
+      <div class="form-group"><label>Email</label><input type="email" id="contactEmail" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="contactPrimary" /> Primary Contact</label></div>
+      <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="contactBilling" /> Billing Contact</label></div>
+    </div>
+    <div class="form-group"><label>Notes</label><input type="text" id="contactNotes" /></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('contactModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveContact()">Save Contact</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ADD EQUIPMENT ═══ -->
+<div class="modal-overlay" id="equipmentModal" onclick="closeOnOverlay(event,'equipmentModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title" id="equipModalTitle">Add Equipment</span><button class="modal-close" onclick="closeModal('equipmentModal')">&#x2715;</button></div>
+    <input type="hidden" id="equipModalId" />
+    <div class="form-row">
+      <div class="form-group"><label>Equipment Type</label>
+        <select id="equipType">
+          <option>Overhead Door</option><option>Dock Leveler</option><option>Truck Restraint</option>
+          <option>Dock Seal/Shelter</option><option>Commercial Operator</option>
+          <option>Fire Door</option><option>Grille</option><option>Other</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Site</label><select id="equipSite"><option value="0">— Not site-specific —</option></select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Manufacturer</label><input type="text" id="equipMfr" placeholder="e.g. Overhead Door, Rite-Hite" /></div>
+      <div class="form-group"><label>Model</label><input type="text" id="equipModel" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Serial Number</label><input type="text" id="equipSerial" /></div>
+      <div class="form-group"><label>Size</label><input type="text" id="equipSize" placeholder="e.g. 10x10, 12W x 14H" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Install Date</label><input type="date" id="equipInstall" /></div>
+      <div class="form-group"><label>Warranty Expires</label><input type="date" id="equipWarranty" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Condition</label>
+        <select id="equipCondition">
+          <option>Good</option><option>Fair</option><option>Poor</option><option>Unknown</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Location in Building</label><input type="text" id="equipLocation" placeholder="e.g. Bay 3, North Loading Dock" /></div>
+    </div>
+    <div class="form-group"><label>Notes</label><textarea id="equipNotes" rows="2"></textarea></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('equipmentModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEquipment()">Save Equipment</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ UPLOAD PARTNER DOCUMENT ═══ -->
+<div class="modal-overlay" id="partnerDocModal" onclick="closeOnOverlay(event,'partnerDocModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Upload Partner Document</span><button class="modal-close" onclick="closeModal('partnerDocModal')">&#x2715;</button></div>
+    <div class="form-row">
+      <div class="form-group"><label>Document Type</label>
+        <select id="partnerDocType">
+          <option value="work_order_form">Work Order Form (blank)</option>
+          <option value="pm_checklist">PM Checklist</option>
+          <option value="billing_instructions">Billing Instructions</option>
+          <option value="rate_sheet">Rate Sheet / Pricing</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Document Name</label><input type="text" id="partnerDocName" placeholder="e.g. DH-Pace Service Ticket 2024" /></div>
+    </div>
+    <div class="form-group"><label>Notes</label><input type="text" id="partnerDocNotes" /></div>
+    <div class="form-group"><label>File (PDF, JPG, PNG — max 10MB)</label><input type="file" id="partnerDocFile" accept=".pdf,.jpg,.jpeg,.png" style="padding:8px" /></div>
+    <div id="partnerDocProgress" style="display:none" class="calc-note">Uploading...</div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('partnerDocModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="savePartnerDoc()">Upload</button>
+    </div>
+  </div>
 </div>
 
 <div id="toast" class="toast"></div>

@@ -189,14 +189,140 @@ async function initDb() {
     uploaded_at TEXT DEFAULT (datetime('now'))
   )`);
   db.run(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`);
+
+  // ─── CUSTOMER DATABASE TABLES ─────────────────────────────────────────────
+  db.run(`CREATE TABLE IF NOT EXISTS customers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_name TEXT NOT NULL,
+    customer_type TEXT DEFAULT 'End User',
+    is_partner_company INTEGER DEFAULT 0,
+    qb_customer_id TEXT DEFAULT '',
+    billing_address TEXT DEFAULT '',
+    billing_city TEXT DEFAULT '',
+    billing_state TEXT DEFAULT '',
+    billing_zip TEXT DEFAULT '',
+    billing_email TEXT DEFAULT '',
+    billing_phone TEXT DEFAULT '',
+    billing_fax TEXT DEFAULT '',
+    credit_terms TEXT DEFAULT 'Net 30',
+    tax_exempt INTEGER DEFAULT 0,
+    tax_exempt_number TEXT DEFAULT '',
+    union_required INTEGER DEFAULT 0,
+    requires_certified_payroll INTEGER DEFAULT 0,
+    partner_labor_rate_notes TEXT DEFAULT '',
+    partner_billing_hours INTEGER DEFAULT 0,
+    partner_work_order_instructions TEXT DEFAULT '',
+    partner_checkin_instructions TEXT DEFAULT '',
+    partner_billing_email TEXT DEFAULT '',
+    partner_billing_notes TEXT DEFAULT '',
+    internal_notes TEXT DEFAULT '',
+    status TEXT DEFAULT 'active',
+    assigned_salesperson_id INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS customer_sites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL,
+    site_name TEXT DEFAULT '',
+    store_number TEXT DEFAULT '',
+    address TEXT DEFAULT '',
+    city TEXT DEFAULT '',
+    state TEXT DEFAULT '',
+    zip TEXT DEFAULT '',
+    site_notes TEXT DEFAULT '',
+    access_instructions TEXT DEFAULT '',
+    status TEXT DEFAULT 'active',
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY(customer_id) REFERENCES customers(id)
+  )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS customer_contacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL,
+    site_id INTEGER DEFAULT 0,
+    first_name TEXT NOT NULL,
+    last_name TEXT DEFAULT '',
+    title TEXT DEFAULT '',
+    phone TEXT DEFAULT '',
+    phone2 TEXT DEFAULT '',
+    email TEXT DEFAULT '',
+    is_primary INTEGER DEFAULT 0,
+    is_billing_contact INTEGER DEFAULT 0,
+    notes TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY(customer_id) REFERENCES customers(id)
+  )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS customer_equipment (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL,
+    site_id INTEGER DEFAULT 0,
+    equipment_type TEXT DEFAULT '',
+    manufacturer TEXT DEFAULT '',
+    model TEXT DEFAULT '',
+    serial_number TEXT DEFAULT '',
+    size TEXT DEFAULT '',
+    install_date TEXT DEFAULT '',
+    last_service_date TEXT DEFAULT '',
+    warranty_expiry TEXT DEFAULT '',
+    condition TEXT DEFAULT '',
+    location_in_site TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY(customer_id) REFERENCES customers(id)
+  )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS partner_documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL,
+    doc_type TEXT DEFAULT '',
+    doc_name TEXT NOT NULL,
+    file_name TEXT DEFAULT '',
+    file_data TEXT DEFAULT '',
+    file_type TEXT DEFAULT '',
+    file_size INTEGER DEFAULT 0,
+    notes TEXT DEFAULT '',
+    uploaded_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY(customer_id) REFERENCES customers(id)
+  )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS job_numbers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    prefix TEXT NOT NULL,
+    job_number TEXT UNIQUE NOT NULL,
+    sequence INTEGER NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS qb_sync_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sync_type TEXT DEFAULT '',
+    records_synced INTEGER DEFAULT 0,
+    status TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+
   db.run(`CREATE TABLE IF NOT EXISTS oncall_rotation (id INTEGER PRIMARY KEY AUTOINCREMENT, department TEXT NOT NULL, user_id INTEGER NOT NULL, position INTEGER NOT NULL)`);
   saveDb();
 
   // Migrate: add new columns if upgrading
+  // Add role_type column for new permission system
+  try { db.run(`ALTER TABLE users ADD COLUMN role_type TEXT DEFAULT 'technician'`); saveDb(); } catch(e){}
   ['oncall_dept','oncall_role','paired_with','hire_date'].forEach(col => {
     try { db.run(`ALTER TABLE users ADD COLUMN ${col} TEXT DEFAULT ''`); saveDb(); } catch(e){}
   });
   try { db.run(`ALTER TABLE oncall ADD COLUMN department TEXT DEFAULT ''`); saveDb(); } catch(e){}
+  // Create customer database tables if upgrading from older version
+  try { db.run(`CREATE TABLE IF NOT EXISTS customers (id INTEGER PRIMARY KEY AUTOINCREMENT, company_name TEXT NOT NULL, customer_type TEXT DEFAULT 'End User', is_partner_company INTEGER DEFAULT 0, qb_customer_id TEXT DEFAULT '', billing_address TEXT DEFAULT '', billing_city TEXT DEFAULT '', billing_state TEXT DEFAULT '', billing_zip TEXT DEFAULT '', billing_email TEXT DEFAULT '', billing_phone TEXT DEFAULT '', billing_fax TEXT DEFAULT '', credit_terms TEXT DEFAULT 'Net 30', tax_exempt INTEGER DEFAULT 0, tax_exempt_number TEXT DEFAULT '', union_required INTEGER DEFAULT 0, requires_certified_payroll INTEGER DEFAULT 0, partner_labor_rate_notes TEXT DEFAULT '', partner_billing_hours INTEGER DEFAULT 0, partner_work_order_instructions TEXT DEFAULT '', partner_checkin_instructions TEXT DEFAULT '', partner_billing_email TEXT DEFAULT '', partner_billing_notes TEXT DEFAULT '', internal_notes TEXT DEFAULT '', status TEXT DEFAULT 'active', assigned_salesperson_id INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')))`); saveDb(); } catch(e){}
+  try { db.run(`CREATE TABLE IF NOT EXISTS customer_sites (id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER NOT NULL, site_name TEXT DEFAULT '', store_number TEXT DEFAULT '', address TEXT DEFAULT '', city TEXT DEFAULT '', state TEXT DEFAULT '', zip TEXT DEFAULT '', site_notes TEXT DEFAULT '', access_instructions TEXT DEFAULT '', status TEXT DEFAULT 'active', created_at TEXT DEFAULT (datetime('now')))`); saveDb(); } catch(e){}
+  try { db.run(`CREATE TABLE IF NOT EXISTS customer_contacts (id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER NOT NULL, site_id INTEGER DEFAULT 0, first_name TEXT NOT NULL, last_name TEXT DEFAULT '', title TEXT DEFAULT '', phone TEXT DEFAULT '', phone2 TEXT DEFAULT '', email TEXT DEFAULT '', is_primary INTEGER DEFAULT 0, is_billing_contact INTEGER DEFAULT 0, notes TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')))`); saveDb(); } catch(e){}
+  try { db.run(`CREATE TABLE IF NOT EXISTS customer_equipment (id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER NOT NULL, site_id INTEGER DEFAULT 0, equipment_type TEXT DEFAULT '', manufacturer TEXT DEFAULT '', model TEXT DEFAULT '', serial_number TEXT DEFAULT '', size TEXT DEFAULT '', install_date TEXT DEFAULT '', last_service_date TEXT DEFAULT '', warranty_expiry TEXT DEFAULT '', condition TEXT DEFAULT '', location_in_site TEXT DEFAULT '', notes TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')))`); saveDb(); } catch(e){}
+  try { db.run(`CREATE TABLE IF NOT EXISTS partner_documents (id INTEGER PRIMARY KEY AUTOINCREMENT, customer_id INTEGER NOT NULL, doc_type TEXT DEFAULT '', doc_name TEXT NOT NULL, file_name TEXT DEFAULT '', file_data TEXT DEFAULT '', file_type TEXT DEFAULT '', file_size INTEGER DEFAULT 0, notes TEXT DEFAULT '', uploaded_at TEXT DEFAULT (datetime('now')))`); saveDb(); } catch(e){}
+  try { db.run(`CREATE TABLE IF NOT EXISTS job_numbers (id INTEGER PRIMARY KEY AUTOINCREMENT, prefix TEXT NOT NULL, job_number TEXT UNIQUE NOT NULL, sequence INTEGER NOT NULL, created_at TEXT DEFAULT (datetime('now')))`); saveDb(); } catch(e){}
+  try { db.run(`CREATE TABLE IF NOT EXISTS qb_sync_log (id INTEGER PRIMARY KEY AUTOINCREMENT, sync_type TEXT DEFAULT '', records_synced INTEGER DEFAULT 0, status TEXT DEFAULT '', notes TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')))`); saveDb(); } catch(e){}
   // Create attendance tables if upgrading
   try { db.run(`CREATE TABLE IF NOT EXISTS attendance (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, user_name TEXT NOT NULL, event_date TEXT NOT NULL, event_type TEXT NOT NULL, minutes_late INTEGER DEFAULT 0, notes TEXT DEFAULT '', logged_by TEXT DEFAULT 'system', quarter TEXT DEFAULT '', year INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')))`); saveDb(); } catch(e){}
   try { db.run(`CREATE TABLE IF NOT EXISTS callins (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, user_name TEXT NOT NULL, call_in_date TEXT NOT NULL, call_in_type TEXT NOT NULL DEFAULT 'Sick', notes TEXT DEFAULT '', notified INTEGER DEFAULT 0, logged_by TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')))`); saveDb(); } catch(e){}
@@ -329,24 +455,42 @@ app.get('/api/me',requireAuth,(req,res)=>{
 
 // ─── USERS ────────────────────────────────────────────────────────────────────
 app.get('/api/users',requireAuth,(req,res)=>{
-  res.json(all('SELECT id,username,first_name,last_name,role,department,oncall_dept,oncall_role,paired_with,phone,email,is_admin,pto_total,pto_left,avatar_color,hire_date FROM users ORDER BY first_name').map(u=>({...u,is_admin:!!u.is_admin})));
+  res.json(all('SELECT id,username,first_name,last_name,role,department,oncall_dept,oncall_role,paired_with,phone,email,is_admin,role_type,pto_total,pto_left,avatar_color,hire_date FROM users ORDER BY first_name').map(u=>({...u,is_admin:!!u.is_admin})));
 });
 app.post('/api/users',requireAdmin,(req,res)=>{
-  const {username,password,first_name,last_name,role,department,oncall_dept,oncall_role,paired_with,phone,email,is_admin,pto_total,pto_left,avatar_color,hire_date}=req.body;
+  const {username,password,first_name,last_name,role,department,oncall_dept,oncall_role,paired_with,phone,email,is_admin,role_type,pto_total,pto_left,avatar_color,hire_date}=req.body;
   if(!username||!password||!first_name) return res.status(400).json({error:'Missing required fields'});
   if(get('SELECT id FROM users WHERE username=?',[username])) return res.status(400).json({error:'Username already exists'});
-  const id=runGetId(`INSERT INTO users (username,password,first_name,last_name,role,department,oncall_dept,oncall_role,paired_with,phone,email,is_admin,pto_total,pto_left,avatar_color,hire_date) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [username,bcrypt.hashSync(password,10),first_name,last_name||'',role||'',department||'',oncall_dept||'',oncall_role||'',paired_with||0,phone||'',email||'',is_admin?1:0,pto_total||10,pto_left||10,avatar_color||'#7a5010',hire_date||'']);
+  const id=runGetId(`INSERT INTO users (username,password,first_name,last_name,role,department,oncall_dept,oncall_role,paired_with,phone,email,is_admin,role_type,pto_total,pto_left,avatar_color,hire_date) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [username,bcrypt.hashSync(password,10),first_name,last_name||'',role||'',department||'',oncall_dept||'',oncall_role||'',paired_with||0,phone||'',email||'',is_admin?1:0,role_type||'technician',pto_total||10,pto_left||10,avatar_color||'#7a5010',hire_date||'']);
   res.json({id});
 });
-app.put('/api/users/:id',requireAdmin,(req,res)=>{
-  const {first_name,last_name,username,role,department,oncall_dept,oncall_role,paired_with,phone,email,is_admin,pto_total,pto_left,hire_date}=req.body;
-  if(!first_name||!username) return res.status(400).json({error:'First name and username are required'});
-  // Check username not taken by another user
-  const existing=get('SELECT id FROM users WHERE username=? AND id!=?',[username,req.params.id]);
-  if(existing) return res.status(400).json({error:'Username already taken by another employee'});
-  run(`UPDATE users SET first_name=?,last_name=?,username=?,role=?,department=?,oncall_dept=?,oncall_role=?,paired_with=?,phone=?,email=?,is_admin=?,pto_total=?,pto_left=?,hire_date=? WHERE id=?`,
-    [first_name,last_name||'',username,role||'',department||'',oncall_dept||'',oncall_role||'',paired_with||0,phone||'',email||'',is_admin?1:0,pto_total||10,pto_left||10,hire_date||'',req.params.id]);
+app.put('/api/users/:id', requireManager, (req, res) => {
+  const callerUser = get('SELECT is_admin, role_type FROM users WHERE id=?', [req.session.userId]);
+  const isAdmin = callerUser && callerUser.is_admin;
+  const isManager = callerUser && callerUser.role_type === 'manager';
+
+  if (isAdmin) {
+    // Full edit — admin can change everything
+    const {first_name,last_name,username,role,department,oncall_dept,oncall_role,paired_with,phone,email,is_admin,pto_total,pto_left,hire_date} = req.body;
+    if (!first_name||!username) return res.status(400).json({error:'First name and username are required'});
+    const existing = get('SELECT id FROM users WHERE username=? AND id!=?',[username,req.params.id]);
+    if (existing) return res.status(400).json({error:'Username already taken'});
+    run(`UPDATE users SET first_name=?,last_name=?,username=?,role=?,department=?,oncall_dept=?,oncall_role=?,paired_with=?,phone=?,email=?,is_admin=?,pto_total=?,pto_left=?,hire_date=? WHERE id=?`,
+      [first_name,last_name||'',username,role||'',department||'',oncall_dept||'',oncall_role||'',paired_with||0,phone||'',email||'',is_admin?1:0,pto_total||10,pto_left||10,hire_date||'',req.params.id]);
+  } else {
+    // Manager — limited edit only (no hire_date, PTO, username, is_admin)
+    const {first_name,last_name,role,department,oncall_dept,oncall_role,phone,email} = req.body;
+    if (!first_name) return res.status(400).json({error:'First name is required'});
+    // Managers cannot edit other managers or admins
+    const target = get('SELECT is_admin, role_type FROM users WHERE id=?', [req.params.id]);
+    if (target && (target.is_admin || target.role_type === 'manager')) {
+      return res.status(403).json({error:'Managers cannot edit other managers or admin accounts'});
+    }
+    const {role_type:mgr_role_type} = req.body;
+    run(`UPDATE users SET first_name=?,last_name=?,role=?,department=?,oncall_dept=?,oncall_role=?,phone=?,email=? WHERE id=?`,
+      [first_name,last_name||'',role||'',department||'',oncall_dept||'',oncall_role||'',phone||'',email||'',req.params.id]);
+  }
   res.json({ok:true});
 });
 // Change own password
@@ -1347,6 +1491,287 @@ app.post('/api/attendance/my-callin', requireAuth, async (req, res) => {
 // Get my call-ins
 app.get('/api/attendance/my-callins', requireAuth, (req, res) => {
   res.json(all('SELECT * FROM callins WHERE user_id=? ORDER BY call_in_date DESC LIMIT 20', [req.session.userId]));
+});
+
+
+// ═══ CUSTOMER DATABASE ROUTES ════════════════════════════════════════════════
+
+// ─── PERMISSION HELPER ────────────────────────────────────────────────────────
+function canAccessCustomers(req) {
+  const u = get('SELECT role_type, is_admin FROM users WHERE id=?', [req.session.userId]);
+  return u && (u.is_admin || ['admin','billing','sales','dispatcher','manager'].includes(u.role_type));
+}
+function requireCustomerAccess(req, res, next) {
+  if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' });
+  if (!canAccessCustomers(req)) return res.status(403).json({ error: 'Access denied' });
+  next();
+}
+
+// ─── JOB NUMBER GENERATOR ─────────────────────────────────────────────────────
+function generateJobNumber() {
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const yy = String(now.getFullYear()).slice(-2);
+  const prefix = mm + yy;
+  const lastJob = get(
+    "SELECT job_number FROM job_numbers WHERE prefix=? ORDER BY sequence DESC LIMIT 1",
+    [prefix]
+  );
+  const seq = lastJob ? (parseInt(lastJob.job_number.split('-')[1]) + 1) : 1;
+  const jobNum = prefix + '-' + seq;
+  runGetId('INSERT INTO job_numbers (prefix, job_number, sequence) VALUES (?,?,?)', [prefix, jobNum, seq]);
+  return jobNum;
+}
+
+// ─── CUSTOMERS ────────────────────────────────────────────────────────────────
+app.get('/api/customers', requireCustomerAccess, (req, res) => {
+  const { search, type, status } = req.query;
+  let sql = 'SELECT c.*, u.first_name || " " || u.last_name as salesperson_name FROM customers c LEFT JOIN users u ON c.assigned_salesperson_id=u.id WHERE 1=1';
+  const params = [];
+  if (search) { sql += ' AND (c.company_name LIKE ? OR c.billing_city LIKE ?)'; params.push('%'+search+'%','%'+search+'%'); }
+  if (type) { sql += ' AND c.customer_type=?'; params.push(type); }
+  if (status) { sql += ' AND c.status=?'; params.push(status); }
+  else { sql += " AND c.status='active'"; }
+  sql += ' ORDER BY c.company_name';
+  res.json(all(sql, params));
+});
+
+app.get('/api/customers/:id', requireCustomerAccess, (req, res) => {
+  const c = get('SELECT * FROM customers WHERE id=?', [req.params.id]);
+  if (!c) return res.status(404).json({ error: 'Customer not found' });
+  const sites    = all('SELECT * FROM customer_sites WHERE customer_id=? ORDER BY site_name', [req.params.id]);
+  const contacts = all('SELECT * FROM customer_contacts WHERE customer_id=? ORDER BY is_primary DESC, last_name', [req.params.id]);
+  const equipment = all('SELECT * FROM customer_equipment WHERE customer_id=? ORDER BY site_id, equipment_type', [req.params.id]);
+  const docs     = all('SELECT id,customer_id,doc_type,doc_name,file_name,file_type,file_size,notes,uploaded_at FROM partner_documents WHERE customer_id=?', [req.params.id]);
+  res.json({ ...c, sites, contacts, equipment, docs });
+});
+
+app.post('/api/customers', requireCustomerAccess, (req, res) => {
+  const {
+    company_name, customer_type, is_partner_company, qb_customer_id,
+    billing_address, billing_city, billing_state, billing_zip,
+    billing_email, billing_phone, billing_fax, credit_terms,
+    tax_exempt, tax_exempt_number, union_required, requires_certified_payroll,
+    partner_labor_rate_notes, partner_billing_hours, partner_work_order_instructions,
+    partner_checkin_instructions, partner_billing_email, partner_billing_notes,
+    internal_notes, assigned_salesperson_id
+  } = req.body;
+  if (!company_name) return res.status(400).json({ error: 'Company name is required' });
+  const id = runGetId(`INSERT INTO customers (
+    company_name,customer_type,is_partner_company,qb_customer_id,
+    billing_address,billing_city,billing_state,billing_zip,
+    billing_email,billing_phone,billing_fax,credit_terms,
+    tax_exempt,tax_exempt_number,union_required,requires_certified_payroll,
+    partner_labor_rate_notes,partner_billing_hours,partner_work_order_instructions,
+    partner_checkin_instructions,partner_billing_email,partner_billing_notes,
+    internal_notes,assigned_salesperson_id,updated_at
+  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))`,
+  [company_name,customer_type||'End User',is_partner_company?1:0,qb_customer_id||'',
+   billing_address||'',billing_city||'',billing_state||'',billing_zip||'',
+   billing_email||'',billing_phone||'',billing_fax||'',credit_terms||'Net 30',
+   tax_exempt?1:0,tax_exempt_number||'',union_required?1:0,requires_certified_payroll?1:0,
+   partner_labor_rate_notes||'',partner_billing_hours||0,partner_work_order_instructions||'',
+   partner_checkin_instructions||'',partner_billing_email||'',partner_billing_notes||'',
+   internal_notes||'',assigned_salesperson_id||0]);
+  res.json({ id });
+});
+
+app.put('/api/customers/:id', requireCustomerAccess, (req, res) => {
+  const {
+    company_name, customer_type, is_partner_company, qb_customer_id,
+    billing_address, billing_city, billing_state, billing_zip,
+    billing_email, billing_phone, billing_fax, credit_terms,
+    tax_exempt, tax_exempt_number, union_required, requires_certified_payroll,
+    partner_labor_rate_notes, partner_billing_hours, partner_work_order_instructions,
+    partner_checkin_instructions, partner_billing_email, partner_billing_notes,
+    internal_notes, assigned_salesperson_id, status
+  } = req.body;
+  run(`UPDATE customers SET
+    company_name=?,customer_type=?,is_partner_company=?,qb_customer_id=?,
+    billing_address=?,billing_city=?,billing_state=?,billing_zip=?,
+    billing_email=?,billing_phone=?,billing_fax=?,credit_terms=?,
+    tax_exempt=?,tax_exempt_number=?,union_required=?,requires_certified_payroll=?,
+    partner_labor_rate_notes=?,partner_billing_hours=?,partner_work_order_instructions=?,
+    partner_checkin_instructions=?,partner_billing_email=?,partner_billing_notes=?,
+    internal_notes=?,assigned_salesperson_id=?,status=?,updated_at=datetime('now')
+    WHERE id=?`,
+  [company_name,customer_type,is_partner_company?1:0,qb_customer_id||'',
+   billing_address||'',billing_city||'',billing_state||'',billing_zip||'',
+   billing_email||'',billing_phone||'',billing_fax||'',credit_terms||'Net 30',
+   tax_exempt?1:0,tax_exempt_number||'',union_required?1:0,requires_certified_payroll?1:0,
+   partner_labor_rate_notes||'',partner_billing_hours||0,partner_work_order_instructions||'',
+   partner_checkin_instructions||'',partner_billing_email||'',partner_billing_notes||'',
+   internal_notes||'',assigned_salesperson_id||0,status||'active',req.params.id]);
+  res.json({ ok: true });
+});
+
+app.delete('/api/customers/:id', requireAdmin, (req, res) => {
+  run("UPDATE customers SET status='inactive' WHERE id=?", [req.params.id]);
+  res.json({ ok: true });
+});
+
+// ─── SITES ────────────────────────────────────────────────────────────────────
+app.get('/api/customers/:id/sites', requireCustomerAccess, (req, res) => {
+  res.json(all('SELECT * FROM customer_sites WHERE customer_id=? AND status=? ORDER BY site_name', [req.params.id,'active']));
+});
+
+app.post('/api/customers/:id/sites', requireCustomerAccess, (req, res) => {
+  const { site_name, store_number, address, city, state, zip, site_notes, access_instructions } = req.body;
+  const id = runGetId('INSERT INTO customer_sites (customer_id,site_name,store_number,address,city,state,zip,site_notes,access_instructions) VALUES (?,?,?,?,?,?,?,?,?)',
+    [req.params.id,site_name||'',store_number||'',address||'',city||'',state||'',zip||'',site_notes||'',access_instructions||'']);
+  res.json({ id });
+});
+
+app.put('/api/customers/:cid/sites/:id', requireCustomerAccess, (req, res) => {
+  const { site_name, store_number, address, city, state, zip, site_notes, access_instructions, status } = req.body;
+  run('UPDATE customer_sites SET site_name=?,store_number=?,address=?,city=?,state=?,zip=?,site_notes=?,access_instructions=?,status=? WHERE id=? AND customer_id=?',
+    [site_name||'',store_number||'',address||'',city||'',state||'',zip||'',site_notes||'',access_instructions||'',status||'active',req.params.id,req.params.cid]);
+  res.json({ ok: true });
+});
+
+app.delete('/api/customers/:cid/sites/:id', requireAdmin, (req, res) => {
+  run("UPDATE customer_sites SET status='inactive' WHERE id=? AND customer_id=?", [req.params.id,req.params.cid]);
+  res.json({ ok: true });
+});
+
+// ─── CONTACTS ─────────────────────────────────────────────────────────────────
+app.post('/api/customers/:id/contacts', requireCustomerAccess, (req, res) => {
+  const { first_name, last_name, title, phone, phone2, email, site_id, is_primary, is_billing_contact, notes } = req.body;
+  if (!first_name) return res.status(400).json({ error: 'First name required' });
+  if (is_primary) run('UPDATE customer_contacts SET is_primary=0 WHERE customer_id=?', [req.params.id]);
+  const id = runGetId('INSERT INTO customer_contacts (customer_id,site_id,first_name,last_name,title,phone,phone2,email,is_primary,is_billing_contact,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+    [req.params.id,site_id||0,first_name,last_name||'',title||'',phone||'',phone2||'',email||'',is_primary?1:0,is_billing_contact?1:0,notes||'']);
+  res.json({ id });
+});
+
+app.put('/api/customers/:cid/contacts/:id', requireCustomerAccess, (req, res) => {
+  const { first_name, last_name, title, phone, phone2, email, site_id, is_primary, is_billing_contact, notes } = req.body;
+  if (is_primary) run('UPDATE customer_contacts SET is_primary=0 WHERE customer_id=?', [req.params.cid]);
+  run('UPDATE customer_contacts SET first_name=?,last_name=?,title=?,phone=?,phone2=?,email=?,site_id=?,is_primary=?,is_billing_contact=?,notes=? WHERE id=? AND customer_id=?',
+    [first_name,last_name||'',title||'',phone||'',phone2||'',email||'',site_id||0,is_primary?1:0,is_billing_contact?1:0,notes||'',req.params.id,req.params.cid]);
+  res.json({ ok: true });
+});
+
+app.delete('/api/customers/:cid/contacts/:id', requireAdmin, (req, res) => {
+  run('DELETE FROM customer_contacts WHERE id=? AND customer_id=?', [req.params.id,req.params.cid]);
+  res.json({ ok: true });
+});
+
+// ─── EQUIPMENT ────────────────────────────────────────────────────────────────
+app.post('/api/customers/:id/equipment', requireCustomerAccess, (req, res) => {
+  const { site_id, equipment_type, manufacturer, model, serial_number, size, install_date, warranty_expiry, condition, location_in_site, notes } = req.body;
+  const id = runGetId('INSERT INTO customer_equipment (customer_id,site_id,equipment_type,manufacturer,model,serial_number,size,install_date,warranty_expiry,condition,location_in_site,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+    [req.params.id,site_id||0,equipment_type||'',manufacturer||'',model||'',serial_number||'',size||'',install_date||'',warranty_expiry||'',condition||'',location_in_site||'',notes||'']);
+  res.json({ id });
+});
+
+app.put('/api/customers/:cid/equipment/:id', requireCustomerAccess, (req, res) => {
+  const { site_id, equipment_type, manufacturer, model, serial_number, size, install_date, last_service_date, warranty_expiry, condition, location_in_site, notes } = req.body;
+  run('UPDATE customer_equipment SET site_id=?,equipment_type=?,manufacturer=?,model=?,serial_number=?,size=?,install_date=?,last_service_date=?,warranty_expiry=?,condition=?,location_in_site=?,notes=? WHERE id=? AND customer_id=?',
+    [site_id||0,equipment_type||'',manufacturer||'',model||'',serial_number||'',size||'',install_date||'',last_service_date||'',warranty_expiry||'',condition||'',location_in_site||'',notes||'',req.params.id,req.params.cid]);
+  res.json({ ok: true });
+});
+
+app.delete('/api/customers/:cid/equipment/:id', requireAdmin, (req, res) => {
+  run('DELETE FROM customer_equipment WHERE id=? AND customer_id=?', [req.params.id,req.params.cid]);
+  res.json({ ok: true });
+});
+
+// ─── PARTNER DOCUMENTS ────────────────────────────────────────────────────────
+app.post('/api/customers/:id/docs', requireCustomerAccess, (req, res) => {
+  const { doc_type, doc_name, file_name, file_data, file_type, file_size, notes } = req.body;
+  if (!doc_name || !file_data) return res.status(400).json({ error: 'Missing doc name or file' });
+  const id = runGetId('INSERT INTO partner_documents (customer_id,doc_type,doc_name,file_name,file_data,file_type,file_size,notes) VALUES (?,?,?,?,?,?,?,?)',
+    [req.params.id,doc_type||'',doc_name,file_name||'',file_data,file_type||'',file_size||0,notes||'']);
+  res.json({ id });
+});
+
+app.get('/api/customers/:id/docs/:docId/download', requireCustomerAccess, (req, res) => {
+  const doc = get('SELECT * FROM partner_documents WHERE id=? AND customer_id=?', [req.params.docId,req.params.id]);
+  if (!doc) return res.status(404).json({ error: 'Not found' });
+  const buf = Buffer.from(doc.file_data, 'base64');
+  res.setHeader('Content-Type', doc.file_type || 'application/octet-stream');
+  res.setHeader('Content-Disposition', 'attachment; filename="' + doc.file_name + '"');
+  res.send(buf);
+});
+
+app.delete('/api/customers/:cid/docs/:id', requireAdmin, (req, res) => {
+  run('DELETE FROM partner_documents WHERE id=? AND customer_id=?', [req.params.id,req.params.cid]);
+  res.json({ ok: true });
+});
+
+// ─── QB DESKTOP IIF EXPORT ────────────────────────────────────────────────────
+app.get('/api/customers/export/qb-iif', requireAdmin, (req, res) => {
+  const customers = all("SELECT * FROM customers WHERE status='active' ORDER BY company_name");
+  let iif = '!CUST	NAME	REFNUM	TIMESTAMP	BSTYPE	ACCNUM	CCARDNUM	ALTDPHONE	EMAIL	CONT1	CONT2	CONT3	ADDR1	ADDR2	ADDR3	ADDR4	ADDR5	CUST	JOBSTATUS	NOTES	TERMS
+';
+  customers.forEach(c => {
+    iif += `CUST	${c.company_name}	${c.qb_customer_id||''}			${c.qb_customer_id||''}		${c.billing_phone||''}	${c.billing_email||''}				${c.billing_address||''}	${c.billing_city||''}${c.billing_city&&c.billing_state?', ':''}	${c.billing_state||''}	${c.billing_zip||''}		TRUE		${c.internal_notes||''}	${c.credit_terms||'Net 30'}
+`;
+  });
+  // Log the sync
+  runGetId('INSERT INTO qb_sync_log (sync_type,records_synced,status,notes) VALUES (?,?,?,?)',
+    ['customer_export', customers.length, 'success', 'Manual IIF export']);
+  res.setHeader('Content-Type', 'text/plain');
+  res.setHeader('Content-Disposition', 'attachment; filename="KVM_Customers_QB_' + new Date().toISOString().split('T')[0] + '.iif"');
+  res.send(iif);
+});
+
+// Daily QB sync at 5 PM — generate IIF and email to admins
+cron.schedule('0 17 * * 1-5', async () => {
+  console.log('  Running daily QB customer sync...');
+  const changed = all("SELECT * FROM customers WHERE status='active' AND updated_at > datetime('now','-1 day') ORDER BY company_name");
+  if (!changed.length) { console.log('  No customer changes today'); return; }
+
+  const settings = getSettings();
+  if (!settings.smtp_host || !settings.smtp_user || !settings.smtp_pass) {
+    runGetId('INSERT INTO qb_sync_log (sync_type,records_synced,status,notes) VALUES (?,?,?,?)',
+      ['auto_sync', changed.length, 'skipped', 'Email not configured — download IIF manually from portal']);
+    return;
+  }
+
+  // Build IIF content for changed customers only
+  let iif = '!CUST\tNAME\tREFNUM\tTIMESTAMP\tBSTYPE\tACCNUM\tCCARDNUM\tALTDPHONE\tEMAIL\tCONT1\tCONT2\tCONT3\tADDR1\tADDR2\tADDR3\tADDR4\tADDR5\tCUST\tJOBSTATUS\tNOTES\tTERMS\n';
+  changed.forEach(c => {
+    iif += 'CUST\t' + [c.company_name, c.qb_customer_id||'', '', '', '', c.qb_customer_id||'', '', c.billing_phone||'', c.billing_email||'', '', '', '',
+      c.billing_address||'', (c.billing_city&&c.billing_state)?c.billing_city+', ':c.billing_city||'', c.billing_state||'', c.billing_zip||'', '',
+      'TRUE', '', c.internal_notes||'', c.credit_terms||'Net 30'].join('\t') + '\n';
+  });
+
+  const adminEmails = all("SELECT email FROM users WHERE (is_admin=1 OR role_type='manager') AND email!=''").map(u=>u.email);
+  const uniqueEmails = [...new Set(adminEmails)];
+  if (!uniqueEmails.length) return;
+
+  try {
+    const transporter = nodemailer.createTransport({ host:settings.smtp_host, port:parseInt(settings.smtp_port)||587, secure:false, auth:{user:settings.smtp_user, pass:settings.smtp_pass}, tls:{rejectUnauthorized:false} });
+    const dateStr = new Date().toISOString().split('T')[0];
+    await transporter.sendMail({
+      from: '"KVM Door Systems" <' + settings.smtp_user + '>',
+      to: uniqueEmails.join(','),
+      subject: 'Daily QB Customer Sync — ' + changed.length + ' update' + (changed.length!==1?'s':'') + ' — ' + dateStr,
+      html: '<div style="font-family:Arial,sans-serif"><div style="background:#0d0d0d;padding:20px;border-bottom:3px solid #F5A623"><span style="color:#fff;font-size:18px;font-weight:bold;letter-spacing:3px">KVM DOOR SYSTEMS</span></div><div style="padding:24px"><h2 style="color:#F5A623">QuickBooks Daily Sync</h2><p>' + changed.length + ' customer record' + (changed.length!==1?'s were':'was') + ' updated today. The IIF file is attached.</p><p><strong>To import:</strong> Open QuickBooks Desktop → File → Utilities → Import → IIF Files → select the attached file.</p><hr/><ul>' + changed.map(c => '<li>' + c.company_name + (c.qb_customer_id?' (QB: '+c.qb_customer_id+')':'') + '</li>').join('') + '</ul></div></div>',
+      attachments: [{ filename: 'KVM_QB_Sync_' + dateStr + '.iif', content: iif, contentType: 'text/plain' }]
+    });
+    runGetId('INSERT INTO qb_sync_log (sync_type,records_synced,status,notes) VALUES (?,?,?,?)',
+      ['auto_sync', changed.length, 'success', 'IIF emailed to ' + uniqueEmails.length + ' recipient(s)']);
+    console.log('  QB sync IIF emailed:', changed.length, 'customers to', uniqueEmails.join(', '));
+  } catch(e) {
+    runGetId('INSERT INTO qb_sync_log (sync_type,records_synced,status,notes) VALUES (?,?,?,?)',
+      ['auto_sync', changed.length, 'error', e.message]);
+    console.error('  QB sync email error:', e.message);
+  }
+}, { timezone: 'America/Detroit' });
+
+// QB sync status
+app.get('/api/qb/sync-log', requireAdmin, (req, res) => {
+  res.json(all('SELECT * FROM qb_sync_log ORDER BY created_at DESC LIMIT 30'));
+});
+
+// Search customers (for job/quote autocomplete)
+app.get('/api/customers/search', requireCustomerAccess, (req, res) => {
+  const q = req.query.q || '';
+  const results = all("SELECT id, company_name, customer_type, billing_city, is_partner_company FROM customers WHERE company_name LIKE ? AND status='active' ORDER BY company_name LIMIT 20", ['%'+q+'%']);
+  res.json(results);
 });
 
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));

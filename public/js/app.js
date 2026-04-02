@@ -74,6 +74,11 @@ function setupUI() {
   if(u.is_admin){
     $('adminSection').style.display='block';
     ['btnNewAnn','btnNewNews','btnNewOncall','btnAutoSchedule','btnLoadSchedule','btnUploadPolicy'].forEach(id=>{ const el=$(id); if(el) el.style.display='inline-flex'; });
+  // Managers can access Manage Employees (limited) and Attendance
+  if (currentUser.role_type === 'manager' || currentUser.is_admin) {
+    const adminSection = $('adminSection');
+    if (adminSection) adminSection.style.display = 'block';
+  }
   const allDocsSection = $('allDocsSection');
   if (allDocsSection) allDocsSection.style.display = 'block';
     updatePtoBadge();
@@ -97,7 +102,7 @@ function showPage(name, el) {
   if(pg) pg.classList.add('active');
   if(el) el.classList.add('active');
   $('sidebar').classList.remove('open');
-  const map={dashboard:renderDashboard,announcements:renderAnnouncements,news:renderNews,oncall:renderOncall,directory:renderDirectory,pto:renderPto,ptoCalendar:renderPtoCalendar,myDocs:renderMyDocs,policies:renderPolicies,timeclock:initTimeclock,adminTimeclock:loadAdminTimecards,adminAlerts:renderAlerts,adminAttendance:initAdminAttendance,adminUsers:renderAdminUsers,adminPto:renderAdminPto,adminBlackout:renderBlackouts,adminRotation:renderRotation,adminSettings:loadSettings};
+  const map={dashboard:renderDashboard,customers:loadCustomers,customerDetail:loadCustomerDetail,announcements:renderAnnouncements,news:renderNews,oncall:renderOncall,directory:renderDirectory,pto:renderPto,ptoCalendar:renderPtoCalendar,myDocs:renderMyDocs,policies:renderPolicies,timeclock:initTimeclock,adminTimeclock:loadAdminTimecards,adminAlerts:renderAlerts,adminAttendance:initAdminAttendance,adminUsers:renderAdminUsers,adminPto:renderAdminPto,adminBlackout:renderBlackouts,adminRotation:renderRotation,adminSettings:loadSettings};
   if(map[name]) map[name]();
 }
 
@@ -650,7 +655,7 @@ async function saveUser() {
   const username=$('addUsername').value.trim(),password=$('addPass').value;
   if(!first_name||!username||!password) return showToast('Fill in required fields.','error');
   try {
-    await api('POST','/api/users',{username,password,first_name,last_name,role:$('addRole').value,department:$('addDept').value,oncall_dept:$('addOncallDept').value,oncall_role:$('addOncallRole').value,phone:$('addPhone').value,email:$('addEmail').value,is_admin:$('addIsAdmin').value==='true',pto_total:parseInt($('addPtoTotal').value)||10,pto_left:parseInt($('addPtoLeft').value)||10,hire_date:$('addHireDate').value||'',avatar_color:avatarBg(first_name+last_name)});
+    await api('POST','/api/users',{username,password,first_name,last_name,role:$('addRole').value,department:$('addDept').value,oncall_dept:$('addOncallDept').value,oncall_role:$('addOncallRole').value,phone:$('addPhone').value,email:$('addEmail').value,is_admin:$('addIsAdmin').value==='true',role_type:$('addRoleType')?$('addRoleType').value:'technician',pto_total:parseInt($('addPtoTotal').value)||10,pto_left:parseInt($('addPtoLeft').value)||10,hire_date:$('addHireDate').value||'',avatar_color:avatarBg(first_name+last_name)});
     closeModal('addUserModal'); ['addFirst','addLast','addUsername','addPass','addRole','addDept','addPhone','addEmail','addHireDate'].forEach(id=>$(id).value='');
     allUsers=[]; showToast('Employee added!','success'); renderAdminUsers();
   } catch(e){ showToast(e.message,'error'); }
@@ -767,12 +772,24 @@ async function openEditUser(id) {
     if (oncallRoleEl.options[i].value === (u.oncall_role || '')) { oncallRoleEl.selectedIndex = i; break; }
   }
   $('editIsAdmin').value = u.is_admin ? 'true' : 'false';
+  if ($('editRoleType')) $('editRoleType').value = u.role_type || 'technician';
+
+  // Lock admin-only fields for managers
+  const limitedMode = !currentUser.is_admin && currentUser.role_type === 'manager';
+  ['editUsername','editIsAdmin','editPtoTotal','editPtoLeft','editHireDate'].forEach(fid => {
+    const el = $(fid);
+    if (el) { el.disabled = limitedMode; el.style.opacity = limitedMode ? '0.4' : '1'; el.title = limitedMode ? 'Admin only' : ''; }
+  });
+  const adminNote = $('editAdminOnlyNote');
+  if (adminNote) adminNote.style.display = limitedMode ? 'block' : 'none';
 
   openModal('editUserModal');
 }
 
 async function saveEditUser() {
   const id = $('editUserId').value;
+  const isAdmin = currentUser.is_admin;
+  const limitedMode = !isAdmin && currentUser.role_type === 'manager';
   const first_name = $('editFirst').value.trim();
   const username   = $('editUsername').value.trim();
   if (!first_name || !username) return showToast('First name and username are required.', 'error');
@@ -781,6 +798,7 @@ async function saveEditUser() {
     await api('PUT', '/api/users/' + id, {
       first_name,
       last_name:    $('editLast').value.trim(),
+      role_type:    $('editRoleType') ? $('editRoleType').value : 'technician',
       username,
       role:         $('editRole').value,
       department:   $('editDept').value,
@@ -2207,4 +2225,527 @@ async function submitSelfCallin() {
     resultEl.textContent = '✗ ' + e.message;
     resultEl.style.display = 'block';
   }
+}
+
+// ═══ CUSTOMER DATABASE ════════════════════════════════════════════════════════
+let currentCustomerId = null;
+let currentCustomerData = null;
+let custTabActive = 'overview';
+let custSitesList = [];
+
+const CUST_TYPES = ['General Contractor','Property Manager','End User / Building Owner','Municipality / Government','Industrial','Retail','Partner Door Company'];
+const CUST_TYPE_ICONS = {
+  'General Contractor':'🏗️', 'Property Manager':'🏢', 'End User / Building Owner':'🏭',
+  'Municipality / Government':'🏛️', 'Industrial':'⚙️', 'Retail':'🛒', 'Partner Door Company':'🤝'
+};
+
+// ─── CUSTOMER LIST ────────────────────────────────────────────────────────────
+async function loadCustomers() {
+  const search  = $('custSearch') ? $('custSearch').value : '';
+  const type    = $('custTypeFilter') ? $('custTypeFilter').value : '';
+  const partner = $('custPartnerFilter') && $('custPartnerFilter').checked;
+  const el = $('customersList');
+  if (!el) return;
+  el.innerHTML = '<div class="empty-state">Loading...</div>';
+  try {
+    let url = '/api/customers?';
+    if (search) url += 'search=' + encodeURIComponent(search) + '&';
+    if (type) url += 'type=' + encodeURIComponent(type) + '&';
+    const customers = await api('GET', url.replace(/[?&]$/, ''));
+    const filtered = partner ? customers.filter(c => c.is_partner_company) : customers;
+
+    if (!filtered.length) {
+      el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🏢</div>No customers found. Add your first customer to get started.</div>';
+      return;
+    }
+
+    el.innerHTML = `<div class="table-wrap"><table class="data-table">
+      <thead><tr>
+        <th>Company</th><th>Type</th><th>City</th><th>Phone</th>
+        <th>Terms</th><th>Salesperson</th><th>Flags</th><th></th>
+      </tr></thead>
+      <tbody>${filtered.map(c => `<tr style="cursor:pointer" onclick="openCustomerDetail(${c.id})">
+        <td>
+          <div style="font-weight:600;color:var(--white)">${c.company_name}</div>
+          ${c.qb_customer_id ? `<div style="font-size:10px;color:var(--text-faint)">QB: ${c.qb_customer_id}</div>` : ''}
+        </td>
+        <td><span style="font-size:12px">${CUST_TYPE_ICONS[c.customer_type]||'🏢'} ${c.customer_type}</span></td>
+        <td style="font-size:13px;color:var(--text-muted)">${c.billing_city||'—'}, ${c.billing_state||''}</td>
+        <td style="font-size:13px">${c.billing_phone||'—'}</td>
+        <td><span class="badge badge-gray" style="font-size:10px">${c.credit_terms||'Net 30'}</span></td>
+        <td style="font-size:12px;color:var(--text-muted)">${c.salesperson_name||'—'}</td>
+        <td style="font-size:18px">${c.is_partner_company ? '🤝' : ''}${c.union_required ? '👷' : ''}${c.tax_exempt ? '📋' : ''}</td>
+        <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openCustomerDetail(${c.id})">View &#8250;</button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    <div style="font-size:12px;color:var(--text-faint);padding:.5rem 0">${filtered.length} customer${filtered.length!==1?'s':''}</div>`;
+  } catch(e) { el.innerHTML = '<div class="empty-state">Error loading customers.</div>'; console.error(e); }
+}
+
+// ─── CUSTOMER DETAIL ──────────────────────────────────────────────────────────
+async function openCustomerDetail(id) {
+  currentCustomerId = id;
+  custTabActive = 'overview';
+  showPage('customerDetail', null);
+}
+
+async function loadCustomerDetail() {
+  if (!currentCustomerId) return;
+  try {
+    currentCustomerData = await api('GET', '/api/customers/' + currentCustomerId);
+    const c = currentCustomerData;
+    custSitesList = c.sites || [];
+
+    $('custDetailName').textContent = c.company_name;
+    $('custDetailType').textContent = (CUST_TYPE_ICONS[c.customer_type]||'') + ' ' + c.customer_type;
+
+    // Partner banner
+    const banner = $('partnerBanner');
+    if (c.is_partner_company) {
+      banner.style.display = 'block';
+      banner.className = 'alert alert-warning';
+      banner.innerHTML = `<strong>⚠️ Partner Door Company</strong> — Do not discuss pricing with their end customers.
+        ${c.partner_billing_hours ? ` Bill within <strong>${c.partner_billing_hours} hours</strong> of job completion.` : ''}
+        ${c.partner_billing_email ? ` Submit to: <strong>${c.partner_billing_email}</strong>` : ''}`;
+    } else {
+      banner.style.display = 'none';
+    }
+
+    setCustTab(custTabActive, null);
+  } catch(e) { console.error(e); }
+}
+
+function setCustTab(tab, el) {
+  custTabActive = tab;
+  document.querySelectorAll('#page-customerDetail .tab-bar .tab').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  else {
+    const tabs = document.querySelectorAll('#page-customerDetail .tab-bar .tab');
+    const tabNames = ['overview','sites','contacts','equipment','docs'];
+    const idx = tabNames.indexOf(tab);
+    if (tabs[idx]) tabs[idx].classList.add('active');
+  }
+  renderCustTab();
+}
+
+function renderCustTab() {
+  const c = currentCustomerData;
+  if (!c) return;
+  const el = $('custDetailContent');
+
+  if (custTabActive === 'overview') {
+    el.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+      <div class="card">
+        <div class="card-header"><span class="card-title">Billing Info</span></div>
+        <div class="info-grid">
+          <div class="info-row"><span class="info-label">Address</span><span class="info-val">${[c.billing_address,c.billing_city,c.billing_state,c.billing_zip].filter(Boolean).join(', ')||'—'}</span></div>
+          <div class="info-row"><span class="info-label">Phone</span><span class="info-val">${c.billing_phone||'—'}</span></div>
+          <div class="info-row"><span class="info-label">Fax</span><span class="info-val">${c.billing_fax||'—'}</span></div>
+          <div class="info-row"><span class="info-label">Billing Email</span><span class="info-val">${c.billing_email||'—'}</span></div>
+          <div class="info-row"><span class="info-label">Terms</span><span class="info-val">${c.credit_terms||'Net 30'}</span></div>
+          <div class="info-row"><span class="info-label">QB ID</span><span class="info-val">${c.qb_customer_id||'—'}</span></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Account Settings</span></div>
+        <div class="info-grid">
+          <div class="info-row"><span class="info-label">Type</span><span class="info-val">${c.customer_type}</span></div>
+          <div class="info-row"><span class="info-label">Tax Exempt</span><span class="info-val">${c.tax_exempt ? '✓ Yes — #'+c.tax_exempt_number : 'No'}</span></div>
+          <div class="info-row"><span class="info-label">Union Required</span><span class="info-val">${c.union_required ? '✓ Yes' : 'No'}</span></div>
+          <div class="info-row"><span class="info-label">Cert. Payroll</span><span class="info-val">${c.requires_certified_payroll ? '✓ Required' : 'No'}</span></div>
+          <div class="info-row"><span class="info-label">Sites</span><span class="info-val">${(c.sites||[]).length} location${(c.sites||[]).length!==1?'s':''}</span></div>
+          <div class="info-row"><span class="info-label">Contacts</span><span class="info-val">${(c.contacts||[]).length}</span></div>
+        </div>
+      </div>
+      ${c.is_partner_company ? `<div class="card" style="grid-column:1/-1">
+        <div class="card-header"><span class="card-title" style="color:var(--amber)">🤝 Partner Company Requirements</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+          ${c.partner_labor_rate_notes ? `<div><div class="info-label" style="margin-bottom:4px">Labor Rates</div><div style="font-size:13px;white-space:pre-line">${c.partner_labor_rate_notes}</div></div>` : ''}
+          ${c.partner_checkin_instructions ? `<div><div class="info-label" style="margin-bottom:4px">Check-In Instructions (shown to tech)</div><div style="font-size:13px;white-space:pre-line;color:var(--amber)">${c.partner_checkin_instructions}</div></div>` : ''}
+          ${c.partner_work_order_instructions ? `<div style="grid-column:1/-1"><div class="info-label" style="margin-bottom:4px">Work Order Instructions</div><div style="font-size:13px;white-space:pre-line">${c.partner_work_order_instructions}</div></div>` : ''}
+          ${c.partner_billing_notes ? `<div style="grid-column:1/-1"><div class="info-label" style="margin-bottom:4px">Billing Requirements</div><div style="font-size:13px;white-space:pre-line">${c.partner_billing_notes}</div></div>` : ''}
+        </div>
+      </div>` : ''}
+      ${c.internal_notes ? `<div class="card" style="grid-column:1/-1">
+        <div class="card-header"><span class="card-title">Internal Notes</span></div>
+        <div style="font-size:13px;white-space:pre-line;color:var(--text-muted)">${c.internal_notes}</div>
+      </div>` : ''}
+    </div>`;
+
+  } else if (custTabActive === 'sites') {
+    const sites = c.sites || [];
+    el.innerHTML = `<div style="display:flex;justify-content:flex-end;margin-bottom:.75rem">
+      <button class="btn btn-primary" onclick="openAddSite()">+ Add Site</button>
+    </div>
+    ${sites.length ? sites.map(s => `<div class="card" style="margin-bottom:.75rem">
+      <div class="card-header">
+        <div>
+          <div style="font-family:Oswald,sans-serif;font-size:15px;font-weight:600;color:var(--white)">${s.site_name||'Unnamed Site'}${s.store_number?' <span style="color:var(--amber);font-size:13px">#'+s.store_number+'</span>':''}</div>
+          <div style="font-size:12px;color:var(--text-muted)">${[s.address,s.city,s.state,s.zip].filter(Boolean).join(', ')||'No address'}</div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" onclick="openEditSite(${s.id})">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteSite(${s.id})">✕</button>
+        </div>
+      </div>
+      ${s.site_notes||s.access_instructions ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-top:.5rem">
+        ${s.site_notes?`<div><div class="info-label">Notes</div><div style="font-size:12px;color:var(--text-muted)">${s.site_notes}</div></div>`:''}
+        ${s.access_instructions?`<div><div class="info-label">Access</div><div style="font-size:12px;color:var(--amber)">${s.access_instructions}</div></div>`:''}
+      </div>` : ''}
+    </div>`).join('') : '<div class="empty-state">No sites added yet. Click "+ Add Site" to add locations for this customer.</div>'}`;
+
+  } else if (custTabActive === 'contacts') {
+    const contacts = c.contacts || [];
+    el.innerHTML = `<div style="display:flex;justify-content:flex-end;margin-bottom:.75rem">
+      <button class="btn btn-primary" onclick="openAddContact()">+ Add Contact</button>
+    </div>
+    <div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Name</th><th>Title</th><th>Phone</th><th>Email</th><th>Site</th><th>Role</th><th></th></tr></thead>
+      <tbody>${contacts.length ? contacts.map(ct => {
+        const site = custSitesList.find(s => s.id === ct.site_id);
+        return `<tr>
+          <td><strong>${ct.first_name} ${ct.last_name||''}</strong></td>
+          <td style="font-size:12px;color:var(--text-muted)">${ct.title||'—'}</td>
+          <td>${ct.phone||'—'}</td>
+          <td style="font-size:12px">${ct.email||'—'}</td>
+          <td style="font-size:12px;color:var(--text-muted)">${site?site.site_name:'All locations'}</td>
+          <td>${ct.is_primary?'<span class="badge badge-amber">Primary</span>':''}${ct.is_billing_contact?'<span class="badge badge-blue">Billing</span>':''}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="deleteContact(${ct.id})">✕</button></td>
+        </tr>`;
+      }).join('') : '<tr><td colspan="7" style="text-align:center;color:var(--text-faint)">No contacts yet</td></tr>'}</tbody>
+    </table></div>`;
+
+  } else if (custTabActive === 'equipment') {
+    const equip = c.equipment || [];
+    const byType = {};
+    equip.forEach(e => { if (!byType[e.equipment_type]) byType[e.equipment_type] = []; byType[e.equipment_type].push(e); });
+    el.innerHTML = `<div style="display:flex;justify-content:flex-end;margin-bottom:.75rem">
+      <button class="btn btn-primary" onclick="openAddEquipment()">+ Add Equipment</button>
+    </div>
+    ${Object.keys(byType).length ? Object.entries(byType).map(([type,items]) => `
+      <div style="margin-bottom:1rem">
+        <div class="dept-header" style="margin-bottom:.5rem"><h3>${type}</h3><span style="font-size:11px;color:var(--text-muted)">${items.length} unit${items.length!==1?'s':''}</span></div>
+        <div class="table-wrap"><table class="data-table">
+          <thead><tr><th>Manufacturer</th><th>Model</th><th>Serial #</th><th>Size</th><th>Site</th><th>Condition</th><th>Warranty</th><th></th></tr></thead>
+          <tbody>${items.map(e => {
+            const site = custSitesList.find(s => s.id === e.site_id);
+            const warnExpiry = e.warranty_expiry && new Date(e.warranty_expiry) < new Date();
+            return `<tr>
+              <td>${e.manufacturer||'—'}</td>
+              <td>${e.model||'—'}</td>
+              <td style="font-size:12px;font-family:monospace">${e.serial_number||'—'}</td>
+              <td>${e.size||'—'}</td>
+              <td style="font-size:12px;color:var(--text-muted)">${e.location_in_site||site&&site.site_name||'—'}</td>
+              <td><span class="badge ${e.condition==='Good'?'badge-green':e.condition==='Poor'?'badge-red':'badge-amber'}">${e.condition||'Unknown'}</span></td>
+              <td>${e.warranty_expiry?`<span style="color:${warnExpiry?'var(--danger)':'var(--text-muted)'};font-size:12px">${fmtDate(e.warranty_expiry)}</span>`:'—'}</td>
+              <td><button class="btn btn-danger btn-sm" onclick="deleteEquipment(${e.id})">✕</button></td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>
+      </div>`).join('') : '<div class="empty-state">No equipment on file.</div>'}`;
+
+  } else if (custTabActive === 'docs') {
+    const docs = c.docs || [];
+    const docTypeLabels = { work_order_form:'Work Order Form', pm_checklist:'PM Checklist', billing_instructions:'Billing Instructions', rate_sheet:'Rate Sheet', other:'Other' };
+    el.innerHTML = `<div style="display:flex;justify-content:flex-end;margin-bottom:.75rem">
+      <button class="btn btn-primary" onclick="openModal('partnerDocModal')">+ Upload Document</button>
+    </div>
+    ${docs.length ? `<div class="doc-grid">${docs.map(d => `
+      <div class="doc-card">
+        <div class="doc-card-icon">📄</div>
+        <div class="doc-card-info">
+          <div class="doc-card-name">${d.doc_name}</div>
+          <div class="doc-card-meta">
+            <span class="badge badge-amber" style="font-size:9px">${docTypeLabels[d.doc_type]||d.doc_type}</span>
+            <span style="font-size:11px;color:var(--text-faint)">${d.file_name} &middot; ${fmtFileSize(d.file_size)}</span>
+          </div>
+          ${d.notes?`<div style="font-size:11px;color:var(--text-muted)">${d.notes}</div>`:''}
+        </div>
+        <div class="doc-card-actions">
+          <a href="/api/customers/${currentCustomerId}/docs/${d.id}/download" class="btn btn-ghost btn-sm" target="_blank">&#8595; Download</a>
+          <button class="btn btn-danger btn-sm" onclick="deletePartnerDoc(${d.id})">Delete</button>
+        </div>
+      </div>`).join('')}</div>` : '<div class="empty-state">No documents uploaded. Upload work order forms, PM checklists, and rate sheets for this partner.</div>'}`;
+  }
+}
+
+// ─── CUSTOMER CRUD ────────────────────────────────────────────────────────────
+async function openAddCustomer() {
+  if (!allUsers.length) allUsers = await api('GET', '/api/users');
+  $('custModalId').value = '';
+  $('customerModalTitle').textContent = 'Add Customer';
+  ['custName','custQbId','custBillingAddr','custBillingCity','custBillingState','custBillingZip','custBillingPhone','custBillingFax','custBillingEmail','custInternalNotes','custTaxExemptNum'].forEach(id => { const el=$(id); if(el) el.value=''; });
+  ['custTaxExempt','custUnion','custCertPayroll'].forEach(id => { const el=$(id); if(el) el.checked=false; });
+  $('custType').value = 'General Contractor';
+  $('custTerms').value = 'Net 30';
+  // Populate salesperson dropdown
+  const spEl = $('custSalesperson');
+  spEl.innerHTML = '<option value="0">— Unassigned —</option>' + allUsers.filter(u=>!u.is_admin).map(u=>`<option value="${u.id}">${displayName(u)}</option>`).join('');
+  togglePartnerFields();
+  openModal('customerModal');
+}
+
+function openEditCustomer() {
+  const c = currentCustomerData;
+  if (!c) return;
+  $('custModalId').value = c.id;
+  $('customerModalTitle').textContent = 'Edit Customer';
+  $('custName').value = c.company_name || '';
+  $('custQbId').value = c.qb_customer_id || '';
+  $('custType').value = c.customer_type || 'General Contractor';
+  $('custTerms').value = c.credit_terms || 'Net 30';
+  $('custBillingAddr').value = c.billing_address || '';
+  $('custBillingCity').value = c.billing_city || '';
+  $('custBillingState').value = c.billing_state || '';
+  $('custBillingZip').value = c.billing_zip || '';
+  $('custBillingPhone').value = c.billing_phone || '';
+  $('custBillingFax').value = c.billing_fax || '';
+  $('custBillingEmail').value = c.billing_email || '';
+  $('custInternalNotes').value = c.internal_notes || '';
+  $('custTaxExempt').checked = !!c.tax_exempt;
+  $('custTaxExemptNum').value = c.tax_exempt_number || '';
+  $('custUnion').checked = !!c.union_required;
+  $('custCertPayroll').checked = !!c.requires_certified_payroll;
+  // Partner fields
+  $('custPartnerLaborNotes').value = c.partner_labor_rate_notes || '';
+  $('custPartnerBillingHours').value = c.partner_billing_hours || '48';
+  $('custPartnerCheckin').value = c.partner_checkin_instructions || '';
+  $('custPartnerWOInstructions').value = c.partner_work_order_instructions || '';
+  $('custPartnerBillingNotes').value = c.partner_billing_notes || '';
+  $('custPartnerBillingEmail').value = c.partner_billing_email || '';
+  const spEl = $('custSalesperson');
+  if (spEl) spEl.value = c.assigned_salesperson_id || 0;
+  togglePartnerFields();
+  openModal('customerModal');
+}
+
+function togglePartnerFields() {
+  const isPartner = $('custType').value === 'Partner Door Company';
+  $('partnerFields').style.display = isPartner ? 'block' : 'none';
+}
+
+async function saveCustomer() {
+  const id = $('custModalId').value;
+  const payload = {
+    company_name: $('custName').value.trim(),
+    customer_type: $('custType').value,
+    is_partner_company: $('custType').value === 'Partner Door Company',
+    qb_customer_id: $('custQbId').value.trim(),
+    credit_terms: $('custTerms').value,
+    billing_address: $('custBillingAddr').value,
+    billing_city: $('custBillingCity').value,
+    billing_state: $('custBillingState').value.toUpperCase(),
+    billing_zip: $('custBillingZip').value,
+    billing_phone: $('custBillingPhone').value,
+    billing_fax: $('custBillingFax').value,
+    billing_email: $('custBillingEmail').value,
+    tax_exempt: $('custTaxExempt').checked,
+    tax_exempt_number: $('custTaxExemptNum').value,
+    union_required: $('custUnion').checked,
+    requires_certified_payroll: $('custCertPayroll').checked,
+    partner_labor_rate_notes: $('custPartnerLaborNotes').value,
+    partner_billing_hours: parseInt($('custPartnerBillingHours').value) || 48,
+    partner_checkin_instructions: $('custPartnerCheckin').value,
+    partner_work_order_instructions: $('custPartnerWOInstructions').value,
+    partner_billing_notes: $('custPartnerBillingNotes').value,
+    partner_billing_email: $('custPartnerBillingEmail').value,
+    internal_notes: $('custInternalNotes').value,
+    assigned_salesperson_id: parseInt($('custSalesperson').value) || 0,
+    status: 'active'
+  };
+  if (!payload.company_name) return showToast('Company name is required.', 'error');
+  try {
+    if (id) {
+      await api('PUT', '/api/customers/' + id, payload);
+      showToast('Customer updated!', 'success');
+      closeModal('customerModal');
+      currentCustomerData = null;
+      await loadCustomerDetail();
+    } else {
+      const r = await api('POST', '/api/customers', payload);
+      showToast('Customer added!', 'success');
+      closeModal('customerModal');
+      openCustomerDetail(r.id);
+    }
+    loadCustomers();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+// ─── SITES ────────────────────────────────────────────────────────────────────
+function openAddSite() {
+  $('siteModalId').value = '';
+  $('siteModalTitle').textContent = 'Add Site';
+  ['siteName','siteStoreNum','siteAddr','siteCity','siteState','siteZip','siteNotes','siteAccess'].forEach(id => { const el=$(id); if(el) el.value=''; });
+  openModal('siteModal');
+}
+
+function openEditSite(siteId) {
+  const s = custSitesList.find(x => x.id === siteId);
+  if (!s) return;
+  $('siteModalId').value = s.id;
+  $('siteModalTitle').textContent = 'Edit Site';
+  $('siteName').value = s.site_name || '';
+  $('siteStoreNum').value = s.store_number || '';
+  $('siteAddr').value = s.address || '';
+  $('siteCity').value = s.city || '';
+  $('siteState').value = s.state || '';
+  $('siteZip').value = s.zip || '';
+  $('siteNotes').value = s.site_notes || '';
+  $('siteAccess').value = s.access_instructions || '';
+  openModal('siteModal');
+}
+
+async function saveSite() {
+  const id = $('siteModalId').value;
+  const payload = {
+    site_name: $('siteName').value.trim(),
+    store_number: $('siteStoreNum').value.trim(),
+    address: $('siteAddr').value,
+    city: $('siteCity').value,
+    state: $('siteState').value.toUpperCase(),
+    zip: $('siteZip').value,
+    site_notes: $('siteNotes').value,
+    access_instructions: $('siteAccess').value
+  };
+  try {
+    if (id) await api('PUT', '/api/customers/' + currentCustomerId + '/sites/' + id, payload);
+    else await api('POST', '/api/customers/' + currentCustomerId + '/sites', payload);
+    closeModal('siteModal');
+    showToast('Site saved!', 'success');
+    currentCustomerData = null;
+    await loadCustomerDetail();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function deleteSite(id) {
+  if (!confirm('Remove this site?')) return;
+  await api('DELETE', '/api/customers/' + currentCustomerId + '/sites/' + id);
+  currentCustomerData = null;
+  await loadCustomerDetail();
+}
+
+// ─── CONTACTS ─────────────────────────────────────────────────────────────────
+function openAddContact() {
+  $('contactModalId').value = '';
+  $('contactModalTitle').textContent = 'Add Contact';
+  ['contactFirst','contactLast','contactTitle','contactPhone','contactPhone2','contactEmail','contactNotes'].forEach(id => { const el=$(id); if(el) el.value=''; });
+  $('contactPrimary').checked = false;
+  $('contactBilling').checked = false;
+  const siteEl = $('contactSite');
+  siteEl.innerHTML = '<option value="0">— All locations (corporate contact) —</option>' +
+    custSitesList.map(s => `<option value="${s.id}">${s.site_name}</option>`).join('');
+  openModal('contactModal');
+}
+
+async function saveContact() {
+  const id = $('contactModalId').value;
+  const payload = {
+    first_name: $('contactFirst').value.trim(),
+    last_name: $('contactLast').value.trim(),
+    title: $('contactTitle').value,
+    phone: $('contactPhone').value,
+    phone2: $('contactPhone2').value,
+    email: $('contactEmail').value,
+    site_id: parseInt($('contactSite').value) || 0,
+    is_primary: $('contactPrimary').checked,
+    is_billing_contact: $('contactBilling').checked,
+    notes: $('contactNotes').value
+  };
+  if (!payload.first_name) return showToast('First name required.', 'error');
+  try {
+    if (id) await api('PUT', '/api/customers/' + currentCustomerId + '/contacts/' + id, payload);
+    else await api('POST', '/api/customers/' + currentCustomerId + '/contacts', payload);
+    closeModal('contactModal');
+    showToast('Contact saved!', 'success');
+    currentCustomerData = null;
+    await loadCustomerDetail();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function deleteContact(id) {
+  if (!confirm('Remove this contact?')) return;
+  await api('DELETE', '/api/customers/' + currentCustomerId + '/contacts/' + id);
+  currentCustomerData = null;
+  await loadCustomerDetail();
+}
+
+// ─── EQUIPMENT ────────────────────────────────────────────────────────────────
+function openAddEquipment() {
+  $('equipModalId').value = '';
+  $('equipModalTitle').textContent = 'Add Equipment';
+  ['equipMfr','equipModel','equipSerial','equipSize','equipInstall','equipWarranty','equipLocation','equipNotes'].forEach(id => { const el=$(id); if(el) el.value=''; });
+  $('equipCondition').value = 'Good';
+  const siteEl = $('equipSite');
+  siteEl.innerHTML = '<option value="0">— Not site-specific —</option>' +
+    custSitesList.map(s => `<option value="${s.id}">${s.site_name}</option>`).join('');
+  openModal('equipmentModal');
+}
+
+async function saveEquipment() {
+  const id = $('equipModalId').value;
+  const payload = {
+    equipment_type: $('equipType').value,
+    site_id: parseInt($('equipSite').value) || 0,
+    manufacturer: $('equipMfr').value,
+    model: $('equipModel').value,
+    serial_number: $('equipSerial').value,
+    size: $('equipSize').value,
+    install_date: $('equipInstall').value,
+    warranty_expiry: $('equipWarranty').value,
+    condition: $('equipCondition').value,
+    location_in_site: $('equipLocation').value,
+    notes: $('equipNotes').value
+  };
+  try {
+    if (id) await api('PUT', '/api/customers/' + currentCustomerId + '/equipment/' + id, payload);
+    else await api('POST', '/api/customers/' + currentCustomerId + '/equipment', payload);
+    closeModal('equipmentModal');
+    showToast('Equipment saved!', 'success');
+    currentCustomerData = null;
+    await loadCustomerDetail();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function deleteEquipment(id) {
+  if (!confirm('Remove this equipment record?')) return;
+  await api('DELETE', '/api/customers/' + currentCustomerId + '/equipment/' + id);
+  currentCustomerData = null;
+  await loadCustomerDetail();
+}
+
+// ─── PARTNER DOCS ─────────────────────────────────────────────────────────────
+async function savePartnerDoc() {
+  const docType = $('partnerDocType').value;
+  const docName = $('partnerDocName').value.trim();
+  const notes   = $('partnerDocNotes').value;
+  const file    = $('partnerDocFile').files[0];
+  if (!docName) return showToast('Enter a document name.', 'error');
+  if (!file) return showToast('Select a file.', 'error');
+  const prog = $('partnerDocProgress');
+  prog.style.display = 'block'; prog.textContent = 'Uploading...';
+  try {
+    const b64 = await fileToBase64(file);
+    await api('POST', '/api/customers/' + currentCustomerId + '/docs', {
+      doc_type: docType, doc_name: docName, notes,
+      file_name: file.name, file_data: b64, file_type: file.type, file_size: file.size
+    });
+    prog.style.display = 'none';
+    closeModal('partnerDocModal');
+    showToast('Document uploaded!', 'success');
+    currentCustomerData = null;
+    await loadCustomerDetail();
+  } catch(e) { prog.style.display = 'none'; showToast(e.message, 'error'); }
+}
+
+async function deletePartnerDoc(id) {
+  if (!confirm('Delete this document?')) return;
+  await api('DELETE', '/api/customers/' + currentCustomerId + '/docs/' + id);
+  currentCustomerData = null;
+  await loadCustomerDetail();
+}
+
+// ─── QB EXPORT ────────────────────────────────────────────────────────────────
+function exportQBIIF() {
+  window.open('/api/customers/export/qb-iif', '_blank');
+  showToast('QB IIF file downloading. Import into QuickBooks Desktop via File → Utilities → Import → IIF Files.', 'success');
 }
