@@ -465,6 +465,17 @@ app.post('/api/users',requireAdmin,(req,res)=>{
     [username,bcrypt.hashSync(password,10),first_name,last_name||'',role||'',department||'',oncall_dept||'',oncall_role||'',paired_with||0,phone||'',email||'',is_admin?1:0,role_type||'technician',pto_total||10,pto_left||10,avatar_color||'#7a5010',hire_date||'']);
   res.json({id});
 });
+function requireManager(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  if (req.user.role !== 'manager') {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  next();
+}
 app.put('/api/users/:id', requireManager, (req, res) => {
   const callerUser = get('SELECT is_admin, role_type FROM users WHERE id=?', [req.session.userId]);
   const isAdmin = callerUser && callerUser.is_admin;
