@@ -92,6 +92,9 @@ function setupUI() {
   // All employees see customers
   document.querySelectorAll('.nav-item[data-page="customers"]').forEach(el => el.style.display='flex');
 
+  // Time Off Calendar — managers and above only (it's in admin section but double-check)
+  // Admin section already handles this since ptoCalendar is inside adminSection
+
   updatePtoBadge();
 }
 
@@ -154,6 +157,10 @@ $('dashStats').innerHTML=`
       });
     }
     $('dashOncallPreview').innerHTML=ocHtml;
+    // Load manager-only attendance brief
+    loadAttendanceBrief();
+    // Load achievements
+    loadMyAchievements();
   } catch(e){ console.error(e); }
 }
 
@@ -646,35 +653,31 @@ async function submitPto() {
 // ─── ADMIN: USERS ─────────────────────────────────────────────────────────────
 async function renderAdminUsers() {
   try {
-    allUsers=await api('GET','/api/users');
-    
-    // Apply search + department + role filters
-    const searchQ = ($('empSearchInput') && $('empSearchInput').value || '').toLowerCase();
-    const deptF   = ($('empDeptFilter')  && $('empDeptFilter').value)  || '';
-    const roleF   = ($('empRoleFilter')  && $('empRoleFilter').value)  || '';
-    let filtered  = allUsers;
-    if (searchQ) filtered = filtered.filter(u =>
-      (u.first_name||'').toLowerCase().includes(searchQ) ||
-      (u.last_name||'').toLowerCase().includes(searchQ) ||
-      (u.username||'').toLowerCase().includes(searchQ)
-    );
-    if (deptF) filtered = filtered.filter(u => (u.department||'') === deptF);
-    if (roleF) filtered = filtered.filter(u => (u.role_type||'technician') === roleF);
+    // Always refresh from server when page loads
+    allUsers = await api('GET', '/api/users');
+    renderEmployeeRows(allUsers);
+  } catch(e){ console.error(e); }
+}
 
-    const countEl = document.querySelector('#page-adminUsers .emp-count');
-    if (!countEl) {
-      const div = document.createElement('div');
-      div.className = 'emp-count';
-      div.style.cssText = 'font-size:12px;color:var(--text-faint);padding:.25rem 0 .75rem';
-      const tbody = document.querySelector('#usersTbody');
-      if (tbody && tbody.parentElement && tbody.parentElement.parentElement) {
-        tbody.parentElement.parentElement.insertBefore(div, tbody.parentElement);
-      }
-    }
-    const empCount = document.querySelector('#page-adminUsers .emp-count');
-    if (empCount) empCount.textContent = filtered.length + ' of ' + allUsers.length + ' employees';
+function filterEmployeeTable() {
+  if (!allUsers.length) return;
+  const searchQ = ($('empSearchInput') && $('empSearchInput').value || '').toLowerCase();
+  const deptF   = ($('empDeptFilter')  && $('empDeptFilter').value)  || '';
+  let filtered  = allUsers;
+  if (searchQ) filtered = filtered.filter(u =>
+    (u.first_name||'').toLowerCase().includes(searchQ) ||
+    (u.last_name||'').toLowerCase().includes(searchQ) ||
+    (u.username||'').toLowerCase().includes(searchQ)
+  );
+  if (deptF) filtered = filtered.filter(u => (u.department||'') === deptF);
+  renderEmployeeRows(filtered);
+}
 
-    $('usersTbody').innerHTML=filtered.map(u=>{
+function renderEmployeeRows(filtered) {
+  const countEl = $('empFilterCount');
+  if (countEl) countEl.textContent = filtered.length + ' of ' + allUsers.length + ' employees';
+  if (!$('usersTbody')) return;
+  $('usersTbody').innerHTML=filtered.map(u=>{
       const pct=Math.round(u.pto_left/Math.max(u.pto_total,1)*100);
       const cls=pct<20?'low':pct<50?'warn':'';
       const name=displayName(u);
@@ -2988,10 +2991,16 @@ async function refreshAttendanceBrief() {
 
   try {
     const today = new Date().toISOString().split('T')[0];
-    if (!allUsers.length) allUsers = await api('GET', '/api/users');
+    if (!allUsers.length) try { allUsers = await api('GET', '/api/users'); } catch(e){}
 
-    // Get today's clock-ins
-    const clockedIn = await api('GET', `/api/timeclock/all?week=${today}`).catch(()=>[]);
+    // Get today's clock-ins using the week start
+    const d = new Date(today + 'T00:00:00');
+    const day = d.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    const weekMon = new Date(d); weekMon.setDate(d.getDate() + diff);
+    const weekStr = weekMon.toISOString().split('T')[0];
+    let clockedIn = [];
+    try { clockedIn = await api('GET', `/api/timeclock/all?week=${weekStr}`); } catch(e) {}
     const clockedIds = new Set(clockedIn.filter(e => e.clock_in && e.clock_in.startsWith(today)).map(e => e.user_id));
 
     // Get today's call-ins
