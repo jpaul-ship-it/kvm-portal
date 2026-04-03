@@ -916,10 +916,16 @@ app.get('/api/timeclock/my', requireAuth, (req, res) => {
   const { week } = req.query;
   let entries;
   if (week) {
-    const weekEnd = new Date(week + 'T00:00:00'); weekEnd.setDate(weekEnd.getDate() + 6);
+    // Query by date range (Mon–Sun) so week_start format doesn't matter
+    const weekStart = new Date(week + 'T00:00:00');
+    const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
     const weekEndStr = weekEnd.toISOString().split('T')[0];
-    entries = all('SELECT * FROM timeclock WHERE user_id=? AND week_start=? ORDER BY clock_in DESC', [req.session.userId, week]);
+    entries = all(
+      `SELECT * FROM timeclock WHERE user_id=? AND date(clock_in) BETWEEN ? AND ? ORDER BY clock_in DESC`,
+      [req.session.userId, week, weekEndStr]
+    );
   } else {
+    // Default: last 50 entries
     entries = all('SELECT * FROM timeclock WHERE user_id=? ORDER BY clock_in DESC LIMIT 50', [req.session.userId]);
   }
   res.json(entries);

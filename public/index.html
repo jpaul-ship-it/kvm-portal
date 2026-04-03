@@ -568,8 +568,8 @@
         <div class="page-header">
           <div><h1 class="page-title">ATTENDANCE</h1><p class="page-sub">Call-ins, tardies, and quarterly reporting</p></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn btn-primary" onclick="openModal('callinModal')">+ Log Call-In</button>
-            <button class="btn btn-ghost" onclick="openModal('attendanceEventModal')">+ Log Event</button>
+            <button class="btn btn-primary" onclick="openCallinModal()">+ Log Call-In</button>
+            <button class="btn btn-ghost" onclick="openAttEventModal()">+ Log Event</button>
             <button class="btn btn-ghost" onclick="openQuarterlyReport()">&#128202; Quarterly Report</button>
             <button class="btn btn-ghost" onclick="runPerfectAttendanceCheck()">&#127942; Check Perfect Attendance</button>
             <button class="btn btn-ghost" onclick="openAwardAchievement()">&#127942; Award Achievement</button>
@@ -1132,6 +1132,7 @@
     <div id="quarterlyReportContent"></div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('quarterlyReportModal')">Close</button>
+      <button class="btn btn-ghost" id="btnPrintReport" style="display:none" onclick="printQuarterlyReport()">&#128438; Print Report</button>
     </div>
   </div>
 </div>
@@ -1440,6 +1441,22 @@
   </div>
 </div>
 
+
+<!-- ═══ PERFECT ATTENDANCE REPORT ═══ -->
+<div class="modal-overlay" id="perfectAttendanceModal" onclick="closeOnOverlay(event,'perfectAttendanceModal')">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <span class="modal-title">&#127942; Perfect Attendance Check</span>
+      <button class="modal-close" onclick="closeModal('perfectAttendanceModal')">&#x2715;</button>
+    </div>
+    <div id="perfectAttContent" style="min-height:100px;padding:.5rem 0"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('perfectAttendanceModal')">Close</button>
+      <button class="btn btn-ghost" id="btnPrintPerfect" style="display:none" onclick="printPerfectAttendance()">&#128438; Print</button>
+      <button class="btn btn-primary" id="btnPostPerfect" style="display:none" onclick="postPerfectAttendance()">Post to Announcements</button>
+    </div>
+  </div>
+</div>
 <div id="toast" class="toast"></div>
 <script src="/js/app.js"></script>
 

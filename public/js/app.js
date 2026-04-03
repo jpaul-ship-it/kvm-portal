@@ -660,7 +660,7 @@ async function renderAdminUsers() {
 }
 
 function filterEmployeeTable() {
-  if (!allUsers.length) return;
+  if (!allUsers.length) { renderAdminUsers(); return; }
   const searchQ = ($('empSearchInput') && $('empSearchInput').value || '').toLowerCase();
   const deptF   = ($('empDeptFilter')  && $('empDeptFilter').value)  || '';
   let filtered  = allUsers;
@@ -2123,6 +2123,36 @@ async function loadAttendanceContent() {
   } catch(e) { el.innerHTML = '<div class="empty-state">Error loading attendance.</div>'; }
 }
 
+// Wrapper to open callin modal with employees populated
+async function openCallinModal() {
+  if (!allUsers.length) try { allUsers = await api('GET', '/api/users'); } catch(e){}
+  const empOpts = allUsers.filter(u => !['global_admin','admin'].includes(u.role_type||'')).map(u =>
+    `<option value="${u.id}">${displayName(u)}</option>`).join('');
+  const sel = $('callinEmpSelect');
+  if (sel) sel.innerHTML = empOpts;
+  const dateEl = $('callinDate');
+  if (dateEl) dateEl.value = new Date().toISOString().split('T')[0];
+  const notesEl = $('callinNotes');
+  if (notesEl) notesEl.value = '';
+  openModal('callinModal');
+}
+
+// Wrapper to open attendance event modal with employees populated
+async function openAttEventModal() {
+  if (!allUsers.length) try { allUsers = await api('GET', '/api/users'); } catch(e){}
+  const empOpts = allUsers.filter(u => !['global_admin','admin'].includes(u.role_type||'')).map(u =>
+    `<option value="${u.id}">${displayName(u)}</option>`).join('');
+  const sel = $('attEventEmp');
+  if (sel) sel.innerHTML = empOpts;
+  const dateEl = $('attEventDate');
+  if (dateEl) dateEl.value = new Date().toISOString().split('T')[0];
+  const notesEl = $('attEventNotes');
+  if (notesEl) notesEl.value = '';
+  const minsEl = $('attEventMins');
+  if (minsEl) minsEl.value = '0';
+  openModal('attendanceEventModal');
+}
+
 async function saveCallin() {
   const user_id = $('callinEmpSelect').value;
   const call_in_date = $('callinDate').value;
@@ -2250,10 +2280,109 @@ function printQuarterlyReport() {
 }
 
 async function runPerfectAttendanceCheck() {
+  const el = $('perfectAttContent');
+  if (el) el.innerHTML = '<div style="color:var(--text-muted);padding:1rem 0">Checking attendance records...</div>';
+  openModal('perfectAttendanceModal');
   try {
-    await api('POST', '/api/attendance/perfect-check', {});
-    showToast('Perfect attendance checked. Any new recognitions announced!', 'success');
-  } catch(e) { showToast(e.message,'error'); }
+    // Get all employees and their attendance for current quarter
+    const now = new Date();
+    const q = Math.floor(now.getMonth() / 3) + 1;
+    const year = now.getFullYear();
+    const qStart = new Date(year, (q-1)*3, 1).toISOString().split('T')[0];
+    const qEnd = new Date(year, q*3, 0).toISOString().split('T')[0];
+
+    const [users, callins, events] = await Promise.all([
+      api('GET', '/api/users'),
+      api('GET', '/api/attendance/callins-range?start=' + qStart + '&end=' + qEnd).catch(()=>[]),
+      api('GET', '/api/attendance/events-range?start=' + qStart + '&end=' + qEnd).catch(()=>[])
+    ]);
+
+    const employees = users.filter(u => !['global_admin','admin'].includes(u.role_type||''));
+    const callinsByEmp = {};
+    const eventsByEmp = {};
+    (Array.isArray(callins) ? callins : []).forEach(c => { if (!callinsByEmp[c.user_id]) callinsByEmp[c.user_id] = []; callinsByEmp[c.user_id].push(c); });
+    (Array.isArray(events) ? events : []).forEach(e => { if (!eventsByEmp[e.user_id]) eventsByEmp[e.user_id] = []; eventsByEmp[e.user_id].push(e); });
+
+    const perfect = employees.filter(u => !(callinsByEmp[u.id]||[]).length && !(eventsByEmp[u.id]||[]).length);
+    const hasConcerns = employees.filter(u => (callinsByEmp[u.id]||[]).length + (eventsByEmp[u.id]||[]).length > 0)
+      .sort((a,b) => ((callinsByEmp[b.id]||[]).length + (eventsByEmp[b.id]||[]).length) - ((callinsByEmp[a.id]||[]).length + (eventsByEmp[a.id]||[]).length));
+
+    if (el) el.innerHTML = `
+      <div style="margin-bottom:1rem">
+        <div style="font-family:Oswald,sans-serif;font-size:13px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.5rem">
+          Q${q} ${year} — ${qStart} to ${qEnd}
+        </div>
+      </div>
+      <div style="margin-bottom:1.25rem">
+        <div style="font-family:Oswald,sans-serif;font-size:15px;color:var(--amber);margin-bottom:.75rem">
+          &#127942; Perfect Attendance (${perfect.length} employees)
+        </div>
+        ${perfect.length ? `<div style="display:flex;flex-wrap:wrap;gap:8px">${perfect.map(u=>`
+          <div style="background:var(--amber-bg2);border:1px solid var(--amber-dim);border-radius:6px;padding:6px 12px;font-size:13px;font-weight:600">
+            ${displayName(u)}
+          </div>`).join('')}</div>` : '<div style="color:var(--text-faint);font-size:13px">No employees with perfect attendance this quarter.</div>'}
+      </div>
+      ${hasConcerns.length ? `<div>
+        <div style="font-family:Oswald,sans-serif;font-size:15px;color:var(--danger);margin-bottom:.75rem">
+          Attendance Concerns (${hasConcerns.length} employees)
+        </div>
+        <table class="data-table">
+          <thead><tr><th>Employee</th><th>Call-Ins</th><th>Events (Tardy/NCNS)</th><th>Total</th></tr></thead>
+          <tbody>${hasConcerns.map(u => {
+            const ci = (callinsByEmp[u.id]||[]).length;
+            const ev = (eventsByEmp[u.id]||[]).length;
+            return `<tr>
+              <td><strong>${displayName(u)}</strong></td>
+              <td>${ci ? `<span style="color:var(--amber)">${ci}</span>` : '—'}</td>
+              <td>${ev ? `<span style="color:var(--danger)">${ev}</span>` : '—'}</td>
+              <td><strong>${ci+ev}</strong></td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>` : ''}`;
+
+    const btnPost = $('btnPostPerfect');
+    const btnPrint = $('btnPrintPerfect');
+    if (btnPost) { btnPost.style.display = perfect.length ? 'inline-flex' : 'none'; btnPost._perfectList = perfect; }
+    if (btnPrint) btnPrint.style.display = 'inline-flex';
+
+    // Also run the server-side check
+    try { await api('POST', '/api/attendance/perfect-check', {}); } catch(e) {}
+  } catch(e) {
+    if (el) el.innerHTML = '<div style="color:var(--danger)">Error loading attendance data: ' + e.message + '</div>';
+  }
+}
+
+async function postPerfectAttendance() {
+  const btn = $('btnPostPerfect');
+  const perfect = btn && btn._perfectList;
+  if (!perfect || !perfect.length) return;
+  const names = perfect.map(u => displayName(u)).join(', ');
+  const now = new Date();
+  const q = Math.floor(now.getMonth() / 3) + 1;
+  try {
+    await api('POST', '/api/announcements', {
+      title: `&#127942; Q${q} Perfect Attendance Recognition`,
+      body: `Congratulations to the following employees for achieving perfect attendance this quarter: ${names}. Thank you for your dedication and reliability!`,
+      priority: 'info'
+    });
+    showToast('Perfect attendance posted to announcements!', 'success');
+    closeModal('perfectAttendanceModal');
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+function printPerfectAttendance() {
+  const el = $('perfectAttContent');
+  if (!el) return;
+  const win = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html><html><head><title>KVM Perfect Attendance Report</title>
+  <style>body{font-family:Arial,sans-serif;margin:24px;color:#000}h1{font-size:18px;margin-bottom:4px}
+  h2{font-size:14px;color:#555;margin-bottom:16px}table{width:100%;border-collapse:collapse;font-size:13px}
+  th{background:#f0f0f0;padding:8px;text-align:left;border:1px solid #ccc}
+  td{padding:7px 8px;border:1px solid #ddd}@media print{button{display:none}}</style></head>
+  <body><h1>KVM Door Systems — Attendance Report</h1><h2>Generated ${new Date().toLocaleDateString()}</h2>
+  ${el.innerHTML}<script>window.onload=()=>window.print();</script></body></html>`);
+  win.document.close();
 }
 
 // ─── EXCEL EXPORT BUTTON ──────────────────────────────────────────────────────
@@ -2627,8 +2756,10 @@ function openEditCustomer() {
 }
 
 function togglePartnerFields() {
-  const isPartner = $('custType').value === 'Partner Door Company';
-  $('partnerFields').style.display = isPartner ? 'block' : 'none';
+  const typeEl = $('custType');
+  const pfEl = $('partnerFields');
+  if (!typeEl || !pfEl) return;
+  pfEl.style.display = typeEl.value === 'Partner Door Company' ? 'block' : 'none';
 }
 
 async function saveCustomer() {
@@ -2860,53 +2991,75 @@ function exportQBIIF() {
 // ─── MY TIMECARDS PAGE ────────────────────────────────────────────────────────
 async function renderMyTimecards() {
   const wkEl = $('myTcWeekPicker');
-  if (wkEl && !wkEl.value) wkEl.value = getCurrentWeekValue();
+  const weekVal = getCurrentWeekValue();
+  if (wkEl) wkEl.value = wkEl.value || weekVal;
   await loadMyTimecardPage();
 }
 
 async function loadMyTimecardPage() {
   const wkEl = $('myTcWeekPicker');
-  if (!wkEl || !wkEl.value) return;
-  const [yr, wk] = wkEl.value.split('-W');
-  const jan4 = new Date(parseInt(yr), 0, 4);
-  const weekStart = new Date(jan4.getTime() + (parseInt(wk)-1)*7*86400000);
-  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
-  const ws = weekStart.toISOString().split('T')[0];
+  const body = $('myTcBody');
+  const summary = $('myTcSummary');
+
+  // Calculate Monday of selected week (or current week)
+  let weekMonday;
+  if (wkEl && wkEl.value) {
+    const [yr, wk] = wkEl.value.split('-W');
+    // ISO week to date: Jan 4 is always in week 1
+    const jan4 = new Date(parseInt(yr), 0, 4);
+    const dayOfWeek = jan4.getDay() || 7; // treat Sunday as 7
+    weekMonday = new Date(jan4);
+    weekMonday.setDate(jan4.getDate() - dayOfWeek + 1 + (parseInt(wk) - 1) * 7);
+  } else {
+    // Current week Monday
+    const today = new Date();
+    const day = today.getDay() || 7;
+    weekMonday = new Date(today);
+    weekMonday.setDate(today.getDate() - day + 1);
+  }
+  const ws = weekMonday.toISOString().split('T')[0];
+
+  if (body) body.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:1rem 0">Loading...</div>';
 
   try {
     const entries = await api('GET', `/api/timeclock/my?week=${ws}`);
-    const body = $('myTcBody');
-    const summary = $('myTcSummary');
-    if (!entries.length) {
-      body.innerHTML = '<div class="empty-state">No time entries for this week.</div>';
-      summary.innerHTML = '';
+    if (!entries || !entries.length) {
+      if (body) body.innerHTML = '<div class="empty-state">No time entries for this week.</div>';
+      if (summary) summary.innerHTML = '';
       return;
     }
     let totalMins = 0;
-    body.innerHTML = `<div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Date</th><th>Type</th><th>Clock In</th><th>Clock Out</th><th>Hours</th><th>Job</th></tr></thead>
+    if (body) body.innerHTML = `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th>Date</th><th>Type</th><th>Clock In</th><th>Clock Out</th><th>Hours</th><th>Job / Location</th></tr></thead>
       <tbody>${entries.map(e => {
-        totalMins += e.total_minutes || 0;
-        const typeLabel = e.clock_type==='shop'?'🏭 Shop':e.clock_type==='union'?'🤝 Union':'📍 Field';
+        const mins = e.total_minutes || 0;
+        totalMins += mins;
+        const typeLabel = e.clock_type === 'shop' ? '🏭 Shop' : e.clock_type === 'union' ? '🤝 Union' : '📍 Field';
+        const clockIn = e.clock_in ? new Date(e.clock_in) : null;
+        const clockOut = e.clock_out ? new Date(e.clock_out) : null;
         return `<tr>
-          <td>${new Date(e.clock_in).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</td>
-          <td>${typeLabel}</td><td>${fmtTime(e.clock_in)}</td>
-          <td>${e.clock_out?fmtTime(e.clock_out):'<span class="badge badge-green">Active</span>'}</td>
-          <td><strong>${((e.total_minutes||0)/60).toFixed(2)}</strong></td>
-          <td style="font-size:12px;color:var(--text-muted)">${e.job_name||'—'}</td>
+          <td>${clockIn ? clockIn.toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'}) : '—'}</td>
+          <td style="font-size:12px">${typeLabel}</td>
+          <td>${clockIn ? clockIn.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'}) : '—'}</td>
+          <td>${clockOut ? clockOut.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'}) : '<span class="badge badge-green" style="font-size:10px">Active</span>'}</td>
+          <td><strong>${(mins/60).toFixed(2)}</strong> hrs</td>
+          <td style="font-size:12px;color:var(--text-muted)">${e.job_name || e.customer || '—'}</td>
         </tr>`;
       }).join('')}</tbody>
     </table></div>`;
-    const ot = Math.max(0, totalMins-2400);
-    summary.innerHTML = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem">
-      <div class="stat-card"><div class="stat-label">Regular</div><div class="stat-value">${(Math.min(totalMins,2400)/60).toFixed(2)} hrs</div></div>
+    const reg = Math.min(totalMins, 2400);
+    const ot = Math.max(0, totalMins - 2400);
+    if (summary) summary.innerHTML = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:1rem">
+      <div class="stat-card"><div class="stat-label">Regular</div><div class="stat-value">${(reg/60).toFixed(2)} hrs</div></div>
       <div class="stat-card"><div class="stat-label">Overtime</div><div class="stat-value" style="color:${ot>0?'var(--danger)':'var(--green)'}">${(ot/60).toFixed(2)} hrs</div></div>
-      <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value" style="color:var(--amber)">${(totalMins/60).toFixed(2)} hrs</div></div>
+      <div class="stat-card"><div class="stat-label">Total This Week</div><div class="stat-value" style="color:var(--amber)">${(totalMins/60).toFixed(2)} hrs</div></div>
     </div>`;
-  } catch(e) { console.error(e); }
+  } catch(e) {
+    console.error('My Timecards error:', e);
+    if (body) body.innerHTML = '<div class="empty-state">Error loading timecards: ' + e.message + '</div>';
+  }
 }
 
-// ─── ACHIEVEMENTS ─────────────────────────────────────────────────────────────
 async function openAwardAchievement() {
   if (!allUsers.length) try { allUsers = await api('GET','/api/users'); } catch(e){}
   $('achEmployee').innerHTML = allUsers.map(u=>`<option value="${u.id}">${displayName(u)}</option>`).join('');
