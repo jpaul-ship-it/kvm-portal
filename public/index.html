@@ -4,35 +4,117 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>KVM Door Systems — Employee Portal</title>
-
-  <!-- PWA Manifest -->
   <link rel="manifest" href="/manifest.json" />
-
-  <!-- Theme color (browser chrome color) -->
   <meta name="theme-color" content="#F5A623" />
   <meta name="background-color" content="#0a0a0a" />
-
-  <!-- iOS PWA meta tags -->
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="KVM Portal" />
   <link rel="apple-touch-icon" href="/icons/icon-152.png" />
   <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152.png" />
   <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png" />
-
-  <!-- iOS splash screens (iPhone/iPad) -->
   <meta name="apple-touch-fullscreen" content="yes" />
-
-  <!-- Android / general -->
   <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
   <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-96.png" />
-
-  <!-- App description -->
   <meta name="description" content="KVM Door Systems Employee Portal — Time clock, scheduling, PTO, and more" />
   <meta name="application-name" content="KVM Portal" />
   <meta name="mobile-web-app-capable" content="yes" />
-
   <link rel="stylesheet" href="/css/style.css" />
+
+  <style>
+    /* ─── SALES / QUOTES MODULE STYLES ─── */
+    .quotes-ai-panel {
+      background: #111;
+      border: 1px solid #2a2a2a;
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .quotes-ai-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--amber);
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      margin-bottom: 8px;
+    }
+    .quotes-ai-panel textarea {
+      width: 100%;
+      background: #0a0a0a;
+      border: 1px solid #333;
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      padding: 10px;
+      font-size: 12.5px;
+      resize: vertical;
+      outline: none;
+      font-family: inherit;
+      box-sizing: border-box;
+      min-height: 70px;
+    }
+    .quotes-ai-panel textarea:focus { border-color: var(--amber); }
+    .quotes-ai-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 8px;
+      flex-wrap: wrap;
+    }
+    .quotes-ai-btn {
+      background: var(--amber);
+      color: #000;
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: 7px 18px;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .quotes-ai-btn:disabled { background: #555; color: #888; cursor: not-allowed; }
+    .quotes-ai-upload-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--amber);
+      border: 1px solid var(--amber);
+      padding: 6px 12px;
+      border-radius: var(--radius-sm);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .quotes-ai-status { font-size: 11px; color: var(--text-muted); }
+    .quotes-ai-status.thinking { color: var(--amber); }
+    .quotes-ai-status.done { color: #27ae60; }
+    .quotes-ai-status.error { color: var(--danger); }
+
+    .ql { display: block; font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 3px; }
+    .qi { width: 100%; background: var(--bg-input,#111); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); padding: 7px 10px; font-size: 13px; outline: none; box-sizing: border-box; }
+    .qi:focus { border-color: var(--amber); }
+    .qi-select { background: var(--bg-input,#111); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); padding: 7px 10px; font-size: 13px; outline: none; width: 100%; }
+
+    .q-scope-block { border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 10px; overflow: hidden; }
+    .q-scope-hdr { display: flex; align-items: center; gap: 10px; background: var(--bg-surface); padding: 8px 12px; border-bottom: 1px solid var(--border); }
+    .q-scope-body { padding: 10px 12px; background: var(--bg-card); }
+    .q-line-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+    .q-line-row input { flex: 1; background: transparent; border: none; border-bottom: 1px dashed var(--border); color: var(--text); padding: 3px 0; font-size: 12.5px; outline: none; font-family: inherit; }
+    .q-line-row input:focus { border-bottom-color: var(--amber); }
+    .q-rm-btn { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 12px; padding: 0 4px; flex-shrink: 0; }
+    .q-rm-btn:hover { color: var(--danger); }
+    .q-add-line-btn { font-size: 11px; color: var(--amber); background: none; border: none; cursor: pointer; text-decoration: underline; padding: 4px 0; }
+    .q-total-bar { background: var(--amber); color: #000; border-radius: var(--radius-sm); padding: 8px 12px; display: flex; align-items: center; margin-top: 4px; }
+    .q-total-bar input { background: transparent; border: none; border-bottom: 1px dashed rgba(0,0,0,0.4); color: #000; font-size: 16px; font-weight: 700; text-align: right; width: 130px; outline: none; }
+
+    .quotes-status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+  </style>
 </head>
 <body>
 
@@ -103,11 +185,19 @@
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M2 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 002 2H4a2 2 0 01-2-2V5zm3 1h6v4H5V6zm6 6H5v2h6v-2z" clip-rule="evenodd"/><path d="M15 7h1a2 2 0 012 2v5.5a1.5 1.5 0 01-3 0V7z"/></svg>
         Company News
       </div>
+
       <div class="nav-group-label">Field</div>
       <div class="nav-item" data-page="customers" onclick="showPage('customers',this)">
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>
         Customers
       </div>
+
+      <!-- ─── SALES NAV ITEM ─── -->
+      <div class="nav-item" data-page="sales" onclick="showPage('sales',this)" id="nav-sales">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg>
+        Sales &amp; Quotes
+      </div>
+
       <div class="nav-group-label">Team</div>
       <div class="nav-item" data-page="oncall" onclick="showPage('oncall',this)">
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"/></svg>
@@ -121,7 +211,6 @@
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"/></svg>
         Time Off
       </div>
-
       <div class="nav-item" data-page="myDocs" onclick="showPage('myDocs',this)">
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg>
         My Documents
@@ -180,8 +269,6 @@
           <div><h1 class="page-title">DASHBOARD</h1><p class="page-sub" id="dashGreeting"></p></div>
         </div>
         <div class="stat-grid" id="dashStats"></div>
-
-        <!-- DAILY ATTENDANCE BRIEF — managers and above only -->
         <div id="dailyAttendanceBrief" style="display:none;margin-bottom:1.25rem">
           <div class="card attendance-brief-card">
             <div class="attendance-brief-header">
@@ -194,7 +281,6 @@
             <div class="attendance-brief-grid" id="attendanceBriefGrid"></div>
           </div>
         </div>
-
         <div class="two-col">
           <div class="card">
             <div class="card-header"><span class="card-title">Latest Announcements</span><button class="btn btn-ghost btn-sm" onclick="showPage('announcements',null)">View all →</button></div>
@@ -231,7 +317,7 @@
         <div class="page-header">
           <div><h1 class="page-title">ON-CALL SCHEDULE</h1><p class="page-sub">After-hours emergency contacts by department</p></div>
           <div style="display:flex;gap:8px">
-            <button class="btn btn-ghost" id="btnLoadSchedule" style="display:none" onclick="loadKVMSchedule()" title="Load the paper schedule">&#128196; Load KVM Schedule</button>
+            <button class="btn btn-ghost" id="btnLoadSchedule" style="display:none" onclick="loadKVMSchedule()">&#128196; Load KVM Schedule</button>
             <button class="btn btn-ghost" id="btnAutoSchedule" style="display:none" onclick="openModal('autoScheduleModal')">⟳ Auto-Schedule</button>
             <button class="btn btn-primary" id="btnNewOncall" style="display:none" onclick="openOncallModal()">+ Add Entry</button>
           </div>
@@ -264,7 +350,7 @@
         <div class="card">
           <div class="card-header"><span class="card-title">My Requests</span></div>
           <div id="myAttendanceSummary"></div>
-        <div id="myPtoList"></div>
+          <div id="myPtoList"></div>
         </div>
       </div>
 
@@ -325,25 +411,22 @@
           <button class="btn btn-primary" onclick="openAutoScheduleModal()">⟳ Auto-Schedule Builder</button>
         </div>
         <div class="two-col">
-          <div class="card"><div class="card-header"><span class="card-title">Overhead Door Division</span><span style="font-size:11px;color:var(--text-muted)">9 leaders + helpers · 2 per rotation</span></div><div id="rotOhTable"></div></div>
-          <div class="card"><div class="card-header"><span class="card-title">Automatic Door Division</span><span style="font-size:11px;color:var(--text-muted)">4 technicians · 1 per rotation</span></div><div id="rotAuTable"></div></div>
+          <div class="card"><div class="card-header"><span class="card-title">Overhead Door Division</span></div><div id="rotOhTable"></div></div>
+          <div class="card"><div class="card-header"><span class="card-title">Automatic Door Division</span></div><div id="rotAuTable"></div></div>
         </div>
       </div>
 
       <!-- ADMIN: SETTINGS -->
       <div class="page" id="page-adminSettings">
         <div class="page-header"><h1 class="page-title">PORTAL SETTINGS</h1></div>
-
         <div class="alert alert-warning" style="margin-bottom:1rem">
           &#9888; <strong>Data Persistence:</strong> Render free tier resets data on redeploy.
-          To permanently save data, upgrade to Render Starter ($7/mo), add a Persistent Disk at mount path <strong>/data</strong>,
-          and set environment variable <strong>RENDER_DISK_PATH=/data</strong> in your Render service settings.
+          Upgrade to Render Starter ($7/mo), add a Persistent Disk at mount path <strong>/data</strong>,
+          and set environment variable <strong>RENDER_DISK_PATH=/data</strong>.
           <a href="https://render.com/docs/disks" target="_blank" style="color:var(--amber);margin-left:4px">Render Disk Docs &#8599;</a>
         </div>
-
         <div class="card">
           <div class="card-header"><span class="card-title">Email Notifications — Microsoft 365</span></div>
-          <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem">Employees receive email when PTO is approved or denied. Requires Microsoft 365 / Outlook SMTP credentials.</p>
           <div id="emailTestResult" style="display:none;margin-bottom:10px"></div>
           <div class="form-row">
             <div class="form-group"><label>SMTP Host</label><input type="text" id="smtpHost" placeholder="smtp.office365.com" /></div>
@@ -358,48 +441,27 @@
             <button class="btn btn-primary" onclick="saveSmtpSettings()">Save Settings</button>
             <button class="btn btn-ghost" onclick="testEmail()">&#9993; Send Test Email to Me</button>
           </div>
-          <p style="font-size:11px;color:var(--text-faint);margin-top:10px">&#9432; If MFA is enabled on your Microsoft account, create an App Password at <a href="https://account.microsoft.com/security" target="_blank" style="color:var(--amber)">account.microsoft.com/security</a> and use that instead of your regular password.</p>
         </div>
-
         <div class="card">
-          <div class="card-header"><span class="card-title">Google Calendar — Time Off Sync</span></div>
-          <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">When PTO is approved, automatically add it to your company Google Calendar so managers can see who is off.</p>
-          <div class="form-group"><label>Google Calendar ID</label><input type="text" id="gcalId" placeholder="yourcompany@group.calendar.google.com" /></div>
-          <div class="form-group"><label>Google Service Account Key (JSON)</label><textarea id="gcalKey" rows="3" placeholder="Paste your Google service account JSON here..."></textarea></div>
-          <button class="btn btn-primary" onclick="saveGcalSettings()">Save Calendar Settings</button>
-          <div style="margin-top:10px;font-size:11px;color:var(--text-faint)">
-            &#9432; Setup: <a href="https://calendar.google.com/calendar/r/settings/createcalendar" target="_blank" style="color:var(--amber)">1. Create a Google Calendar</a> for KVM Time Off &rarr;
-            <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:var(--amber)">2. Create a Service Account</a> in Google Cloud &rarr;
-            3. Share the calendar with the service account email &rarr; 4. Paste the JSON key above.
+          <div class="card-header"><span class="card-title">AI Quote Assistant — API Key</span></div>
+          <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">Set your Anthropic API key to enable AI auto-fill in the Sales quote builder. The key is stored as a server environment variable on Render — never exposed to the browser.</p>
+          <div class="alert alert-warning" style="font-size:12px;">
+            To set the API key: Go to your <strong>Render dashboard → your kvm-portal service → Environment</strong> → add variable <strong>ANTHROPIC_API_KEY</strong> with your key value (starts with sk-ant-...). Then redeploy.
           </div>
         </div>
-
         <div class="card">
-          <div class="card">
           <div class="card-header"><span class="card-title">QuickBooks Customer Import</span></div>
-          <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">Bulk import your existing QB customer list into the portal. Existing customers are skipped automatically.</p>
           <button class="btn btn-ghost" onclick="openModal('qbImportModal')">&#8659; Import from QB IIF File</button>
         </div>
-        <div class="card-header"><span class="card-title">Daily Attendance Emails</span></div>
-          <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">
-            Sent automatically Monday–Friday. <strong style="color:var(--text)">7:00 AM</strong> — Field Technicians &nbsp;|&nbsp; <strong style="color:var(--text)">9:00 AM</strong> — Office Staff.<br/>
-            Office departments: Management, Executives, Office Staff, Sales. All others are treated as field technicians.
-          </p>
+        <div class="card">
+          <div class="card-header"><span class="card-title">Daily Attendance Emails</span></div>
           <div id="dailyEmailResult" style="display:none;margin-bottom:10px"></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-ghost" onclick="testDailyEmail('technicians')">&#9993; Test — Technician Email Now</button>
             <button class="btn btn-ghost" onclick="testDailyEmail('office')">&#9993; Test — Office Email Now</button>
           </div>
-          <p style="font-size:11px;color:var(--text-faint);margin-top:8px">&#9432; Uses current clock-in data as of right now. Good for testing before the scheduled time.</p>
-        </div>
-        <div class="card">
-          <div class="card-header"><span class="card-title">On-Call Departments</span></div>
-          <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">Configured: <strong style="color:var(--text)">Automatic Door Division</strong> (1 person) and <strong style="color:var(--text)">Overhead Door Division</strong> (2 people).</p>
-          <div class="alert alert-warning">To change department structure, update the server configuration.</div>
         </div>
       </div>
-
-
 
       <!-- PTO CALENDAR VIEW -->
       <div class="page" id="page-ptoCalendar">
@@ -413,18 +475,14 @@
               <option value="month">Month</option>
               <option value="week">Week</option>
             </select>
-            <a id="gcalLink" href="#" target="_blank" style="display:none;font-size:12px;color:var(--amber)">&#128197; Open Google Calendar</a>
           </div>
         </div>
-        <div class="card" style="padding:.75rem 1rem">
-          <div id="ptoCalendarGrid"></div>
-        </div>
+        <div class="card" style="padding:.75rem 1rem"><div id="ptoCalendarGrid"></div></div>
         <div class="card" style="margin-top:1rem">
           <div class="card-header"><span class="card-title">Approved Time Off This Period</span></div>
           <div id="ptoCalendarList"></div>
         </div>
       </div>
-
 
       <!-- MY DOCUMENTS -->
       <div class="page" id="page-myDocs">
@@ -440,7 +498,6 @@
           <button class="tab" onclick="setDocFilter('other',this)">Other</button>
         </div>
         <div id="myDocsList"></div>
-        <!-- Admin: view all employees docs -->
         <div id="allDocsSection" style="display:none">
           <div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border)">
             <div class="card-header" style="margin-bottom:.75rem">
@@ -452,7 +509,7 @@
         </div>
       </div>
 
-      <!-- POLICIES & PROCEDURES -->
+      <!-- POLICIES -->
       <div class="page" id="page-policies">
         <div class="page-header">
           <div><h1 class="page-title">POLICIES &amp; PROCEDURES</h1><p class="page-sub">Company policies, safety procedures, and reference documents</p></div>
@@ -469,14 +526,11 @@
         <div id="policiesList"></div>
       </div>
 
-
       <!-- TIME CLOCK -->
       <div class="page" id="page-timeclock">
         <div class="page-header">
           <div><h1 class="page-title">TIME CLOCK</h1><p class="page-sub">Clock in and out — location tracked automatically</p></div>
         </div>
-
-        <!-- CLOCK IN/OUT PANEL -->
         <div class="card" id="clockPanel">
           <div id="clockStatusDisplay" style="text-align:center;padding:1rem 0">
             <div id="clockStatusIcon" style="font-size:48px;margin-bottom:.5rem">⏱️</div>
@@ -484,8 +538,6 @@
             <div id="clockInTime" style="font-size:13px;color:var(--text-muted);margin-top:4px"></div>
             <div id="clockElapsed" style="font-family:Oswald,sans-serif;font-size:32px;color:var(--amber);margin-top:8px"></div>
           </div>
-
-          <!-- CLOCK IN FORM -->
           <div id="clockInForm" style="display:none">
             <hr class="section-divider" />
             <div class="form-group"><label>Clock-In Type</label>
@@ -499,29 +551,20 @@
               <div class="form-group"><label>Job Name / Work Order</label><input type="text" id="clockJobName" placeholder="e.g. Commercial Door Install — Meijer Warren" /></div>
               <div class="form-group"><label>Customer Name</label><input type="text" id="clockCustomer" placeholder="e.g. Meijer" /></div>
             </div>
-            <div id="unionFields" style="display:none">
-              <div class="alert alert-warning" style="font-size:12px">&#128205; GPS location will be captured when you clock in.</div>
-            </div>
             <div class="form-group"><label>Notes (optional)</label><input type="text" id="clockNotes" placeholder="Any notes..." /></div>
             <div id="locationStatus" class="calc-note" style="display:none"></div>
             <button class="btn btn-primary btn-full" style="margin-top:.5rem;padding:14px;font-size:16px;font-family:Oswald,sans-serif;letter-spacing:.08em" onclick="doClockin()">&#9654; CLOCK IN</button>
           </div>
-
-          <!-- CLOCK OUT FORM -->
           <div id="clockOutForm" style="display:none">
             <hr class="section-divider" />
             <div class="form-group"><label>Notes (optional)</label><input type="text" id="clockOutNotes" placeholder="End of shift notes..." /></div>
             <button class="btn btn-full" style="margin-top:.5rem;padding:14px;font-size:16px;font-family:Oswald,sans-serif;letter-spacing:.08em;background:var(--danger);color:#fff;border-color:var(--danger)" onclick="doClockout()">&#9646;&#9646; CLOCK OUT</button>
           </div>
         </div>
-
-        <!-- GEOFENCE STATUS -->
         <div class="card" id="geofenceCard" style="display:none">
           <div class="card-header"><span class="card-title">&#127757; Location Status</span></div>
           <div id="geofenceStatus"></div>
         </div>
-
-        <!-- MY RECENT TIMECLOCK -->
         <div class="card" style="margin-top:1rem">
           <div class="card-header">
             <span class="card-title">My Recent Time Entries</span>
@@ -559,11 +602,7 @@
         <div id="alertsList"></div>
       </div>
 
-
-      <!-- EMPLOYEE ATTENDANCE (self view) -->
-      <!-- shown on dashboard — no separate page needed -->
-
-      <!-- ADMIN: ATTENDANCE & CALL-INS -->
+      <!-- ADMIN: ATTENDANCE -->
       <div class="page" id="page-adminAttendance">
         <div class="page-header">
           <div><h1 class="page-title">ATTENDANCE</h1><p class="page-sub">Call-ins, tardies, and quarterly reporting</p></div>
@@ -583,7 +622,6 @@
         <div id="attendanceContent"></div>
       </div>
 
-
       <!-- CUSTOMERS -->
       <div class="page" id="page-customers">
         <div class="page-header">
@@ -593,29 +631,20 @@
             <button class="btn btn-primary" onclick="openAddCustomer()">+ Add Customer</button>
           </div>
         </div>
-
-        <!-- FILTERS -->
         <div class="card" style="padding:.75rem 1rem;margin-bottom:1rem">
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
             <input type="text" id="custSearch" placeholder="Search company name or city..." style="flex:1;min-width:200px" oninput="loadCustomers()" />
             <select id="custTypeFilter" onchange="loadCustomers()" style="width:auto">
               <option value="">All Types</option>
-              <option>General Contractor</option>
-              <option>Property Manager</option>
-              <option>End User / Building Owner</option>
-              <option>Municipality / Government</option>
-              <option>Industrial</option>
-              <option>Retail</option>
-              <option>Partner Door Company</option>
+              <option>General Contractor</option><option>Property Manager</option>
+              <option>End User / Building Owner</option><option>Municipality / Government</option>
+              <option>Industrial</option><option>Retail</option><option>Partner Door Company</option>
             </select>
             <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
-              <input type="checkbox" id="custPartnerFilter" onchange="loadCustomers()" />
-              Partners only
+              <input type="checkbox" id="custPartnerFilter" onchange="loadCustomers()" />Partners only
             </label>
           </div>
         </div>
-
-        <!-- CUSTOMER LIST -->
         <div id="customersList"></div>
       </div>
 
@@ -623,18 +652,14 @@
       <div class="page" id="page-customerDetail">
         <div class="page-header">
           <div style="display:flex;align-items:center;gap:12px">
-            <button class="btn btn-ghost btn-sm" onclick="showPage('customers',document.querySelector(\'.nav-item[data-page=\\\'customers\\\']\'))">&#8592; Back</button>
+            <button class="btn btn-ghost btn-sm" onclick="showPage('customers',document.querySelector('.nav-item[data-page=\'customers\']'))">&#8592; Back</button>
             <div><h1 class="page-title" id="custDetailName">Customer</h1><p class="page-sub" id="custDetailType"></p></div>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-ghost" id="custEditBtn" onclick="openEditCustomer()">&#9998; Edit</button>
           </div>
         </div>
-
-        <!-- PARTNER ALERT BANNER -->
-        <div id="partnerBanner" style="display:none" class="alert" style="margin-bottom:1rem;border-left:4px solid var(--amber)"></div>
-
-        <!-- TABS -->
+        <div id="partnerBanner" style="display:none" class="alert"></div>
         <div class="tab-bar" style="margin-bottom:1rem">
           <button class="tab active" onclick="setCustTab('overview',this)">Overview</button>
           <button class="tab" onclick="setCustTab('sites',this)">Sites</button>
@@ -644,7 +669,6 @@
         </div>
         <div id="custDetailContent"></div>
       </div>
-
 
       <!-- MY TIMECARDS -->
       <div class="page" id="page-myTimecards">
@@ -656,45 +680,158 @@
         <div id="myTcSummary" style="margin-top:1rem"></div>
       </div>
 
-<!-- ═══ MODALS ═══ -->
+      <!-- ═══ SALES & QUOTES PAGE ═══ -->
+      <div class="page" id="page-sales">
+        <div class="page-header">
+          <div><h1 class="page-title">SALES &amp; QUOTES</h1><p class="page-sub" id="salesPageSub">Create, manage, and track service quotes</p></div>
+          <div style="display:flex;gap:8px;" id="salesHeaderBtns">
+            <button class="btn btn-ghost" onclick="quotesShowList()" id="btnQuoteList">&#128203; My Quotes</button>
+            <button class="btn btn-primary" onclick="quotesNewQuote()">+ New Quote</button>
+          </div>
+        </div>
 
-<!-- Announcement -->
+        <!-- QUOTE LIST VIEW -->
+        <div id="quotes-list-view">
+          <div class="card" style="padding:0;overflow:hidden;">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+              <input type="text" id="quotes-search" placeholder="Search quotes..." oninput="quotesFilter()"
+                style="width:220px;padding:6px 10px;font-size:13px;" />
+              <select id="quotes-status-filter" onchange="quotesFilter()" style="width:auto;padding:6px 10px;font-size:13px;">
+                <option value="">All Status</option>
+                <option value="draft">Draft</option>
+                <option value="sent">Sent</option>
+                <option value="accepted">Accepted</option>
+                <option value="declined">Declined</option>
+              </select>
+              <span id="quotes-count" style="font-size:12px;color:var(--text-muted);margin-left:auto;"></span>
+            </div>
+            <div id="quotes-table-body" style="min-height:120px;">
+              <div style="padding:40px;text-align:center;color:var(--text-faint);font-size:13px;">Loading quotes...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- QUOTE BUILDER VIEW -->
+        <div id="quotes-builder-view" style="display:none;">
+
+          <!-- AI ASSISTANT -->
+          <div class="quotes-ai-panel">
+            <div class="quotes-ai-label">&#129302; AI Quote Assistant — paste notes or upload a file</div>
+            <textarea id="ai-notes-input" placeholder="Paste scope notes, emails, or job details here and click Analyze...&#10;&#10;Example: Crane Co, Jennifer Quaker, 10725 Harrison Rd Romulus MI. Dock Door 3 — new bottom section, springs, jamb seals, bumpers $2,295. Door 5 — jamb seals and bumpers $975."></textarea>
+            <div class="quotes-ai-row">
+              <label class="quotes-ai-upload-label">
+                &#128196; Upload File
+                <input type="file" id="ai-file-upload" accept="image/*,application/pdf,.doc,.docx" style="display:none;" onchange="quotesHandleFile(event)">
+              </label>
+              <div id="ai-file-preview-tag" style="display:none;font-size:11px;color:var(--text-muted);background:var(--bg-surface);padding:4px 10px;border-radius:var(--radius-sm);"></div>
+              <button class="quotes-ai-btn" id="ai-analyze-btn" onclick="quotesRunAI()">Analyze &amp; Fill Quote</button>
+              <span class="quotes-ai-status" id="ai-status-msg">Paste notes or upload a file, then click Analyze.</span>
+            </div>
+          </div>
+
+          <!-- FORM -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+            <!-- Quote Info -->
+            <div class="card" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-content:start;">
+              <div style="grid-column:1/-1;font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:4px;">Quote Info</div>
+              <div><label class="ql">Quote #</label><input class="qi" id="q-num" placeholder="e.g. 0426-27-GK"></div>
+              <div><label class="ql">Date</label><input class="qi" id="q-date" type="date"></div>
+              <div><label class="ql">Valid For</label><input class="qi" id="q-valid" value="30 days"></div>
+              <div><label class="ql">Status</label>
+                <select class="qi qi-select" id="q-status">
+                  <option value="draft">Draft</option>
+                  <option value="sent">Sent</option>
+                  <option value="accepted">Accepted</option>
+                  <option value="declined">Declined</option>
+                </select>
+              </div>
+            </div>
+            <!-- Client Info -->
+            <div class="card" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-content:start;">
+              <div style="grid-column:1/-1;font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:4px;">Client Info</div>
+              <div style="grid-column:1/-1;"><label class="ql">Company / Client Name</label><input class="qi" id="q-client" placeholder="e.g. Crane Co."></div>
+              <div><label class="ql">Contact Name</label><input class="qi" id="q-contact" placeholder="e.g. Jennifer Quaker"></div>
+              <div><label class="ql">Phone</label><input class="qi" id="q-phone" placeholder="(000) 000-0000"></div>
+              <div><label class="ql">Email</label><input class="qi" id="q-email" placeholder="contact@company.com"></div>
+              <div><label class="ql">Address</label><input class="qi" id="q-addr" placeholder="Street, City, State ZIP"></div>
+              <div style="grid-column:1/-1;"><label class="ql">Project / Job Name</label><input class="qi" id="q-project" placeholder="e.g. Door Repairs After PM"></div>
+              <div style="grid-column:1/-1;"><label class="ql">Scope Summary</label><input class="qi" id="q-scope-summary" placeholder="Brief description of overall work"></div>
+            </div>
+          </div>
+
+          <!-- SCOPE OF WORK -->
+          <div class="card" style="margin-bottom:16px;">
+            <div style="font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:12px;">Scope of Work</div>
+            <div id="q-scopes-container"></div>
+            <button onclick="quotesAddScope()" style="width:100%;padding:8px;border:1.5px dashed var(--amber);background:transparent;color:var(--amber);cursor:pointer;font-size:12px;font-weight:700;border-radius:var(--radius-sm);margin-top:8px;">+ Add Door / Section</button>
+          </div>
+
+          <!-- OPTIONS -->
+          <div class="card" style="margin-bottom:16px;">
+            <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Options &amp; Add-Ons</div>
+            <div id="q-options-container"></div>
+            <button onclick="quotesAddOption()" class="q-add-line-btn">+ Add option line</button>
+          </div>
+
+          <!-- NOTES + TOTALS -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+            <div class="card">
+              <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Notes</div>
+              <textarea id="q-notes" rows="4" placeholder="Additional notes, site conditions, requirements..."
+                style="width:100%;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-size:12.5px;resize:vertical;outline:none;font-family:inherit;box-sizing:border-box;"></textarea>
+            </div>
+            <div class="card">
+              <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Totals</div>
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <div style="display:flex;align-items:center;gap:10px;"><span style="font-size:11px;color:var(--text-muted);min-width:80px;">Subtotal</span><input class="qi" id="q-subtotal" placeholder="$0.00" style="text-align:right;"></div>
+                <div style="display:flex;align-items:center;gap:10px;"><span style="font-size:11px;color:var(--text-muted);min-width:80px;">Tax</span><input class="qi" id="q-tax" placeholder="$0.00" style="text-align:right;"></div>
+                <div class="q-total-bar">
+                  <span style="font-size:12px;font-weight:700;flex:1;">Total Contract</span>
+                  <input id="q-total" placeholder="$0.00">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ACTIONS -->
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+            <button onclick="quotesSave()" class="btn btn-primary">&#128190; Save Quote</button>
+            <button onclick="quotesPrint()" class="btn btn-ghost">&#8982; Print / PDF</button>
+            <button onclick="quotesShowList()" class="btn btn-ghost">&#8592; Back to List</button>
+            <span id="q-save-status" style="font-size:12px;color:var(--text-muted);margin-left:auto;"></span>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- ═══ MODALS (all original modals preserved) ═══ -->
+
 <div class="modal-overlay" id="annModal" onclick="closeOnOverlay(event,'annModal')">
   <div class="modal">
     <div class="modal-header"><span class="modal-title">New Announcement</span><button class="modal-close" onclick="closeModal('annModal')">✕</button></div>
     <div class="form-group"><label>Title</label><input type="text" id="annTitle" /></div>
-    <div class="form-group"><label>Priority</label>
-      <select id="annPriority"><option value="normal">Normal</option><option value="urgent">Urgent</option><option value="info">Info / FYI</option></select>
-    </div>
+    <div class="form-group"><label>Priority</label><select id="annPriority"><option value="normal">Normal</option><option value="urgent">Urgent</option><option value="info">Info / FYI</option></select></div>
     <div class="form-group"><label>Message</label><textarea id="annBody" rows="4"></textarea></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('annModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveAnnouncement()">Post</button>
-    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('annModal')">Cancel</button><button class="btn btn-primary" onclick="saveAnnouncement()">Post</button></div>
   </div>
 </div>
 
-<!-- News -->
 <div class="modal-overlay" id="newsModal" onclick="closeOnOverlay(event,'newsModal')">
   <div class="modal">
     <div class="modal-header"><span class="modal-title">New News Post</span><button class="modal-close" onclick="closeModal('newsModal')">✕</button></div>
     <div class="form-group"><label>Title</label><input type="text" id="newsTitle" /></div>
-    <div class="form-group"><label>Category</label>
-      <select id="newsCat"><option>Project Update</option><option>Safety</option><option>HR</option><option>Recognition</option><option>General</option></select>
-    </div>
+    <div class="form-group"><label>Category</label><select id="newsCat"><option>Project Update</option><option>Safety</option><option>HR</option><option>Recognition</option><option>General</option></select></div>
     <div class="form-group"><label>Content</label><textarea id="newsBody" rows="5"></textarea></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('newsModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveNews()">Publish</button>
-    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('newsModal')">Cancel</button><button class="btn btn-primary" onclick="saveNews()">Publish</button></div>
   </div>
 </div>
 
-<!-- On-Call (manual) -->
 <div class="modal-overlay" id="oncallModal" onclick="closeOnOverlay(event,'oncallModal')">
   <div class="modal modal-lg">
     <div class="modal-header"><span class="modal-title">Add On-Call Entry</span><button class="modal-close" onclick="closeModal('oncallModal')">&#x2715;</button></div>
-    <p style="font-size:12px;color:var(--text-muted);margin-bottom:1rem">Each weekly entry covers 2 Overhead Door staff and 1 Automatic Door tech.</p>
     <div class="modal-section">Overhead Door Division — 2 people</div>
     <div class="form-group"><label>Person 1 (Leader)</label><select id="ocOH1"></select></div>
     <div class="form-group"><label>Person 2 (Helper / Leader)</label><select id="ocOH2"></select></div>
@@ -705,15 +842,10 @@
       <div class="form-group"><label>Start Date</label><input type="date" id="ocStart" /></div>
       <div class="form-group"><label>End Date</label><input type="date" id="ocEnd" /></div>
     </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('oncallModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveOncall()">Save Entry</button>
-    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('oncallModal')">Cancel</button><button class="btn btn-primary" onclick="saveOncall()">Save Entry</button></div>
   </div>
 </div>
 
-
-<!-- Auto-Schedule Builder -->
 <div class="modal-overlay" id="autoScheduleModal" onclick="closeOnOverlay(event,'autoScheduleModal')">
   <div class="modal modal-xl">
     <div class="modal-header"><span class="modal-title">Auto-Schedule Builder</span><button class="modal-close" onclick="closeModal('autoScheduleModal')">✕</button></div>
@@ -721,27 +853,25 @@
       <div class="form-group"><label>Schedule Start Date</label><input type="date" id="schedStart" oninput="previewSchedule()" /></div>
       <div class="form-group"><label>Number of Weeks</label><select id="schedWeeks" onchange="previewSchedule()"><option value="4">4 weeks</option><option value="6">6 weeks</option><option value="8" selected>8 weeks</option><option value="12">12 weeks</option><option value="26">26 weeks</option></select></div>
     </div>
-    <div class="form-group"><label>Rotation Frequency</label>
-      <select id="schedFreq" onchange="previewSchedule()"><option value="1">Weekly</option><option value="2">Bi-weekly</option><option value="4">Monthly (every 4 weeks)</option></select>
+    <div class="form-row">
+      <div class="form-group"><label>Rotation Frequency</label><select id="schedFreq" onchange="previewSchedule()"><option value="1">Weekly</option><option value="2">Bi-weekly</option><option value="4">Monthly (4 weeks)</option></select></div>
+      <div class="form-group"></div>
     </div>
-    <div class="modal-section">Automatic Door Division — 1 person per rotation</div>
-    <div class="form-group"><label>Select Employees to Rotate (in order)</label>
-      <div id="autoEmpListAuto" style="max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px"></div>
+    <div class="modal-section">Continue Rotation From Position</div>
+    <div class="form-row">
+      <div class="form-group"><label>Overhead Door — Start at position #</label><input type="number" id="ohStartIdx" value="0" min="0" oninput="previewSchedule()" /></div>
+      <div class="form-group"><label>Automatic Door — Start at position #</label><input type="number" id="auStartIdx" value="0" min="0" oninput="previewSchedule()" /></div>
     </div>
-    <div class="modal-section">Overhead Door Division — 2 people per rotation</div>
-    <div class="form-group"><label>Select Employees to Rotate (in order)</label>
-      <div id="autoEmpListOverhead" style="max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px"></div>
-    </div>
+    <div class="modal-section">Overhead Door Division Rotation Order</div>
+    <div id="rotListOverhead" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px"></div>
+    <div class="modal-section">Automatic Door Division Rotation Order</div>
+    <div id="rotListAutomatic" style="max-height:120px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px"></div>
     <div class="modal-section">Schedule Preview</div>
-    <div id="schedPreview" style="max-height:280px;overflow-y:auto"></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('autoScheduleModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="applyAutoSchedule()">Apply Schedule</button>
-    </div>
+    <div id="schedPreview" style="max-height:300px;overflow-y:auto"></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('autoScheduleModal')">Cancel</button><button class="btn btn-primary" onclick="applyAutoSchedule()">Apply Schedule</button></div>
   </div>
 </div>
 
-<!-- PTO Request -->
 <div class="modal-overlay" id="ptoReqModal" onclick="closeOnOverlay(event,'ptoReqModal')">
   <div class="modal modal-lg">
     <div class="modal-header"><span class="modal-title">Request Time Off</span><button class="modal-close" onclick="closeModal('ptoReqModal')">&#x2715;</button></div>
@@ -758,7 +888,6 @@
       <div class="pto-cal-jump">
         <select id="ptoJumpMonth" onchange="ptoJump()"></select>
         <select id="ptoJumpYear" onchange="ptoJump()"></select>
-        <span style="font-size:11px;color:var(--text-muted)">Jump to month</span>
       </div>
       <div class="pto-cal-grid-wrap">
         <div id="ptoCalGrid1" class="pto-cal-grid"></div>
@@ -767,204 +896,83 @@
       <div class="pto-cal-legend">
         <span class="pto-leg-item"><span class="pto-leg-dot" style="background:var(--amber)"></span>Selected</span>
         <span class="pto-leg-item"><span class="pto-leg-dot" style="background:var(--danger)"></span>Blackout</span>
-        <span class="pto-leg-item"><span class="pto-leg-dot" style="background:var(--bg-surface);border:1px solid var(--border2)"></span>Weekend</span>
       </div>
     </div>
     <div class="form-row" style="margin-top:.75rem">
       <div class="form-group"><label>Start Date</label><input type="date" id="ptoStart" oninput="ptoManualInput()" /></div>
       <div class="form-group"><label>End Date</label><input type="date" id="ptoEnd" oninput="ptoManualInput()" /></div>
     </div>
-    <div class="form-group"><label>Type</label>
-      <select id="ptoType"><option>Vacation</option><option>Personal</option><option>Sick</option><option>Bereavement</option><option>Other</option></select>
-    </div>
+    <div class="form-group"><label>Type</label><select id="ptoType"><option>Vacation</option><option>Personal</option><option>Sick</option><option>Bereavement</option><option>Other</option></select></div>
     <div class="form-group"><label>Notes (optional)</label><textarea id="ptoNotes" rows="2"></textarea></div>
     <div id="ptoDaysCalc" class="calc-note" style="display:none"></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('ptoReqModal')">Cancel</button>
-      <button class="btn btn-primary" id="ptoSubmitBtn" onclick="submitPto()">Submit Request</button>
-    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('ptoReqModal')">Cancel</button><button class="btn btn-primary" id="ptoSubmitBtn" onclick="submitPto()">Submit Request</button></div>
   </div>
 </div>
 
-<!-- Add User -->
 <div class="modal-overlay" id="addUserModal" onclick="closeOnOverlay(event,'addUserModal')">
   <div class="modal modal-lg">
     <div class="modal-header"><span class="modal-title">Add Employee</span><button class="modal-close" onclick="closeModal('addUserModal')">&#x2715;</button></div>
-    <div class="form-row">
-      <div class="form-group"><label>First Name</label><input type="text" id="addFirst" /></div>
-      <div class="form-group"><label>Last Name</label><input type="text" id="addLast" /></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Username</label><input type="text" id="addUsername" placeholder="firstname.lastname" /></div>
-      <div class="form-group"><label>Password</label><input type="password" id="addPass" /></div>
-    </div>
+    <div class="form-row"><div class="form-group"><label>First Name</label><input type="text" id="addFirst" /></div><div class="form-group"><label>Last Name</label><input type="text" id="addLast" /></div></div>
+    <div class="form-row"><div class="form-group"><label>Username</label><input type="text" id="addUsername" placeholder="firstname.lastname" /></div><div class="form-group"><label>Password</label><input type="password" id="addPass" /></div></div>
     <div class="form-row">
       <div class="form-group"><label>Job Title</label><input type="text" id="addRole" placeholder="e.g. Field Technician" /></div>
       <div class="form-group"><label>Department</label>
-          <select id="addDept">
-            <option value="">— Select Department —</option>
-          <option value="Office Admin">Office Admin</option>
-          <option value="Sales">Sales</option>
-          <option value="Management">Management</option>
-          <option value="Executive">Executive</option>
-          <option value="Technician">Technician</option>
-          <option value="Field Supervisor">Field Supervisor</option>
-          <option value="Dispatcher">Dispatcher</option>
-          </select>
-        </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>On-Call Department</label>
-        <select id="addOncallDept">
-          <option value="">Not on on-call rotation</option>
-          <option value="Automatic Door Division">Automatic Door Division</option>
-          <option value="Overhead Door Division">Overhead Door Division</option>
-          <option value="Both Divisions">Both Divisions</option>
-        </select>
-      </div>
-      <div class="form-group"><label>On-Call Role</label>
-        <select id="addOncallRole">
-          <option value="">&#8212; Not applicable</option>
-          <option value="Leader">Leader</option>
-          <option value="Helper">Helper</option>
-        </select>
+        <select id="addDept"><option value="">— Select Department —</option><option>Office Admin</option><option>Sales</option><option>Management</option><option>Executive</option><option>Technician</option><option>Field Supervisor</option><option>Dispatcher</option></select>
       </div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Phone</label><input type="tel" id="addPhone" /></div>
-      <div class="form-group"><label>Email</label><input type="email" id="addEmail" /></div>
+      <div class="form-group"><label>On-Call Department</label><select id="addOncallDept"><option value="">Not on on-call rotation</option><option>Automatic Door Division</option><option>Overhead Door Division</option><option>Both Divisions</option></select></div>
+      <div class="form-group"><label>On-Call Role</label><select id="addOncallRole"><option value="">&#8212; Not applicable</option><option>Leader</option><option>Helper</option></select></div>
     </div>
+    <div class="form-row"><div class="form-group"><label>Phone</label><input type="tel" id="addPhone" /></div><div class="form-group"><label>Email</label><input type="email" id="addEmail" /></div></div>
     <div class="form-row">
       <div class="form-group"><label>Hire Date</label><input type="date" id="addHireDate" /></div>
       <div class="form-group"><label>Access Level</label>
-        <select id="addIsAdmin" style="display:none"><option value="false">Employee</option></select>
         <select id="addRoleTypeMain" onchange="document.getElementById('addRoleType').value=this.value">
-          <option value="technician">Technician (field employee)</option>
-          <option value="dispatcher">Dispatcher</option>
-          <option value="sales">Sales</option>
-          <option value="billing">Billing</option>
-          <option value="manager">Manager</option>
-          <option value="admin">Admin</option>
-          <option value="global_admin">Global Admin</option>
+          <option value="technician">Technician</option><option value="dispatcher">Dispatcher</option><option value="sales">Sales</option><option value="billing">Billing</option><option value="manager">Manager</option><option value="admin">Admin</option><option value="global_admin">Global Admin</option>
         </select>
       </div>
     </div>
-    <div class="form-row">
-      <div class="form-group"><label>Role Type</label>
-        <select id="addRoleType">
-          <option value="technician">Technician</option>
-          <option value="manager">Manager</option>
-          <option value="billing">Billing</option>
-          <option value="sales">Sales</option>
-          <option value="dispatcher">Dispatcher</option>
-          <option value="admin">Admin</option>
-        </select>
-      </div>
-      <div class="form-group"></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>PTO Days / Year</label><input type="number" id="addPtoTotal" value="10" min="0" /></div>
-      <div class="form-group"><label>PTO Days Remaining</label><input type="number" id="addPtoLeft" value="10" min="0" /></div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('addUserModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveUser()">Add Employee</button>
-    </div>
+    <input type="hidden" id="addRoleType" value="technician" />
+    <div class="form-row"><div class="form-group"><label>PTO Days / Year</label><input type="number" id="addPtoTotal" value="10" min="0" /></div><div class="form-group"><label>PTO Days Remaining</label><input type="number" id="addPtoLeft" value="10" min="0" /></div></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('addUserModal')">Cancel</button><button class="btn btn-primary" onclick="saveUser()">Add Employee</button></div>
   </div>
 </div>
 
-
-<!-- ═══ CHANGE OWN PASSWORD ═══ -->
 <div class="modal-overlay" id="changePwModal" onclick="closeOnOverlay(event,'changePwModal')">
   <div class="modal">
     <div class="modal-header"><span class="modal-title">Change My Password</span><button class="modal-close" onclick="closeModal('changePwModal')">&#x2715;</button></div>
     <div id="changePwError" class="alert alert-danger" style="display:none"></div>
-    <div class="form-group"><label>Current Password</label><input type="password" id="cpCurrent" placeholder="Your current password" /></div>
+    <div class="form-group"><label>Current Password</label><input type="password" id="cpCurrent" /></div>
     <div class="form-group"><label>New Password</label><input type="password" id="cpNew" placeholder="At least 6 characters" /></div>
-    <div class="form-group"><label>Confirm New Password</label><input type="password" id="cpConfirm" placeholder="Repeat new password" /></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('changePwModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="changeMyPassword()">Update Password</button>
-    </div>
+    <div class="form-group"><label>Confirm New Password</label><input type="password" id="cpConfirm" /></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('changePwModal')">Cancel</button><button class="btn btn-primary" onclick="changeMyPassword()">Update Password</button></div>
   </div>
 </div>
 
-<!-- ═══ EDIT EMPLOYEE ═══ -->
 <div class="modal-overlay" id="editUserModal" onclick="closeOnOverlay(event,'editUserModal')">
   <div class="modal modal-lg">
     <div class="modal-header"><span class="modal-title">Edit Employee</span><button class="modal-close" onclick="closeModal('editUserModal')">&#x2715;</button></div>
     <input type="hidden" id="editUserId" />
+    <div class="form-row"><div class="form-group"><label>First Name</label><input type="text" id="editFirst" /></div><div class="form-group"><label>Last Name</label><input type="text" id="editLast" /></div></div>
+    <div class="form-row"><div class="form-group"><label>Username</label><input type="text" id="editUsername" /></div><div class="form-group"><label>Job Title</label><input type="text" id="editRole" /></div></div>
     <div class="form-row">
-      <div class="form-group"><label>First Name</label><input type="text" id="editFirst" /></div>
-      <div class="form-group"><label>Last Name</label><input type="text" id="editLast" /></div>
+      <div class="form-group"><label>Department</label><select id="editDept"><option value="">— Select Department —</option><option>Office Admin</option><option>Sales</option><option>Management</option><option>Executive</option><option>Technician</option><option>Field Supervisor</option><option>Dispatcher</option></select></div>
+      <div class="form-group"><label>On-Call Department</label><select id="editOncallDept"><option value="">Not on on-call rotation</option><option>Automatic Door Division</option><option>Overhead Door Division</option><option>Both Divisions</option></select></div>
     </div>
     <div class="form-row">
-      <div class="form-group"><label>Username</label><input type="text" id="editUsername" /></div>
-      <div class="form-group"><label>Job Title</label><input type="text" id="editRole" /></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Department</label>
-      <select id="editDept">
-        <option value="">— Select Department —</option>
-          <option value="Office Admin">Office Admin</option>
-          <option value="Sales">Sales</option>
-          <option value="Management">Management</option>
-          <option value="Executive">Executive</option>
-          <option value="Technician">Technician</option>
-          <option value="Field Supervisor">Field Supervisor</option>
-          <option value="Dispatcher">Dispatcher</option>
-      </select>
-    </div>
-      <div class="form-group"><label>On-Call Department</label>
-        <select id="editOncallDept">
-          <option value="">Not on on-call rotation</option>
-          <option value="Automatic Door Division">Automatic Door Division</option>
-          <option value="Overhead Door Division">Overhead Door Division</option>
-          <option value="Both Divisions">Both Divisions</option>
-        </select>
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>On-Call Role</label>
-        <select id="editOncallRole">
-          <option value="">—</option>
-          <option value="Leader">Leader</option>
-          <option value="Helper">Helper</option>
-        </select>
-      </div>
-    <div id="editAdminOnlyNote" class="alert alert-warning" style="display:none;font-size:12px;margin-bottom:.5rem">&#128274; Manager mode — hire date, PTO, and username are admin-only.</div>
-    <div class="form-group"><label>Role</label>
-      <select id="editRoleType">
-        <option value="technician">Technician (field employee)</option>
-        <option value="dispatcher">Dispatcher</option>
-        <option value="sales">Sales</option>
-        <option value="billing">Billing</option>
-        <option value="manager">Manager</option>
-        <option value="admin">Admin</option>
-        <option value="global_admin">Global Admin (JohnPaul only)</option>
-      </select>
+      <div class="form-group"><label>On-Call Role</label><select id="editOncallRole"><option value="">—</option><option>Leader</option><option>Helper</option></select></div>
+      <div class="form-group"><label>Role</label><select id="editRoleType"><option value="technician">Technician</option><option value="dispatcher">Dispatcher</option><option value="sales">Sales</option><option value="billing">Billing</option><option value="manager">Manager</option><option value="admin">Admin</option><option value="global_admin">Global Admin</option></select></div>
     </div>
     <input type="hidden" id="editIsAdmin" value="false" />
-    <div class="form-row">
-      <div class="form-group"><label>Phone</label><input type="tel" id="editPhone" /></div>
-      <div class="form-group"><label>Email</label><input type="email" id="editEmail" /></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>PTO Days / Year</label><input type="number" id="editPtoTotal" min="0" /></div>
-      <div class="form-group"><label>PTO Days Remaining</label><input type="number" id="editPtoLeft" min="0" /></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Hire Date</label><input type="date" id="editHireDate" /></div>
-      <div class="form-group"></div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('editUserModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveEditUser()">Save Changes</button>
-    </div>
+    <div id="editAdminOnlyNote" class="alert alert-warning" style="display:none;font-size:12px;margin-bottom:.5rem">&#128274; Manager mode — hire date, PTO, and username are admin-only.</div>
+    <div class="form-row"><div class="form-group"><label>Phone</label><input type="tel" id="editPhone" /></div><div class="form-group"><label>Email</label><input type="email" id="editEmail" /></div></div>
+    <div class="form-row"><div class="form-group"><label>PTO Days / Year</label><input type="number" id="editPtoTotal" min="0" /></div><div class="form-group"><label>PTO Days Remaining</label><input type="number" id="editPtoLeft" min="0" /></div></div>
+    <div class="form-row"><div class="form-group"><label>Hire Date</label><input type="date" id="editHireDate" /></div><div class="form-group"></div></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('editUserModal')">Cancel</button><button class="btn btn-primary" onclick="saveEditUser()">Save Changes</button></div>
   </div>
 </div>
 
-<!-- ═══ ADMIN RESET PASSWORD ═══ -->
 <div class="modal-overlay" id="resetPwModal" onclick="closeOnOverlay(event,'resetPwModal')">
   <div class="modal">
     <div class="modal-header"><span class="modal-title">Reset Employee Password</span><button class="modal-close" onclick="closeModal('resetPwModal')">&#x2715;</button></div>
@@ -972,655 +980,128 @@
     <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem">Resetting password for: <strong id="resetPwName" style="color:var(--text)"></strong></p>
     <div id="resetPwError" class="alert alert-danger" style="display:none"></div>
     <div class="form-group"><label>New Password</label><input type="password" id="resetPwNew" placeholder="At least 6 characters" /></div>
-    <div class="form-group"><label>Confirm Password</label><input type="password" id="resetPwConfirm" placeholder="Repeat new password" /></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('resetPwModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="adminResetPassword()">Reset Password</button>
-    </div>
+    <div class="form-group"><label>Confirm Password</label><input type="password" id="resetPwConfirm" /></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('resetPwModal')">Cancel</button><button class="btn btn-primary" onclick="adminResetPassword()">Reset Password</button></div>
   </div>
 </div>
 
-
-<!-- ═══ SWAP ON-CALL EMPLOYEE ═══ -->
 <div class="modal-overlay" id="swapOncallModal" onclick="closeOnOverlay(event,'swapOncallModal')">
   <div class="modal">
     <div class="modal-header"><span class="modal-title">Swap On-Call Employee</span><button class="modal-close" onclick="closeModal('swapOncallModal')">&#x2715;</button></div>
     <input type="hidden" id="swapOncallId" />
     <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem">Replacing: <strong id="swapOncallCurrentName" style="color:var(--amber)"></strong></p>
     <div class="form-group"><label>Replace With</label><select id="swapOncallNewEmp"></select></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('swapOncallModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveOncallSwap()">Confirm Swap</button>
-    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('swapOncallModal')">Cancel</button><button class="btn btn-primary" onclick="saveOncallSwap()">Confirm Swap</button></div>
   </div>
 </div>
 
-
-<!-- ═══ BLACKOUT DATE ═══ -->
 <div class="modal-overlay" id="blackoutModal" onclick="closeOnOverlay(event,'blackoutModal')">
   <div class="modal">
     <div class="modal-header"><span class="modal-title">Add Blackout Period</span><button class="modal-close" onclick="closeModal('blackoutModal')">&#x2715;</button></div>
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem">Employees will not be able to request PTO during this period.</p>
-    <div class="form-group"><label>Label / Reason</label><input type="text" id="boLabel" placeholder="e.g. Year-End Freeze, Holiday Season" /></div>
-    <div class="form-row">
-      <div class="form-group"><label>Start Date</label><input type="date" id="boStart" /></div>
-      <div class="form-group"><label>End Date</label><input type="date" id="boEnd" /></div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('blackoutModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveBlackout()">Save Blackout</button>
-    </div>
+    <div class="form-group"><label>Label / Reason</label><input type="text" id="boLabel" placeholder="e.g. Year-End Freeze" /></div>
+    <div class="form-row"><div class="form-group"><label>Start Date</label><input type="date" id="boStart" /></div><div class="form-group"><label>End Date</label><input type="date" id="boEnd" /></div></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('blackoutModal')">Cancel</button><button class="btn btn-primary" onclick="saveBlackout()">Save Blackout</button></div>
   </div>
 </div>
 
-
-<!-- ═══ UPLOAD DOCUMENT (Employee) ═══ -->
 <div class="modal-overlay" id="uploadDocModal" onclick="closeOnOverlay(event,'uploadDocModal')">
   <div class="modal">
     <div class="modal-header"><span class="modal-title">Upload Document</span><button class="modal-close" onclick="closeModal('uploadDocModal')">&#x2715;</button></div>
-    <div class="form-group"><label>Document Name</label><input type="text" id="docName" placeholder="e.g. OSHA 10 Certification" /></div>
-    <div class="form-group"><label>Document Type</label>
-      <select id="docType">
-        <option value="certification">Certification</option>
-        <option value="must_card">MUST Card</option>
-        <option value="license">License</option>
-        <option value="other">Other</option>
-      </select>
-    </div>
+    <div class="form-group"><label>Document Name</label><input type="text" id="docName" /></div>
+    <div class="form-group"><label>Document Type</label><select id="docType"><option value="certification">Certification</option><option value="must_card">MUST Card</option><option value="license">License</option><option value="other">Other</option></select></div>
     <div class="form-group"><label>Expiration Date (if applicable)</label><input type="date" id="docExpiry" /></div>
-    <div class="form-group"><label>Notes</label><input type="text" id="docNotes" placeholder="e.g. Expires annually, renewal pending..." /></div>
-    <div class="form-group">
-      <label>File (PDF, JPG, PNG — max 5MB)</label>
-      <input type="file" id="docFile" accept=".pdf,.jpg,.jpeg,.png" style="padding:8px" />
-    </div>
+    <div class="form-group"><label>Notes</label><input type="text" id="docNotes" /></div>
+    <div class="form-group"><label>File (PDF, JPG, PNG — max 5MB)</label><input type="file" id="docFile" accept=".pdf,.jpg,.jpeg,.png" style="padding:8px" /></div>
     <div id="docUploadProgress" style="display:none" class="calc-note">Uploading...</div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('uploadDocModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="uploadDocument()">Upload</button>
-    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('uploadDocModal')">Cancel</button><button class="btn btn-primary" onclick="uploadDocument()">Upload</button></div>
   </div>
 </div>
 
-<!-- ═══ UPLOAD POLICY (Admin) ═══ -->
 <div class="modal-overlay" id="uploadPolicyModal" onclick="closeOnOverlay(event,'uploadPolicyModal')">
   <div class="modal">
     <div class="modal-header"><span class="modal-title">Add Policy / Procedure</span><button class="modal-close" onclick="closeModal('uploadPolicyModal')">&#x2715;</button></div>
-    <div class="form-group"><label>Document Title</label><input type="text" id="policyName" placeholder="e.g. PPE Safety Policy 2026" /></div>
-    <div class="form-group"><label>Category</label>
-      <select id="policyCategory">
-        <option value="safety">Safety</option>
-        <option value="hr">HR</option>
-        <option value="operations">Operations</option>
-        <option value="training">Training</option>
-        <option value="other">Other</option>
-      </select>
-    </div>
-    <div class="form-group"><label>Description</label><textarea id="policyDesc" rows="2" placeholder="Brief description of this document..."></textarea></div>
-    <div class="form-group">
-      <label>File (PDF, JPG, PNG — max 10MB)</label>
-      <input type="file" id="policyFile" accept=".pdf,.jpg,.jpeg,.png" style="padding:8px" />
-    </div>
+    <div class="form-group"><label>Document Title</label><input type="text" id="policyName" /></div>
+    <div class="form-group"><label>Category</label><select id="policyCategory"><option value="safety">Safety</option><option value="hr">HR</option><option value="operations">Operations</option><option value="training">Training</option><option value="other">Other</option></select></div>
+    <div class="form-group"><label>Description</label><textarea id="policyDesc" rows="2"></textarea></div>
+    <div class="form-group"><label>File (PDF, JPG, PNG — max 10MB)</label><input type="file" id="policyFile" accept=".pdf,.jpg,.jpeg,.png" style="padding:8px" /></div>
     <div id="policyUploadProgress" style="display:none" class="calc-note">Uploading...</div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('uploadPolicyModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="uploadPolicy()">Upload</button>
-    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('uploadPolicyModal')">Cancel</button><button class="btn btn-primary" onclick="uploadPolicy()">Upload</button></div>
   </div>
 </div>
 
-
-<!-- ═══ LOG CALL-IN ═══ -->
 <div class="modal-overlay" id="callinModal" onclick="closeOnOverlay(event,'callinModal')">
   <div class="modal">
     <div class="modal-header"><span class="modal-title">Log Call-In</span><button class="modal-close" onclick="closeModal('callinModal')">&#x2715;</button></div>
     <div class="form-group"><label>Employee</label><select id="callinEmpSelect"></select></div>
-    <div class="form-row">
-      <div class="form-group"><label>Date</label><input type="date" id="callinDate" /></div>
-      <div class="form-group"><label>Type</label>
-        <select id="callinType">
-          <option>Sick</option><option>Personal</option><option>No Call No Show</option>
-          <option>FMLA</option><option>Bereavement</option><option>Union Leave</option><option>Approved Absence</option>
-        </select>
-      </div>
-    </div>
-    <div class="form-group"><label>Notes</label><input type="text" id="callinNotes" placeholder="Optional notes..." /></div>
-    <p style="font-size:11px;color:var(--text-muted)">&#9993; Employee will be notified by email if their email is on file.</p>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('callinModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveCallin()">Log Call-In</button>
-    </div>
+    <div class="form-row"><div class="form-group"><label>Date</label><input type="date" id="callinDate" /></div><div class="form-group"><label>Type</label><select id="callinType"><option>Sick</option><option>Personal</option><option>No Call No Show</option><option>FMLA</option><option>Bereavement</option><option>Union Leave</option><option>Approved Absence</option></select></div></div>
+    <div class="form-group"><label>Notes</label><input type="text" id="callinNotes" /></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('callinModal')">Cancel</button><button class="btn btn-primary" onclick="saveCallin()">Log Call-In</button></div>
   </div>
 </div>
 
-<!-- ═══ LOG ATTENDANCE EVENT ═══ -->
 <div class="modal-overlay" id="attendanceEventModal" onclick="closeOnOverlay(event,'attendanceEventModal')">
   <div class="modal">
     <div class="modal-header"><span class="modal-title">Log Attendance Event</span><button class="modal-close" onclick="closeModal('attendanceEventModal')">&#x2715;</button></div>
     <div class="form-group"><label>Employee</label><select id="attEventEmp"></select></div>
-    <div class="form-row">
-      <div class="form-group"><label>Date</label><input type="date" id="attEventDate" /></div>
-      <div class="form-group"><label>Event Type</label>
-        <select id="attEventType">
-          <option value="tardy">Tardy</option>
-          <option value="absence">Absence</option>
-          <option value="early_departure">Early Departure</option>
-        </select>
-      </div>
-    </div>
-    <div class="form-group"><label>Minutes Late/Early (if applicable)</label><input type="number" id="attEventMins" value="0" min="0" /></div>
+    <div class="form-row"><div class="form-group"><label>Date</label><input type="date" id="attEventDate" /></div><div class="form-group"><label>Event Type</label><select id="attEventType"><option value="tardy">Tardy</option><option value="absence">Absence</option><option value="early_departure">Early Departure</option></select></div></div>
+    <div class="form-group"><label>Minutes Late/Early</label><input type="number" id="attEventMins" value="0" min="0" /></div>
     <div class="form-group"><label>Notes</label><input type="text" id="attEventNotes" /></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('attendanceEventModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveAttendanceEvent()">Save</button>
-    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('attendanceEventModal')">Cancel</button><button class="btn btn-primary" onclick="saveAttendanceEvent()">Save</button></div>
   </div>
 </div>
 
-<!-- ═══ QUARTERLY REPORT ═══ -->
 <div class="modal-overlay" id="quarterlyReportModal" onclick="closeOnOverlay(event,'quarterlyReportModal')">
   <div class="modal modal-xl">
     <div class="modal-header"><span class="modal-title">&#128202; Quarterly Attendance Report</span><button class="modal-close" onclick="closeModal('quarterlyReportModal')">&#x2715;</button></div>
-    <div class="form-row" style="margin-bottom:1rem">
-      <div class="form-group"><label>Quarter</label>
-        <select id="reportQuarter"><option>Q1</option><option>Q2</option><option>Q3</option><option>Q4</option></select>
-      </div>
-      <div class="form-group"><label>Year</label>
-        <input type="number" id="reportYear" value="2026" min="2024" max="2030" />
-      </div>
-    </div>
+    <div class="form-row" style="margin-bottom:1rem"><div class="form-group"><label>Quarter</label><select id="reportQuarter"><option>Q1</option><option>Q2</option><option>Q3</option><option>Q4</option></select></div><div class="form-group"><label>Year</label><input type="number" id="reportYear" value="2026" min="2024" max="2030" /></div></div>
     <button class="btn btn-primary" onclick="loadQuarterlyReport()" style="margin-bottom:1rem">Generate Report</button>
     <div id="quarterlyReportContent"></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('quarterlyReportModal')">Close</button>
-      <button class="btn btn-ghost" id="btnPrintReport" style="display:none" onclick="printQuarterlyReport()">&#128438; Print Report</button>
-    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('quarterlyReportModal')">Close</button><button class="btn btn-ghost" id="btnPrintReport" style="display:none" onclick="printQuarterlyReport()">&#128438; Print Report</button></div>
   </div>
 </div>
 
-
-<!-- ═══ EMPLOYEE SELF CALL-IN ═══ -->
 <div class="modal-overlay" id="selfCallinModal" onclick="closeOnOverlay(event,'selfCallinModal')">
   <div class="modal">
     <div class="modal-header"><span class="modal-title">&#128222; Call In</span><button class="modal-close" onclick="closeModal('selfCallinModal')">&#x2715;</button></div>
-    <div class="alert alert-warning" style="margin-bottom:1rem">
-      Submitting this will notify your manager immediately by email.
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Date</label><input type="date" id="selfCallinDate" /></div>
-      <div class="form-group"><label>Reason</label>
-        <select id="selfCallinType">
-          <option>Sick</option>
-          <option>Personal</option>
-          <option>FMLA</option>
-          <option>Bereavement</option>
-          <option>Union Leave</option>
-        </select>
-      </div>
-    </div>
-    <div class="form-group"><label>Notes (optional)</label>
-      <textarea id="selfCallinNotes" rows="2" placeholder="Any additional information for your manager..."></textarea>
-    </div>
+    <div class="alert alert-warning" style="margin-bottom:1rem">Submitting this will notify your manager immediately by email.</div>
+    <div class="form-row"><div class="form-group"><label>Date</label><input type="date" id="selfCallinDate" /></div><div class="form-group"><label>Reason</label><select id="selfCallinType"><option>Sick</option><option>Personal</option><option>FMLA</option><option>Bereavement</option><option>Union Leave</option></select></div></div>
+    <div class="form-group"><label>Notes (optional)</label><textarea id="selfCallinNotes" rows="2"></textarea></div>
     <div id="selfCallinResult" style="display:none"></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('selfCallinModal')">Cancel</button>
-      <button class="btn" style="background:var(--danger);color:#fff;border-color:var(--danger)" onclick="submitSelfCallin()">Submit Call-In</button>
-    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('selfCallinModal')">Cancel</button><button class="btn" style="background:var(--danger);color:#fff;border-color:var(--danger)" onclick="submitSelfCallin()">Submit Call-In</button></div>
   </div>
 </div>
 
-
-<!-- PWA Install Banner -->
-<div id="pwaInstallBanner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:400;background:var(--bg-card);border-top:2px solid var(--amber);padding:12px 16px;display:none;align-items:center;gap:12px;box-shadow:0 -4px 20px rgba(0,0,0,0.4)">
+<div id="pwaInstallBanner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:400;background:var(--bg-card);border-top:2px solid var(--amber);padding:12px 16px;align-items:center;gap:12px;box-shadow:0 -4px 20px rgba(0,0,0,0.4)">
   <img src="/icons/icon-72.png" style="width:40px;height:40px;border-radius:10px" alt="KVM" />
-  <div style="flex:1">
-    <div style="font-family:Oswald,sans-serif;font-size:14px;font-weight:600;color:var(--white)">Install KVM Portal</div>
-    <div style="font-size:11px;color:var(--text-muted)">Add to your home screen for quick access</div>
-  </div>
+  <div style="flex:1"><div style="font-family:Oswald,sans-serif;font-size:14px;font-weight:600;color:var(--white)">Install KVM Portal</div><div style="font-size:11px;color:var(--text-muted)">Add to your home screen for quick access</div></div>
   <button class="btn btn-primary btn-sm" onclick="installPWA()" style="flex-shrink:0">Install</button>
   <button class="btn btn-ghost btn-sm" onclick="dismissInstallBanner()" style="flex-shrink:0">&#x2715;</button>
 </div>
 
-
-<!-- ═══ ADD/EDIT CUSTOMER ═══ -->
 <div class="modal-overlay" id="customerModal" onclick="closeOnOverlay(event,'customerModal')">
   <div class="modal modal-xl" style="max-height:90vh;overflow-y:auto">
-    <div class="modal-header">
-      <span class="modal-title" id="customerModalTitle">Add Customer</span>
-      <button class="modal-close" onclick="closeModal('customerModal')">&#x2715;</button>
-    </div>
+    <div class="modal-header"><span class="modal-title" id="customerModalTitle">Add Customer</span><button class="modal-close" onclick="closeModal('customerModal')">&#x2715;</button></div>
     <input type="hidden" id="custModalId" />
-
-    <!-- BASIC INFO -->
     <div class="modal-section">Basic Information</div>
-    <div class="form-row">
-      <div class="form-group" style="flex:2"><label>Company Name *</label><input type="text" id="custName" /></div>
-      <div class="form-group"><label>Customer Type</label>
-        <select id="custType" onchange="togglePartnerFields()">
-          <option>General Contractor</option>
-          <option>Property Manager</option>
-          <option>End User / Building Owner</option>
-          <option>Municipality / Government</option>
-          <option>Industrial</option>
-          <option>Retail</option>
-          <option>Partner Door Company</option>
-        </select>
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>QB Customer ID</label><input type="text" id="custQbId" placeholder="From QuickBooks" /></div>
-      <div class="form-group"><label>Credit Terms</label>
-        <select id="custTerms">
-          <option>Net 30</option><option>Net 60</option><option>Net 90</option>
-          <option>Due on Receipt</option><option>Net 15</option>
-        </select>
-      </div>
-      <div class="form-group"><label>Assigned Salesperson</label><select id="custSalesperson"><option value="0">— Unassigned —</option></select></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="custTaxExempt" /> Tax Exempt</label></div>
-      <div class="form-group"><label>Tax Exempt #</label><input type="text" id="custTaxExemptNum" /></div>
-      <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="custUnion" /> Union Required</label></div>
-      <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="custCertPayroll" /> Certified Payroll</label></div>
-    </div>
-
-    <!-- BILLING ADDRESS -->
-    <div class="modal-section">Billing Address & Contact</div>
+    <div class="form-row"><div class="form-group" style="flex:2"><label>Company Name *</label><input type="text" id="custName" /></div><div class="form-group"><label>Customer Type</label><select id="custType" onchange="togglePartnerFields()"><option>General Contractor</option><option>Property Manager</option><option>End User / Building Owner</option><option>Municipality / Government</option><option>Industrial</option><option>Retail</option><option>Partner Door Company</option></select></div></div>
+    <div class="form-row"><div class="form-group"><label>QB Customer ID</label><input type="text" id="custQbId" /></div><div class="form-group"><label>Credit Terms</label><select id="custTerms"><option>Net 30</option><option>Net 60</option><option>Net 90</option><option>Due on Receipt</option><option>Net 15</option></select></div><div class="form-group"><label>Assigned Salesperson</label><select id="custSalesperson"><option value="0">— Unassigned —</option></select></div></div>
+    <div class="form-row"><div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="custTaxExempt" /> Tax Exempt</label></div><div class="form-group"><label>Tax Exempt #</label><input type="text" id="custTaxExemptNum" /></div><div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="custUnion" /> Union Required</label></div><div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="custCertPayroll" /> Certified Payroll</label></div></div>
+    <div class="modal-section">Billing Address &amp; Contact</div>
     <div class="form-group"><label>Address</label><input type="text" id="custBillingAddr" /></div>
-    <div class="form-row">
-      <div class="form-group" style="flex:2"><label>City</label><input type="text" id="custBillingCity" /></div>
-      <div class="form-group"><label>State</label><input type="text" id="custBillingState" placeholder="MI" maxlength="2" /></div>
-      <div class="form-group"><label>ZIP</label><input type="text" id="custBillingZip" /></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Phone</label><input type="tel" id="custBillingPhone" /></div>
-      <div class="form-group"><label>Fax</label><input type="tel" id="custBillingFax" /></div>
-      <div class="form-group"><label>Billing Email</label><input type="email" id="custBillingEmail" /></div>
-    </div>
-
-    <!-- PARTNER FIELDS (shown only for Partner Door Company) -->
+    <div class="form-row"><div class="form-group" style="flex:2"><label>City</label><input type="text" id="custBillingCity" /></div><div class="form-group"><label>State</label><input type="text" id="custBillingState" maxlength="2" /></div><div class="form-group"><label>ZIP</label><input type="text" id="custBillingZip" /></div></div>
+    <div class="form-row"><div class="form-group"><label>Phone</label><input type="tel" id="custBillingPhone" /></div><div class="form-group"><label>Fax</label><input type="tel" id="custBillingFax" /></div><div class="form-group"><label>Billing Email</label><input type="email" id="custBillingEmail" /></div></div>
     <div id="partnerFields" style="display:none">
       <div class="modal-section" style="color:var(--amber)">&#9888; Partner Door Company Settings</div>
-      <div class="alert alert-warning" style="margin-bottom:.75rem;font-size:12px">
-        Jobs for this customer will generate a 48-hour billing alert for the billing team if not invoiced in time.
-        Pricing, quotes, and amounts must NEVER be discussed with their end customers.
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>48-Hr Billing Requirement</label>
-          <select id="custPartnerBillingHours">
-            <option value="48">48 hours (standard)</option>
-            <option value="24">24 hours</option>
-            <option value="72">72 hours</option>
-            <option value="10days">10 days</option>
-          </select>
-        </div>
-        <div class="form-group"><label>Their Billing / Submission Email</label><input type="email" id="custPartnerBillingEmail" placeholder="e.g. pfgfax@dhpace.com" /></div>
-      </div>
-      <div class="form-group"><label>Labor Rate Notes</label><textarea id="custPartnerLaborNotes" rows="2" placeholder="e.g. Dock Leveler/EOD - $25, Dock Shelter - $0 visual inspection only"></textarea></div>
-      <div class="form-group"><label>Check-In / Dispatch Instructions (shown to tech on iPad)</label><textarea id="custPartnerCheckin" rows="3" placeholder="e.g. Technician must check in and check out with Distribution Center Manager or on-duty Manager."></textarea></div>
-      <div class="form-group"><label>Work Order Instructions (shown to tech)</label><textarea id="custPartnerWOInstructions" rows="3" placeholder="e.g. Signed service ticket must be completed for each visit. Before/after photos required..."></textarea></div>
-      <div class="form-group"><label>Billing Notes / Special Requirements</label><textarea id="custPartnerBillingNotes" rows="2" placeholder="e.g. Material and Labor must be itemized. No duplicate PO invoices..."></textarea></div>
+      <div class="form-row"><div class="form-group"><label>Billing Requirement</label><select id="custPartnerBillingHours"><option value="48">48 hours (standard)</option><option value="24">24 hours</option><option value="72">72 hours</option><option value="10days">10 days</option></select></div><div class="form-group"><label>Their Billing Email</label><input type="email" id="custPartnerBillingEmail" /></div></div>
+      <div class="form-group"><label>Labor Rate Notes</label><textarea id="custPartnerLaborNotes" rows="2"></textarea></div>
+      <div class="form-group"><label>Check-In Instructions</label><textarea id="custPartnerCheckin" rows="3"></textarea></div>
+      <div class="form-group"><label>Work Order Instructions</label><textarea id="custPartnerWOInstructions" rows="3"></textarea></div>
+      <div class="form-group"><label>Billing Notes</label><textarea id="custPartnerBillingNotes" rows="2"></textarea></div>
     </div>
-
-    <!-- INTERNAL NOTES -->
     <div class="modal-section">Internal Notes</div>
-    <div class="form-group"><textarea id="custInternalNotes" rows="2" placeholder="Slow pay, key account, special requirements, etc..."></textarea></div>
-
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('customerModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveCustomer()">Save Customer</button>
-    </div>
+    <div class="form-group"><textarea id="custInternalNotes" rows="2"></textarea></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('customerModal')">Cancel</button><button class="btn btn-primary" onclick="saveCustomer()">Save Customer</button></div>
   </div>
 </div>
 
-<!-- ═══ ADD SITE ═══ -->
-<div class="modal-overlay" id="siteModal" onclick="closeOnOverlay(event,'siteModal')">
-  <div class="modal">
-    <div class="modal-header"><span class="modal-title" id="siteModalTitle">Add Site</span><button class="modal-close" onclick="closeModal('siteModal')">&#x2715;</button></div>
-    <input type="hidden" id="siteModalId" />
-    <div class="form-row">
-      <div class="form-group" style="flex:2"><label>Site Name</label><input type="text" id="siteName" placeholder="e.g. Kroger #1042 — 14 Mile & Mound" /></div>
-      <div class="form-group"><label>Store / Unit #</label><input type="text" id="siteStoreNum" /></div>
-    </div>
-    <div class="form-group"><label>Address</label><input type="text" id="siteAddr" /></div>
-    <div class="form-row">
-      <div class="form-group" style="flex:2"><label>City</label><input type="text" id="siteCity" /></div>
-      <div class="form-group"><label>State</label><input type="text" id="siteState" placeholder="MI" maxlength="2" /></div>
-      <div class="form-group"><label>ZIP</label><input type="text" id="siteZip" /></div>
-    </div>
-    <div class="form-group"><label>Site Notes</label><textarea id="siteNotes" rows="2" placeholder="Bay count, hours, access codes, etc..."></textarea></div>
-    <div class="form-group"><label>Access Instructions</label><textarea id="siteAccess" rows="2" placeholder="Gate code, who to call on arrival, etc..."></textarea></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('siteModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveSite()">Save Site</button>
-    </div>
-  </div>
-</div>
-
-<!-- ═══ ADD CONTACT ═══ -->
-<div class="modal-overlay" id="contactModal" onclick="closeOnOverlay(event,'contactModal')">
-  <div class="modal">
-    <div class="modal-header"><span class="modal-title" id="contactModalTitle">Add Contact</span><button class="modal-close" onclick="closeModal('contactModal')">&#x2715;</button></div>
-    <input type="hidden" id="contactModalId" />
-    <div class="form-row">
-      <div class="form-group"><label>First Name *</label><input type="text" id="contactFirst" /></div>
-      <div class="form-group"><label>Last Name</label><input type="text" id="contactLast" /></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Title</label><input type="text" id="contactTitle" placeholder="e.g. Facilities Manager" /></div>
-      <div class="form-group"><label>Associated Site</label><select id="contactSite"><option value="0">— All locations (corporate contact) —</option></select></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Phone</label><input type="tel" id="contactPhone" /></div>
-      <div class="form-group"><label>Alt Phone</label><input type="tel" id="contactPhone2" /></div>
-      <div class="form-group"><label>Email</label><input type="email" id="contactEmail" /></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="contactPrimary" /> Primary Contact</label></div>
-      <div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="contactBilling" /> Billing Contact</label></div>
-    </div>
-    <div class="form-group"><label>Notes</label><input type="text" id="contactNotes" /></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('contactModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveContact()">Save Contact</button>
-    </div>
-  </div>
-</div>
-
-<!-- ═══ ADD EQUIPMENT ═══ -->
-<div class="modal-overlay" id="equipmentModal" onclick="closeOnOverlay(event,'equipmentModal')">
-  <div class="modal">
-    <div class="modal-header"><span class="modal-title" id="equipModalTitle">Add Equipment</span><button class="modal-close" onclick="closeModal('equipmentModal')">&#x2715;</button></div>
-    <input type="hidden" id="equipModalId" />
-    <div class="form-row">
-      <div class="form-group"><label>Equipment Type</label>
-        <select id="equipType">
-          <option>Overhead Door</option><option>Dock Leveler</option><option>Truck Restraint</option>
-          <option>Dock Seal/Shelter</option><option>Commercial Operator</option>
-          <option>Fire Door</option><option>Grille</option><option>Other</option>
-        </select>
-      </div>
-      <div class="form-group"><label>Site</label><select id="equipSite"><option value="0">— Not site-specific —</option></select></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Manufacturer</label><input type="text" id="equipMfr" placeholder="e.g. Overhead Door, Rite-Hite" /></div>
-      <div class="form-group"><label>Model</label><input type="text" id="equipModel" /></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Serial Number</label><input type="text" id="equipSerial" /></div>
-      <div class="form-group"><label>Size</label><input type="text" id="equipSize" placeholder="e.g. 10x10, 12W x 14H" /></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Install Date</label><input type="date" id="equipInstall" /></div>
-      <div class="form-group"><label>Warranty Expires</label><input type="date" id="equipWarranty" /></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label>Condition</label>
-        <select id="equipCondition">
-          <option>Good</option><option>Fair</option><option>Poor</option><option>Unknown</option>
-        </select>
-      </div>
-      <div class="form-group"><label>Location in Building</label><input type="text" id="equipLocation" placeholder="e.g. Bay 3, North Loading Dock" /></div>
-    </div>
-    <div class="form-group"><label>Notes</label><textarea id="equipNotes" rows="2"></textarea></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('equipmentModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveEquipment()">Save Equipment</button>
-    </div>
-  </div>
-</div>
-
-<!-- ═══ UPLOAD PARTNER DOCUMENT ═══ -->
-<div class="modal-overlay" id="partnerDocModal" onclick="closeOnOverlay(event,'partnerDocModal')">
-  <div class="modal">
-    <div class="modal-header"><span class="modal-title">Upload Partner Document</span><button class="modal-close" onclick="closeModal('partnerDocModal')">&#x2715;</button></div>
-    <div class="form-row">
-      <div class="form-group"><label>Document Type</label>
-        <select id="partnerDocType">
-          <option value="work_order_form">Work Order Form (blank)</option>
-          <option value="pm_checklist">PM Checklist</option>
-          <option value="billing_instructions">Billing Instructions</option>
-          <option value="rate_sheet">Rate Sheet / Pricing</option>
-          <option value="other">Other</option>
-        </select>
-      </div>
-      <div class="form-group"><label>Document Name</label><input type="text" id="partnerDocName" placeholder="e.g. DH-Pace Service Ticket 2024" /></div>
-    </div>
-    <div class="form-group"><label>Notes</label><input type="text" id="partnerDocNotes" /></div>
-    <div class="form-group"><label>File (PDF, JPG, PNG — max 10MB)</label><input type="file" id="partnerDocFile" accept=".pdf,.jpg,.jpeg,.png" style="padding:8px" /></div>
-    <div id="partnerDocProgress" style="display:none" class="calc-note">Uploading...</div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('partnerDocModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="savePartnerDoc()">Upload</button>
-    </div>
-  </div>
-</div>
-
-
-<!-- ═══ AWARD ACHIEVEMENT ═══ -->
-<div class="modal-overlay" id="achievementModal" onclick="closeOnOverlay(event,'achievementModal')">
-  <div class="modal">
-    <div class="modal-header"><span class="modal-title">🏆 Award Achievement</span><button class="modal-close" onclick="closeModal('achievementModal')">&#x2715;</button></div>
-    <div class="form-group"><label>Employee</label><select id="achEmployee"></select></div>
-    <div class="form-row">
-      <div class="form-group"><label>Icon</label>
-        <select id="achIcon">
-          <option value="🏆">🏆 Achievement</option><option value="⭐">⭐ Star</option>
-          <option value="🎯">🎯 On Target</option><option value="💪">💪 Hard Work</option>
-          <option value="📞">📞 No Callbacks</option><option value="⏰">⏰ Perfect Attendance</option>
-          <option value="🔧">🔧 Top Tech</option><option value="🤝">🤝 Team Player</option>
-          <option value="🚀">🚀 Above &amp; Beyond</option><option value="🛡️">🛡️ Safety First</option>
-        </select>
-      </div>
-      <div class="form-group" style="flex:2"><label>Title</label><input type="text" id="achTitle" placeholder="e.g. No Callbacks — Q1 2026" /></div>
-    </div>
-    <div class="form-group"><label>Description</label><textarea id="achDesc" rows="2" placeholder="Details about this achievement..."></textarea></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('achievementModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="saveAchievement()">Award</button>
-    </div>
-  </div>
-</div>
-
-<!-- ═══ QB BULK IMPORT ═══ -->
-<div class="modal-overlay" id="qbImportModal" onclick="closeOnOverlay(event,'qbImportModal')">
-  <div class="modal modal-lg">
-    <div class="modal-header"><span class="modal-title">&#8659; Import Customers from QuickBooks</span><button class="modal-close" onclick="closeModal('qbImportModal')">&#x2715;</button></div>
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem">
-      Export your customer list from QuickBooks Desktop as an IIF file, then paste the contents below.<br/>
-      In QB Desktop: <strong>File → Utilities → Export → Lists to IIF Files → Customers</strong>
-    </p>
-    <div class="form-group">
-      <label>Paste IIF File Contents</label>
-      <textarea id="qbImportContent" rows="10" placeholder="Paste the contents of your QB IIF export file here..." style="font-family:monospace;font-size:11px"></textarea>
-    </div>
-    <div id="qbImportResult" style="display:none;margin-bottom:.75rem"></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('qbImportModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="runQBImport()">Import Customers</button>
-    </div>
-  </div>
-</div>
-
-
-<!-- ═══ PERFECT ATTENDANCE REPORT ═══ -->
-<div class="modal-overlay" id="perfectAttendanceModal" onclick="closeOnOverlay(event,'perfectAttendanceModal')">
-  <div class="modal modal-lg">
-    <div class="modal-header">
-      <span class="modal-title">&#127942; Perfect Attendance Check</span>
-      <button class="modal-close" onclick="closeModal('perfectAttendanceModal')">&#x2715;</button>
-    </div>
-    <div id="perfectAttContent" style="min-height:100px;padding:.5rem 0"></div>
-    <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('perfectAttendanceModal')">Close</button>
-      <button class="btn btn-ghost" id="btnPrintPerfect" style="display:none" onclick="printPerfectAttendance()">&#128438; Print</button>
-      <button class="btn btn-primary" id="btnPostPerfect" style="display:none" onclick="postPerfectAttendance()">Post to Announcements</button>
-    </div>
-  </div>
-</div>
-<div id="toast" class="toast"></div>
-<script src="/js/app.js"></script>
-
-<script>
-// ─── SERVICE WORKER REGISTRATION ─────────────────────────────────────────────
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', async () => {
-    try {
-      const reg = await navigator.serviceWorker.register('/sw.js');
-      console.log('[PWA] Service worker registered:', reg.scope);
-
-      // Listen for messages from service worker (geofence checks)
-      navigator.serviceWorker.addEventListener('message', event => {
-        if (event.data && event.data.type === 'GEOFENCE_CHECK') {
-          // Trigger a geofence check in the app
-          if (typeof window.runGeofenceCheck === 'function') window.runGeofenceCheck();
-        }
-      });
-
-      // Register for periodic background sync (Android)
-      if ('periodicSync' in reg) {
-        try {
-          await reg.periodicSync.register('geofence-check', { minInterval: 5 * 60 * 1000 });
-          console.log('[PWA] Periodic sync registered');
-        } catch(e) {
-          console.log('[PWA] Periodic sync not available:', e.message);
-        }
-      }
-    } catch(e) {
-      console.log('[PWA] Service worker registration failed:', e);
-    }
-  });
-}
-
-// ─── PUSH NOTIFICATION PERMISSION ────────────────────────────────────────────
-async function requestNotificationPermission() {
-  if (!('Notification' in window)) return false;
-  if (Notification.permission === 'granted') return true;
-  if (Notification.permission === 'denied') return false;
-  const result = await Notification.requestPermission();
-  return result === 'granted';
-}
-
-// Show a local notification (works on Android PWA, limited on iOS)
-async function showLocalNotification(title, body, url) {
-  if (!('serviceWorker' in navigator)) return;
-  const granted = await requestNotificationPermission();
-  if (!granted) return;
-  const reg = await navigator.serviceWorker.ready;
-  reg.showNotification(title, {
-    body,
-    icon: '/icons/icon-192.png',
-    badge: '/icons/icon-72.png',
-    vibrate: [200, 100, 200],
-    tag: 'kvm-geofence',
-    requireInteraction: true,
-    data: { url: url || '/' }
-  });
-}
-
-// Expose globally so geofence monitor can use it
-window.showLocalNotification = showLocalNotification;
-
-// ─── PWA INSTALL PROMPT ───────────────────────────────────────────────────────
-let deferredInstallPrompt = null;
-
-window.addEventListener('beforeinstallprompt', e => {
-  e.preventDefault();
-  deferredInstallPrompt = e;
-  // Show install banner after 30 seconds if not dismissed
-  setTimeout(() => {
-    const banner = document.getElementById('pwaInstallBanner');
-    if (banner && deferredInstallPrompt) banner.style.display = 'flex';
-  }, 30000);
-});
-
-window.addEventListener('appinstalled', () => {
-  deferredInstallPrompt = null;
-  const banner = document.getElementById('pwaInstallBanner');
-  if (banner) banner.style.display = 'none';
-  console.log('[PWA] App installed!');
-});
-
-function installPWA() {
-  if (!deferredInstallPrompt) return;
-  deferredInstallPrompt.prompt();
-  deferredInstallPrompt.userChoice.then(choice => {
-    deferredInstallPrompt = null;
-    const banner = document.getElementById('pwaInstallBanner');
-    if (banner) banner.style.display = 'none';
-  });
-}
-
-function dismissInstallBanner() {
-  const banner = document.getElementById('pwaInstallBanner');
-  if (banner) banner.style.display = 'none';
-  sessionStorage.setItem('pwa-banner-dismissed', '1');
-}
-
-// ─── iOS INSTALL INSTRUCTIONS ─────────────────────────────────────────────────
-// iOS doesn't support beforeinstallprompt — show manual instructions
-function isIOS() {
-  return /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
-}
-function isInStandaloneMode() {
-  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
-}
-
-if (isIOS() && !isInStandaloneMode() && !sessionStorage.getItem('ios-install-dismissed')) {
-  setTimeout(() => {
-    const banner = document.getElementById('pwaInstallBanner');
-    if (banner) {
-      banner.querySelector('.btn-primary').outerHTML = '<span style="font-size:11px;color:var(--amber)">Tap Share &#8679; → Add to Home Screen</span>';
-      banner.style.display = 'flex';
-    }
-  }, 5000);
-}
-
-// ─── HANDLE URL SHORTCUTS ─────────────────────────────────────────────────────
-// Handle shortcuts from manifest (e.g. ?page=timeclock, ?action=callin)
-window.addEventListener('DOMContentLoaded', () => {
-  const params = new URLSearchParams(window.location.search);
-  const page = params.get('page');
-  const action = params.get('action');
-  if (page || action) {
-    // Will be handled after login in init()
-    window._pwaStartPage = page;
-    window._pwaStartAction = action;
-  }
-});
-</script>
-
-</body>
-</html>
-<script>
-// Patch autoScheduleModal HTML after DOM loads
-document.addEventListener('DOMContentLoaded', function() {
-  const modal = document.getElementById('autoScheduleModal');
-  if (modal) {
-    modal.querySelector('.modal').innerHTML = `
-      <div class="modal-header"><span class="modal-title">Auto-Schedule Builder</span><button class="modal-close" onclick="closeModal('autoScheduleModal')">✕</button></div>
-      <div class="form-row">
-        <div class="form-group"><label>Schedule Start Date</label><input type="date" id="schedStart" oninput="previewSchedule()" /></div>
-        <div class="form-group"><label>Number of Weeks</label><select id="schedWeeks" onchange="previewSchedule()"><option value="4">4 weeks</option><option value="6">6 weeks</option><option value="8" selected>8 weeks</option><option value="12">12 weeks</option><option value="26">26 weeks</option></select></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Rotation Frequency</label><select id="schedFreq" onchange="previewSchedule()"><option value="1">Weekly</option><option value="2">Bi-weekly</option><option value="4">Monthly (4 weeks)</option></select></div>
-        <div class="form-group"></div>
-      </div>
-      <div class="modal-section">Continue Rotation From Position</div>
-      <div class="form-row">
-        <div class="form-group"><label>Overhead Door — Start at position #</label><input type="number" id="ohStartIdx" value="0" min="0" oninput="previewSchedule()" /></div>
-        <div class="form-group"><label>Automatic Door — Start at position #</label><input type="number" id="auStartIdx" value="0" min="0" oninput="previewSchedule()" /></div>
-      </div>
-      <div class="modal-section">Overhead Door Division Rotation Order</div>
-      <div id="rotListOverhead" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px"></div>
-      <div class="modal-section">Automatic Door Division Rotation Order</div>
-      <div id="rotListAutomatic" style="max-height:120px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px"></div>
-      <div class="modal-section">Schedule Preview</div>
-      <div id="schedPreview" style="max-height:300px;overflow-y:auto"></div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="closeModal('autoScheduleModal')">Cancel</button>
-        <button class="btn btn-primary" onclick="applyAutoSchedule()">Apply Schedule</button>
-      </div>`;
-  }
-});
-</script>
+<div class="modal-overlay" id
