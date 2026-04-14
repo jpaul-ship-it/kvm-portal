@@ -359,6 +359,65 @@ async function initDb() {
   try { db.run(`CREATE TABLE IF NOT EXISTS company_policies (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, category TEXT DEFAULT 'other', description TEXT DEFAULT '', file_name TEXT DEFAULT '', file_data TEXT DEFAULT '', file_type TEXT DEFAULT '', file_size INTEGER DEFAULT 0, uploaded_by TEXT NOT NULL, uploaded_at TEXT DEFAULT (datetime('now')))`); saveDb(); } catch(e){}
   // Quotes migration for existing deployments
   try { db.run(`CREATE TABLE IF NOT EXISTS quotes (id INTEGER PRIMARY KEY AUTOINCREMENT, quote_number TEXT DEFAULT '', rep_id INTEGER NOT NULL, rep_name TEXT NOT NULL, client_name TEXT DEFAULT '', contact_name TEXT DEFAULT '', address TEXT DEFAULT '', email TEXT DEFAULT '', phone TEXT DEFAULT '', project_name TEXT DEFAULT '', scope_summary TEXT DEFAULT '', scopes TEXT DEFAULT '[]', options TEXT DEFAULT '[]', notes TEXT DEFAULT '', subtotal TEXT DEFAULT '', tax TEXT DEFAULT '', total TEXT DEFAULT '', valid_for TEXT DEFAULT '30 days', status TEXT DEFAULT 'draft', created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')))`); saveDb(); } catch(e){}
+  // Projects migration
+  try { db.run(`CREATE TABLE IF NOT EXISTS projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_number TEXT DEFAULT '',
+    project_name TEXT NOT NULL,
+    customer_id INTEGER DEFAULT 0,
+    customer_name TEXT DEFAULT '',
+    site_id INTEGER DEFAULT 0,
+    location TEXT DEFAULT '',
+    quote_id INTEGER DEFAULT 0,
+    quote_number TEXT DEFAULT '',
+    contract_value TEXT DEFAULT '',
+    billing_type TEXT DEFAULT 'aftermarket',
+    scope_brief TEXT DEFAULT '',
+    status TEXT DEFAULT 'awarded',
+    start_date TEXT DEFAULT '',
+    target_end_date TEXT DEFAULT '',
+    actual_end_date TEXT DEFAULT '',
+    foreman_id INTEGER DEFAULT 0,
+    foreman_name TEXT DEFAULT '',
+    assigned_techs TEXT DEFAULT '[]',
+    notes TEXT DEFAULT '',
+    created_by INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`); saveDb(); } catch(e){}
+  try { db.run(`CREATE TABLE IF NOT EXISTS project_phases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    phase_name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    status TEXT DEFAULT 'pending',
+    start_date TEXT DEFAULT '',
+    end_date TEXT DEFAULT '',
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`); saveDb(); } catch(e){}
+  try { db.run(`CREATE TABLE IF NOT EXISTS project_hours (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    phase_id INTEGER DEFAULT 0,
+    user_id INTEGER NOT NULL,
+    user_name TEXT NOT NULL,
+    work_date TEXT NOT NULL,
+    hours REAL NOT NULL DEFAULT 0,
+    entry_type TEXT DEFAULT 'manual',
+    timeclock_id INTEGER DEFAULT 0,
+    notes TEXT DEFAULT '',
+    logged_by TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now'))
+  )`); saveDb(); } catch(e){}
+  try { db.run(`CREATE TABLE IF NOT EXISTS project_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    author_id INTEGER NOT NULL,
+    author_name TEXT NOT NULL,
+    note TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`); saveDb(); } catch(e){}
 
   const userCount = get('SELECT COUNT(*) as c FROM users');
   if (!userCount || userCount.c === 0) seedDatabase();
@@ -1318,6 +1377,143 @@ app.post('/api/quotes/:id/duplicate', requireAuth, (req, res) => {
   const id = runGetId(`INSERT INTO quotes (quote_number,rep_id,rep_name,client_name,contact_name,address,email,phone,project_name,scope_summary,scopes,options,notes,subtotal,tax,total,valid_for,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [(q.quote_number||'')+'-COPY', req.session.userId, rep_name, q.client_name, q.contact_name, q.address, q.email, q.phone, (q.project_name||'')+' (Copy)', q.scope_summary, q.scopes, q.options, q.notes, q.subtotal, q.tax, q.total, q.valid_for, 'draft']);
   res.json({ id });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── PROJECTS ROUTES ──────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// List projects
+app.get('/api/projects', requireAuth, (req, res) => {
+  const { status, search } = req.query;
+  let sql = `SELECT p.*, 
+    (SELECT COUNT(*) FROM project_phases WHERE project_id=p.id) as phase_count,
+    (SELECT COALESCE(SUM(hours),0) FROM project_hours WHERE project_id=p.id) as total_hours
+    FROM projects p WHERE 1=1`;
+  const params = [];
+  if (status) { sql += ' AND p.status=?'; params.push(status); }
+  if (search) { sql += ' AND (p.project_name LIKE ? OR p.customer_name LIKE ? OR p.job_number LIKE ?)'; const s='%'+search+'%'; params.push(s,s,s); }
+  sql += ' ORDER BY p.updated_at DESC';
+  res.json(all(sql, params));
+});
+
+// Get single project with phases, hours, notes
+app.get('/api/projects/:id', requireAuth, (req, res) => {
+  const p = get('SELECT * FROM projects WHERE id=?', [req.params.id]);
+  if (!p) return res.status(404).json({error:'Not found'});
+  try { p.assigned_techs = JSON.parse(p.assigned_techs || '[]'); } catch(e) { p.assigned_techs = []; }
+  p.phases = all('SELECT * FROM project_phases WHERE project_id=? ORDER BY sort_order, id', [p.id]);
+  p.hours = all(`SELECT ph.*, u.avatar_color FROM project_hours ph 
+    LEFT JOIN users u ON u.id=ph.user_id
+    WHERE ph.project_id=? ORDER BY ph.work_date DESC, ph.created_at DESC`, [p.id]);
+  p.notes = all('SELECT * FROM project_notes WHERE project_id=? ORDER BY created_at DESC', [p.id]);
+  p.total_hours = p.hours.reduce((s,h) => s + (h.hours||0), 0);
+  res.json(p);
+});
+
+// Create project
+app.post('/api/projects', requireAuth, (req, res) => {
+  const { job_number, project_name, customer_id, customer_name, site_id, location, quote_id, quote_number,
+    contract_value, billing_type, scope_brief, status, start_date, target_end_date, foreman_id, foreman_name,
+    assigned_techs, notes } = req.body;
+  if (!project_name) return res.status(400).json({error:'Project name required'});
+  const id = runGetId(`INSERT INTO projects 
+    (job_number,project_name,customer_id,customer_name,site_id,location,quote_id,quote_number,
+     contract_value,billing_type,scope_brief,status,start_date,target_end_date,foreman_id,foreman_name,
+     assigned_techs,notes,created_by)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [job_number||'', project_name, customer_id||0, customer_name||'', site_id||0, location||'',
+     quote_id||0, quote_number||'', contract_value||'', billing_type||'aftermarket', scope_brief||'',
+     status||'awarded', start_date||'', target_end_date||'', foreman_id||0, foreman_name||'',
+     JSON.stringify(assigned_techs||[]), notes||'', req.session.userId]);
+  res.json({id});
+});
+
+// Update project
+app.put('/api/projects/:id', requireAuth, (req, res) => {
+  const p = get('SELECT id FROM projects WHERE id=?', [req.params.id]);
+  if (!p) return res.status(404).json({error:'Not found'});
+  const { job_number, project_name, customer_id, customer_name, site_id, location, quote_id, quote_number,
+    contract_value, billing_type, scope_brief, status, start_date, target_end_date, actual_end_date,
+    foreman_id, foreman_name, assigned_techs, notes } = req.body;
+  run(`UPDATE projects SET job_number=?,project_name=?,customer_id=?,customer_name=?,site_id=?,location=?,
+    quote_id=?,quote_number=?,contract_value=?,billing_type=?,scope_brief=?,status=?,start_date=?,
+    target_end_date=?,actual_end_date=?,foreman_id=?,foreman_name=?,assigned_techs=?,notes=?,
+    updated_at=datetime('now') WHERE id=?`,
+    [job_number||'', project_name, customer_id||0, customer_name||'', site_id||0, location||'',
+     quote_id||0, quote_number||'', contract_value||'', billing_type||'aftermarket', scope_brief||'',
+     status||'awarded', start_date||'', target_end_date||'', actual_end_date||'', foreman_id||0,
+     foreman_name||'', JSON.stringify(assigned_techs||[]), notes||'', req.params.id]);
+  res.json({ok:true});
+});
+
+app.delete('/api/projects/:id', requireAdmin, (req, res) => {
+  run('DELETE FROM projects WHERE id=?', [req.params.id]);
+  run('DELETE FROM project_phases WHERE project_id=?', [req.params.id]);
+  run('DELETE FROM project_hours WHERE project_id=?', [req.params.id]);
+  run('DELETE FROM project_notes WHERE project_id=?', [req.params.id]);
+  res.json({ok:true});
+});
+
+// ─── PHASES ───────────────────────────────────────────────────────────────────
+app.post('/api/projects/:id/phases', requireAuth, (req, res) => {
+  const { phase_name, description, status, start_date, end_date, sort_order } = req.body;
+  if (!phase_name) return res.status(400).json({error:'Phase name required'});
+  const id = runGetId('INSERT INTO project_phases (project_id,phase_name,description,status,start_date,end_date,sort_order) VALUES (?,?,?,?,?,?,?)',
+    [req.params.id, phase_name, description||'', status||'pending', start_date||'', end_date||'', sort_order||0]);
+  run("UPDATE projects SET updated_at=datetime('now') WHERE id=?", [req.params.id]);
+  res.json({id});
+});
+
+app.put('/api/projects/:id/phases/:pid', requireAuth, (req, res) => {
+  const { phase_name, description, status, start_date, end_date, sort_order } = req.body;
+  run('UPDATE project_phases SET phase_name=?,description=?,status=?,start_date=?,end_date=?,sort_order=? WHERE id=? AND project_id=?',
+    [phase_name, description||'', status||'pending', start_date||'', end_date||'', sort_order||0, req.params.pid, req.params.id]);
+  run("UPDATE projects SET updated_at=datetime('now') WHERE id=?", [req.params.id]);
+  res.json({ok:true});
+});
+
+app.delete('/api/projects/:id/phases/:pid', requireAuth, (req, res) => {
+  run('DELETE FROM project_phases WHERE id=? AND project_id=?', [req.params.pid, req.params.id]);
+  res.json({ok:true});
+});
+
+// ─── HOURS ────────────────────────────────────────────────────────────────────
+app.get('/api/projects/:id/hours', requireAuth, (req, res) => {
+  res.json(all('SELECT * FROM project_hours WHERE project_id=? ORDER BY work_date DESC', [req.params.id]));
+});
+
+app.post('/api/projects/:id/hours', requireAuth, (req, res) => {
+  const { user_id, user_name, work_date, hours, phase_id, entry_type, timeclock_id, notes } = req.body;
+  if (!user_id || !work_date || !hours) return res.status(400).json({error:'user_id, work_date, hours required'});
+  const logger = get('SELECT first_name,last_name FROM users WHERE id=?', [req.session.userId]);
+  const loggedBy = logger ? logger.first_name + (logger.last_name?' '+logger.last_name:'') : '';
+  const id = runGetId('INSERT INTO project_hours (project_id,phase_id,user_id,user_name,work_date,hours,entry_type,timeclock_id,notes,logged_by) VALUES (?,?,?,?,?,?,?,?,?,?)',
+    [req.params.id, phase_id||0, user_id, user_name, work_date, parseFloat(hours), entry_type||'manual', timeclock_id||0, notes||'', loggedBy]);
+  run("UPDATE projects SET updated_at=datetime('now') WHERE id=?", [req.params.id]);
+  res.json({id});
+});
+
+app.delete('/api/projects/:id/hours/:hid', requireAuth, (req, res) => {
+  run('DELETE FROM project_hours WHERE id=? AND project_id=?', [req.params.hid, req.params.id]);
+  res.json({ok:true});
+});
+
+// ─── NOTES ────────────────────────────────────────────────────────────────────
+app.post('/api/projects/:id/notes', requireAuth, (req, res) => {
+  const { note } = req.body;
+  if (!note) return res.status(400).json({error:'Note text required'});
+  const u = get('SELECT first_name,last_name FROM users WHERE id=?', [req.session.userId]);
+  const author_name = u ? u.first_name + (u.last_name?' '+u.last_name:'') : '';
+  const id = runGetId('INSERT INTO project_notes (project_id,author_id,author_name,note) VALUES (?,?,?,?)',
+    [req.params.id, req.session.userId, author_name, note]);
+  run("UPDATE projects SET updated_at=datetime('now') WHERE id=?", [req.params.id]);
+  res.json({id});
+});
+
+app.delete('/api/projects/:id/notes/:nid', requireAuth, (req, res) => {
+  run('DELETE FROM project_notes WHERE id=? AND project_id=?', [req.params.nid, req.params.id]);
+  res.json({ok:true});
 });
 
 // ─── CATCH-ALL ────────────────────────────────────────────────────────────────
