@@ -3442,6 +3442,9 @@ async function renderProjectTab() {
         }).join('')}</tbody>
       </table></div>` : '<div class="empty-state">No hours logged yet.</div>'}`;
 
+  } else if (projectTabActive === 'costs') {
+    await renderCostTab();
+    return;
   } else if (projectTabActive === 'log') {
     const notes = p.notes || [];
     el.innerHTML = `
@@ -3747,4 +3750,361 @@ async function deleteProjectNote(nid) {
     currentProjectData = await api('GET', '/api/projects/' + currentProjectId);
     renderProjectTab();
   } catch(e) { showToast(e.message, 'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── JOB COSTING ──────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const COST_CATEGORIES = ['materials','equipment','labor','subcontractors'];
+const COST_CAT_LABELS = { materials:'Materials', equipment:'Equipment', labor:'Labor', subcontractors:'Subcontractors' };
+const COST_CAT_COLORS = { materials:'#2980b9', equipment:'#8e44ad', labor:'#e67e22', subcontractors:'#16a085' };
+const COST_CAT_ICONS  = { materials:'📦', equipment:'🔧', labor:'👷', subcontractors:'🤝' };
+
+function fmtMoney(val) {
+  const n = parseFloat(val)||0;
+  return '$' + n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+// ─── COST TAB RENDERER ────────────────────────────────────────────────────────
+async function renderCostTab() {
+  const p = currentProjectData;
+  const el = $('projDetailContent');
+  if (!el || !p) return;
+
+  const costs = p.costs || [];
+  const hours = p.hours || [];
+
+  // Build actuals per category
+  const actuals = { materials:0, equipment:0, labor:0, subcontractors:0 };
+  costs.forEach(c => { if (actuals[c.category] !== undefined) actuals[c.category] += parseFloat(c.total_cost)||0; });
+  // Labor from hours — use a rate if available, else just show hours
+  const totalLaborHours = hours.reduce((s,h) => s+(h.hours||0), 0);
+  // Budget
+  const budgets = {
+    materials: parseFloat(p.budget_materials)||0,
+    equipment: parseFloat(p.budget_equipment)||0,
+    labor:     parseFloat(p.budget_labor)||0,
+    subcontractors: parseFloat(p.budget_subs)||0
+  };
+  const contractVal = parseFloat((p.contract_value||'').replace(/[^0-9.]/g,''))||0;
+  const totalActual = Object.values(actuals).reduce((s,v)=>s+v,0);
+  const totalBudget = Object.values(budgets).reduce((s,v)=>s+v,0);
+  const margin = contractVal - totalActual;
+  const marginPct = contractVal ? ((margin/contractVal)*100).toFixed(1) : null;
+
+  function budgetBar(cat) {
+    const b = budgets[cat], a = actuals[cat];
+    const pct = b ? Math.min((a/b)*100,100) : (a>0?100:0);
+    const color = pct>=90 ? '#e74c3c' : pct>=70 ? '#e67e22' : '#27ae60';
+    return `
+      <div style="margin-bottom:1rem">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <span style="font-size:13px;font-weight:600">${COST_CAT_ICONS[cat]} ${COST_CAT_LABELS[cat]}</span>
+          <span style="font-size:12px;color:var(--text-muted)">${fmtMoney(a)} <span style="color:var(--text-faint)">/ ${b ? fmtMoney(b) : 'no budget'}</span></span>
+        </div>
+        <div style="height:8px;background:#222;border-radius:4px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:${color};border-radius:4px;transition:width .3s"></div>
+        </div>
+        <div style="font-size:10px;color:${pct>=90?'#e74c3c':pct>=70?'#e67e22':'var(--text-faint)'};margin-top:2px">${pct.toFixed(0)}% used${b&&a>b?` — <strong style="color:#e74c3c">OVER by ${fmtMoney(a-b)}</strong>`:''}${cat==='labor'&&totalLaborHours?` · ${totalLaborHours.toFixed(1)}h logged`:''}
+        </div>
+      </div>`;
+  }
+
+  el.innerHTML = `
+    <!-- Summary Cards -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.75rem;margin-bottom:1.25rem">
+      ${contractVal ? `<div class="card" style="text-align:center">
+        <div style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Contract Value</div>
+        <div style="font-size:22px;font-weight:700;color:var(--amber)">${fmtMoney(contractVal)}</div>
+      </div>` : ''}
+      <div class="card" style="text-align:center">
+        <div style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Total Cost</div>
+        <div style="font-size:22px;font-weight:700;color:var(--white)">${fmtMoney(totalActual)}</div>
+      </div>
+      ${contractVal ? `<div class="card" style="text-align:center">
+        <div style="font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">Margin</div>
+        <div style="font-size:22px;font-weight:700;color:${margin>=0?'#27ae60':'#e74c3c'}">${fmtMoney(margin)}</div>
+        ${marginPct ? `<div style="font-size:11px;color:var(--text-faint)">${marginPct}%</div>` : ''}
+      </div>` : ''}
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.25rem">
+      <!-- Budget vs Actual -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Budget vs Actual</span>
+          <button class="btn btn-ghost btn-sm" onclick="openEditBudgets()">Edit Budgets</button>
+        </div>
+        ${COST_CATEGORIES.map(cat => budgetBar(cat)).join('')}
+      </div>
+
+      <!-- Category Breakdown -->
+      <div class="card">
+        <div class="card-header"><span class="card-title">Cost Breakdown</span></div>
+        ${COST_CATEGORIES.map(cat => {
+          const a = actuals[cat];
+          const pct = totalActual ? ((a/totalActual)*100).toFixed(1) : 0;
+          const color = COST_CAT_COLORS[cat];
+          return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <div style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></div>
+            <div style="flex:1;font-size:13px">${COST_CAT_ICONS[cat]} ${COST_CAT_LABELS[cat]}</div>
+            <div style="font-size:13px;font-weight:600">${fmtMoney(a)}</div>
+            <div style="font-size:11px;color:var(--text-faint);width:36px;text-align:right">${pct}%</div>
+          </div>`;
+        }).join('')}
+        <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px;display:flex;justify-content:space-between;font-weight:700">
+          <span>Total</span><span style="color:var(--amber)">${fmtMoney(totalActual)}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cost Line Items -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Cost Entries</span>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" onclick="openAiInvoice()">📄 AI Invoice Upload</button>
+          <button class="btn btn-primary btn-sm" onclick="openAddCost()">+ Add Cost</button>
+        </div>
+      </div>
+      ${costs.length ? `<div class="table-wrap"><table class="data-table">
+        <thead><tr><th>PO #</th><th>Category</th><th>Vendor</th><th>Description</th><th>Qty</th><th>Unit Cost</th><th>Total</th><th>Invoice #</th><th>Date</th><th></th></tr></thead>
+        <tbody>${costs.map(c => `<tr>
+          <td style="font-family:monospace;font-size:12px;color:var(--amber);white-space:nowrap">${c.po_number||'—'}</td>
+          <td><span style="font-size:11px;font-weight:700;color:${COST_CAT_COLORS[c.category]||'#888'}">${COST_CAT_ICONS[c.category]||''} ${COST_CAT_LABELS[c.category]||c.category}</span></td>
+          <td style="font-size:12px">${c.vendor||'—'}</td>
+          <td style="font-size:13px;font-weight:500">${c.description}</td>
+          <td style="font-size:12px;color:var(--text-muted)">${parseFloat(c.quantity)===1?'—':c.quantity}</td>
+          <td style="font-size:12px;color:var(--text-muted)">${parseFloat(c.unit_cost)>0?fmtMoney(c.unit_cost):'—'}</td>
+          <td style="font-weight:700;color:var(--white)">${fmtMoney(c.total_cost)}</td>
+          <td style="font-size:12px;color:var(--text-muted)">${c.invoice_number||'—'}</td>
+          <td style="font-size:12px;color:var(--text-muted)">${c.invoice_date?fmtDate(c.invoice_date):'—'}</td>
+          <td style="display:flex;gap:4px">
+            <button class="btn btn-ghost btn-sm" onclick="openEditCost(${c.id})">Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteCost(${c.id})">✕</button>
+          </td>
+        </tr>`).join('')}</tbody>
+      </table></div>` : '<div class="empty-state">No cost entries yet. Add costs manually or use AI invoice upload.</div>'}
+    </div>`;
+}
+
+// ─── BUDGET EDIT ──────────────────────────────────────────────────────────────
+function openEditBudgets() {
+  const p = currentProjectData;
+  $('budgetMaterials').value = p.budget_materials || '';
+  $('budgetEquipment').value = p.budget_equipment || '';
+  $('budgetLabor').value = p.budget_labor || '';
+  $('budgetSubs').value = p.budget_subs || '';
+  openModal('budgetModal');
+}
+
+async function saveBudgets() {
+  const payload = {
+    budget_materials: parseFloat($('budgetMaterials').value)||0,
+    budget_equipment: parseFloat($('budgetEquipment').value)||0,
+    budget_labor:     parseFloat($('budgetLabor').value)||0,
+    budget_subs:      parseFloat($('budgetSubs').value)||0
+  };
+  try {
+    await api('PUT', '/api/projects/' + currentProjectId + '/budgets', payload);
+    showToast('Budgets saved!', 'success');
+    closeModal('budgetModal');
+    currentProjectData = await api('GET', '/api/projects/' + currentProjectId);
+    renderCostTab();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+// ─── COST ENTRY CRUD ─────────────────────────────────────────────────────────
+async function openAddCost() {
+  $('costModalId').value = '';
+  $('costModalTitle').textContent = 'Add Cost Entry';
+  $('costVendor').value = '';
+  $('costDesc').value = '';
+  $('costQty').value = '1';
+  $('costUnitCost').value = '';
+  $('costTotal').value = '';
+  $('costInvNum').value = '';
+  $('costInvDate').value = new Date().toISOString().split('T')[0];
+  $('costNotes').value = '';
+  if ($('costCategory')) $('costCategory').value = 'materials';
+  // Show next PO
+  try { const r = await api('GET','/api/po/next'); if($('costPoPreview')) $('costPoPreview').textContent = 'Next PO: ' + r.po_number; } catch(e){}
+  openModal('costModal');
+}
+
+function openEditCost(costId) {
+  const c = (currentProjectData.costs||[]).find(x => x.id === costId);
+  if (!c) return;
+  $('costModalId').value = c.id;
+  $('costModalTitle').textContent = 'Edit Cost Entry';
+  if ($('costCategory')) $('costCategory').value = c.category || 'materials';
+  $('costVendor').value = c.vendor || '';
+  $('costDesc').value = c.description || '';
+  $('costQty').value = c.quantity || 1;
+  $('costUnitCost').value = c.unit_cost || '';
+  $('costTotal').value = c.total_cost || '';
+  $('costInvNum').value = c.invoice_number || '';
+  $('costInvDate').value = c.invoice_date || '';
+  $('costNotes').value = c.notes || '';
+  if ($('costPoPreview')) $('costPoPreview').textContent = 'PO: ' + (c.po_number||'—');
+  openModal('costModal');
+}
+
+function calcCostTotal() {
+  const qty = parseFloat($('costQty').value)||1;
+  const unit = parseFloat($('costUnitCost').value)||0;
+  if (unit > 0) $('costTotal').value = (qty * unit).toFixed(2);
+}
+
+async function saveCost() {
+  const id = $('costModalId').value;
+  const payload = {
+    category: $('costCategory') ? $('costCategory').value : 'materials',
+    vendor: $('costVendor').value.trim(),
+    description: $('costDesc').value.trim(),
+    quantity: parseFloat($('costQty').value)||1,
+    unit_cost: parseFloat($('costUnitCost').value)||0,
+    total_cost: parseFloat($('costTotal').value)||0,
+    invoice_number: $('costInvNum').value.trim(),
+    invoice_date: $('costInvDate').value,
+    notes: $('costNotes').value.trim()
+  };
+  if (!payload.description) return showToast('Description is required.', 'error');
+  if (!payload.total_cost) return showToast('Enter a total cost.', 'error');
+  try {
+    if (id) {
+      await api('PUT', '/api/projects/' + currentProjectId + '/costs/' + id, payload);
+      showToast('Cost updated!', 'success');
+    } else {
+      const r = await api('POST', '/api/projects/' + currentProjectId + '/costs', payload);
+      showToast('Cost added! PO: ' + r.po_number, 'success');
+    }
+    closeModal('costModal');
+    currentProjectData = await api('GET', '/api/projects/' + currentProjectId);
+    renderCostTab();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function deleteCost(costId) {
+  if (!confirm('Delete this cost entry?')) return;
+  try {
+    await api('DELETE', '/api/projects/' + currentProjectId + '/costs/' + costId);
+    showToast('Cost deleted.', 'success');
+    currentProjectData = await api('GET', '/api/projects/' + currentProjectId);
+    renderCostTab();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+// ─── AI INVOICE UPLOAD ────────────────────────────────────────────────────────
+function openAiInvoice() {
+  $('aiInvoiceFile').value = '';
+  $('aiInvoiceStatus').textContent = '';
+  $('aiInvoiceStatus').className = '';
+  $('aiInvoiceLines').innerHTML = '';
+  $('aiInvoiceConfirmBtn').style.display = 'none';
+  openModal('aiInvoiceModal');
+}
+
+async function processAiInvoice() {
+  const file = $('aiInvoiceFile').files[0];
+  if (!file) return showToast('Select a file first.', 'error');
+  const statusEl = $('aiInvoiceStatus');
+  const linesEl = $('aiInvoiceLines');
+  statusEl.textContent = '🤖 Analyzing invoice...';
+  statusEl.className = 'quotes-ai-status thinking';
+  linesEl.innerHTML = '';
+  $('aiInvoiceConfirmBtn').style.display = 'none';
+
+  try {
+    const base64 = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result.split(',')[1]);
+      r.onerror = () => rej(new Error('Read failed'));
+      r.readAsDataURL(file);
+    });
+    const mediaType = file.type || 'image/jpeg';
+    const p = currentProjectData;
+    const result = await api('POST', '/api/projects/' + currentProjectId + '/costs/extract', {
+      image_data: base64, media_type: mediaType,
+      project_name: p.project_name, job_number: p.job_number
+    });
+
+    if (!result.lines || !result.lines.length) {
+      statusEl.textContent = '⚠ No line items found. Try a clearer image.';
+      statusEl.className = 'quotes-ai-status error';
+      return;
+    }
+
+    statusEl.textContent = `✓ Found ${result.lines.length} line item${result.lines.length!==1?'s':''}. Review and confirm below.`;
+    statusEl.className = 'quotes-ai-status done';
+
+    linesEl.innerHTML = `
+      <div style="background:#111;border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;margin-top:10px">
+        <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;margin-bottom:8px;font-size:11px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.05em">
+          <span>Vendor: <strong style="color:var(--amber)">${result.vendor||'Unknown'}</strong></span>
+          <span>Invoice: <strong>${result.invoice_number||'—'}</strong></span>
+          <span>Date: <strong>${result.invoice_date||'—'}</strong></span>
+        </div>
+        <table class="data-table" style="font-size:12px">
+          <thead><tr><th>Category</th><th>Description</th><th>Qty</th><th>Unit</th><th>Total</th><th>✓</th></tr></thead>
+          <tbody>${result.lines.map((line,i) => `<tr>
+            <td><select id="aiCat_${i}" style="background:#111;border:1px solid var(--border);color:var(--text);padding:3px 6px;font-size:11px;border-radius:4px">
+              ${COST_CATEGORIES.map(c=>`<option value="${c}" ${c===line.category?'selected':''}>${COST_CAT_LABELS[c]}</option>`).join('')}
+            </select></td>
+            <td><input id="aiDesc_${i}" type="text" value="${line.description}" style="background:transparent;border:none;border-bottom:1px dashed var(--border);color:var(--text);width:100%;padding:2px 0;font-size:12px;outline:none" /></td>
+            <td style="text-align:center">${parseFloat(line.quantity)||1}</td>
+            <td>${line.unit_cost>0?fmtMoney(line.unit_cost):'—'}</td>
+            <td style="font-weight:700">${fmtMoney(line.total_cost)}</td>
+            <td style="text-align:center"><input type="checkbox" id="aiChk_${i}" checked /></td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>`;
+
+    // Store parsed data for confirmation
+    $('aiInvoiceConfirmBtn').style.display = 'inline-flex';
+    $('aiInvoiceConfirmBtn')._parsed = result;
+    $('aiInvoiceConfirmBtn')._lineCount = result.lines.length;
+  } catch(e) {
+    statusEl.textContent = '✗ Error: ' + e.message;
+    statusEl.className = 'quotes-ai-status error';
+  }
+}
+
+async function confirmAiInvoice() {
+  const btn = $('aiInvoiceConfirmBtn');
+  const parsed = btn._parsed;
+  const count = btn._lineCount;
+  if (!parsed) return;
+
+  const statusEl = $('aiInvoiceStatus');
+  statusEl.textContent = 'Saving...';
+  statusEl.className = 'quotes-ai-status thinking';
+
+  let saved = 0;
+  for (let i = 0; i < count; i++) {
+    const chk = $('aiChk_' + i);
+    if (!chk || !chk.checked) continue;
+    const line = parsed.lines[i];
+    const desc = $('aiDesc_' + i) ? $('aiDesc_' + i).value.trim() : line.description;
+    const cat  = $('aiCat_' + i) ? $('aiCat_' + i).value : (line.category||'materials');
+    try {
+      await api('POST', '/api/projects/' + currentProjectId + '/costs', {
+        category: cat, vendor: parsed.vendor||'',
+        description: desc, quantity: parseFloat(line.quantity)||1,
+        unit_cost: parseFloat(line.unit_cost)||0, total_cost: parseFloat(line.total_cost)||0,
+        invoice_number: parsed.invoice_number||'', invoice_date: parsed.invoice_date||''
+      });
+      saved++;
+    } catch(e) { console.error('Line save error', e); }
+  }
+
+  statusEl.textContent = `✓ ${saved} item${saved!==1?'s':''} saved!`;
+  statusEl.className = 'quotes-ai-status done';
+  showToast(saved + ' cost entr' + (saved===1?'y':'ies') + ' added!', 'success');
+  setTimeout(async () => {
+    closeModal('aiInvoiceModal');
+    currentProjectData = await api('GET', '/api/projects/' + currentProjectId);
+    renderCostTab();
+  }, 1200);
 }
