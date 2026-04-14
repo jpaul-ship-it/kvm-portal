@@ -939,7 +939,7 @@ app.post('/api/timeclock/send-timecards',requireAdmin,async(req,res)=>{
 });
 
 // ─── ATTENDANCE ───────────────────────────────────────────────────────────────
-const SHIFT_START_HOUR=6;const SHIFT_START_MIN=0;const TARDY_GRACE_MINS=20;
+const SHIFT_START_HOUR=6;const SHIFT_START_MIN=0;const TARDY_GRACE_MINS=25;
 function getQuarter(dateStr){const m=parseInt(dateStr.split('-')[1]);return m<=3?'Q1':m<=6?'Q2':m<=9?'Q3':'Q4';}
 function getQuarterStart(quarter,year){const s={Q1:`${year}-01-01`,Q2:`${year}-04-01`,Q3:`${year}-07-01`,Q4:`${year}-10-01`};return s[quarter];}
 function getQuarterEnd(quarter,year){const e={Q1:`${year}-03-31`,Q2:`${year}-06-30`,Q3:`${year}-09-30`,Q4:`${year}-12-31`};return e[quarter];}
@@ -993,6 +993,17 @@ app.get('/api/attendance/report',requireAdmin,(req,res)=>{
   });
   res.json({quarter:q,year:y,qStart,qEnd,report});
 });
+app.get('/api/attendance/brief',requireAuth,(req,res)=>{
+  if(!req.session.isAdmin && req.session.roleType!=='manager' && req.session.roleType!=='global_admin'){
+    return res.status(403).json({error:'Forbidden'});
+  }
+  const today=new Date().toISOString().split('T')[0];
+  const ptoOff=all(`SELECT user_id,user_name,type,start_date,end_date FROM pto_requests WHERE status='approved' AND start_date<=? AND end_date>=? ORDER BY user_name`,[today,today]);
+  const calledIn=all(`SELECT user_id,user_name,call_in_type,notes FROM callins WHERE call_in_date=? ORDER BY user_name`,[today]);
+  const tardy=all(`SELECT user_id,user_name,minutes_late,notes FROM attendance WHERE event_date=? AND event_type='tardy' ORDER BY user_name`,[today]);
+  res.json({date:today,off:ptoOff,callins:calledIn,tardy:tardy});
+});
+
 app.post('/api/attendance/callin',requireAdmin,async(req,res)=>{
   const {user_id,call_in_date,call_in_type,notes}=req.body;
   if(!user_id||!call_in_date||!call_in_type) return res.status(400).json({error:'Missing fields'});
