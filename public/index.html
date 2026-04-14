@@ -1111,7 +1111,7 @@
 
 
 <!-- ═══ PROJECTS PAGE ═══ -->
-<div id="page-projects" class="page" style="display:none">
+<div id="page-projects" class="page">
   <div class="page-header">
     <h1 class="page-title">🏗️ Projects</h1>
     <button class="btn btn-primary" onclick="openAddProject()">+ New Project</button>
@@ -1134,7 +1134,7 @@
 </div>
 
 <!-- ═══ PROJECT DETAIL PAGE ═══ -->
-<div id="page-projectDetail" class="page" style="display:none">
+<div id="page-projectDetail" class="page">
   <div class="page-header" style="flex-wrap:wrap;gap:.5rem">
     <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
       <button class="btn btn-ghost btn-sm" onclick="showPage('projects',null);loadProjects()">← Projects</button>
@@ -1155,6 +1155,7 @@
     <button class="tab-btn active" onclick="setProjectTab('overview',this)">Overview</button>
     <button class="tab-btn" onclick="setProjectTab('phases',this)">Phases</button>
     <button class="tab-btn" onclick="setProjectTab('hours',this)">Hours</button>
+    <button class="tab-btn" onclick="setProjectTab('costs',this)">💰 Job Costing</button>
     <button class="tab-btn" onclick="setProjectTab('log',this)">Project Log</button>
   </div>
   <div id="projDetailContent"></div>
@@ -1251,6 +1252,75 @@
     </div>
     <div class="form-group"><label>Notes</label><input type="text" id="hoursModalNotes" placeholder="Optional notes about the work performed" /></div>
     <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('hoursModal')">Cancel</button><button class="btn btn-primary" onclick="saveProjectHours()">Log Hours</button></div>
+  </div>
+</div>
+
+<!-- ═══ BUDGET MODAL ═══ -->
+<div class="modal-overlay" id="budgetModal" onclick="closeOnOverlay(event,'budgetModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Edit Cost Budgets</span><button class="modal-close" onclick="closeModal('budgetModal')">&#x2715;</button></div>
+    <div class="alert" style="background:var(--amber-bg2);border:1px solid var(--amber-dim);color:var(--amber);margin-bottom:1rem;font-size:12px">Enter your quoted/budgeted cost for each category. These come from your estimate breakdown.</div>
+    <div class="form-row">
+      <div class="form-group"><label>📦 Materials Budget ($)</label><input type="number" id="budgetMaterials" placeholder="0.00" min="0" step="0.01" /></div>
+      <div class="form-group"><label>🔧 Equipment Budget ($)</label><input type="number" id="budgetEquipment" placeholder="0.00" min="0" step="0.01" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>👷 Labor Budget ($)</label><input type="number" id="budgetLabor" placeholder="0.00" min="0" step="0.01" /></div>
+      <div class="form-group"><label>🤝 Subcontractors Budget ($)</label><input type="number" id="budgetSubs" placeholder="0.00" min="0" step="0.01" /></div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('budgetModal')">Cancel</button><button class="btn btn-primary" onclick="saveBudgets()">Save Budgets</button></div>
+  </div>
+</div>
+
+<!-- ═══ COST ENTRY MODAL ═══ -->
+<div class="modal-overlay" id="costModal" onclick="closeOnOverlay(event,'costModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title" id="costModalTitle">Add Cost Entry</span><button class="modal-close" onclick="closeModal('costModal')">&#x2715;</button></div>
+    <input type="hidden" id="costModalId" />
+    <div style="font-size:11px;color:var(--amber);margin-bottom:.75rem;font-family:monospace" id="costPoPreview"></div>
+    <div class="form-row">
+      <div class="form-group"><label>Category</label>
+        <select id="costCategory" style="width:100%">
+          <option value="materials">📦 Materials</option>
+          <option value="equipment">🔧 Equipment</option>
+          <option value="labor">👷 Labor</option>
+          <option value="subcontractors">🤝 Subcontractors</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:2"><label>Vendor / Supplier</label><input type="text" id="costVendor" placeholder="e.g. Stanley Access Technologies" /></div>
+    </div>
+    <div class="form-group"><label>Description *</label><input type="text" id="costDesc" placeholder="What was purchased or performed" /></div>
+    <div class="form-row">
+      <div class="form-group"><label>Qty</label><input type="number" id="costQty" value="1" min="0.01" step="0.01" oninput="calcCostTotal()" /></div>
+      <div class="form-group"><label>Unit Cost ($)</label><input type="number" id="costUnitCost" placeholder="0.00" min="0" step="0.01" oninput="calcCostTotal()" /></div>
+      <div class="form-group"><label>Total Cost ($) *</label><input type="number" id="costTotal" placeholder="0.00" min="0" step="0.01" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Invoice #</label><input type="text" id="costInvNum" placeholder="Vendor invoice number" /></div>
+      <div class="form-group"><label>Invoice Date</label><input type="date" id="costInvDate" /></div>
+    </div>
+    <div class="form-group"><label>Notes</label><input type="text" id="costNotes" placeholder="Optional notes" /></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('costModal')">Cancel</button><button class="btn btn-primary" onclick="saveCost()">Save Entry</button></div>
+  </div>
+</div>
+
+<!-- ═══ AI INVOICE MODAL ═══ -->
+<div class="modal-overlay" id="aiInvoiceModal" onclick="closeOnOverlay(event,'aiInvoiceModal')">
+  <div class="modal modal-xl">
+    <div class="modal-header"><span class="modal-title">📄 AI Invoice Upload</span><button class="modal-close" onclick="closeModal('aiInvoiceModal')">&#x2715;</button></div>
+    <div class="alert" style="background:#111;border:1px solid var(--amber-dim);color:var(--text-muted);margin-bottom:1rem;font-size:12px">
+      Upload a photo or PDF of a vendor invoice or receipt. The AI will extract line items, vendor info, and amounts for your review before saving.
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:1rem;flex-wrap:wrap">
+      <input type="file" id="aiInvoiceFile" accept="image/*,.pdf" style="flex:1;background:#111;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-size:13px" />
+      <button class="btn btn-primary" onclick="processAiInvoice()">🤖 Extract</button>
+    </div>
+    <div id="aiInvoiceStatus" style="font-size:13px;margin-bottom:.5rem"></div>
+    <div id="aiInvoiceLines"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('aiInvoiceModal')">Cancel</button>
+      <button class="btn btn-primary" id="aiInvoiceConfirmBtn" style="display:none" onclick="confirmAiInvoice()">✓ Save Selected Items</button>
+    </div>
   </div>
 </div>
 
