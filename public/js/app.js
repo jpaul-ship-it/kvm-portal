@@ -163,7 +163,40 @@ $('dashStats').innerHTML=`
     loadMyAchievements();
   } catch(e){ console.error(e); }
 }
+async function loadAttendanceBrief(){
+  const container = $('dailyAttendanceBrief');
+  if(!container) return;
+  if(!currentUser || (!currentUser.is_admin && currentUser.role_type !== 'manager' && currentUser.role_type !== 'global_admin')){
+    container.style.display = 'none';
+    return;
+  }
+  try {
+    const data = await api('GET','/api/attendance/brief');
+    const d = new Date(data.date + 'T12:00:00');
+    const dateStr = d.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+    $('attendanceBriefDate').textContent = dateStr;
+    const col = (title, items, emptyMsg, badgeClass, renderItem) => `
+      <div class="card" style="background:var(--bg-surface)">
+        <div class="card-header"><span class="card-title">${title} <span class="badge ${badgeClass}">${items.length}</span></span></div>
+        ${items.length ? items.map(renderItem).join('') : `<div class="empty-state" style="padding:1rem;font-size:0.85rem">${emptyMsg}</div>`}
+      </div>`;
+    $('attendanceBriefGrid').innerHTML = `
+      <div class="attendance-brief-cols" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1rem">
+        ${col('🏖️ Off Today', data.off, 'No one scheduled off.', 'badge-blue',
+          i => `<div style="padding:0.5rem 0;border-bottom:1px solid var(--border)"><strong>${i.user_name}</strong><div style="font-size:0.8rem;color:var(--text-muted)">${i.type||'PTO'}</div></div>`)}
+        ${col('📞 Called In', data.callins, 'No call-ins today.', 'badge-amber',
+          i => `<div style="padding:0.5rem 0;border-bottom:1px solid var(--border)"><strong>${i.user_name}</strong><div style="font-size:0.8rem;color:var(--text-muted)">${i.call_in_type}${i.notes?' — '+i.notes:''}</div></div>`)}
+        ${col('⏰ Late', data.tardy, 'No tardies today.', 'badge-red',
+          i => `<div style="padding:0.5rem 0;border-bottom:1px solid var(--border)"><strong>${i.user_name}</strong><div style="font-size:0.8rem;color:var(--text-muted)">${i.minutes_late||0} min late</div></div>`)}
+      </div>`;
+    container.style.display = 'block';
+  } catch(e){
+    console.error('Attendance brief load failed:', e);
+    container.style.display = 'none';
+  }
+}
 
+function refreshAttendanceBrief(){ loadAttendanceBrief(); }
 // ─── ANNOUNCEMENTS ────────────────────────────────────────────────────────────
 function annItemHTML(a, showDelete) {
   const cls=a.priority==='urgent'?'urgent':a.priority==='info'?'info':'';
