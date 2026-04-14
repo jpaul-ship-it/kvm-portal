@@ -115,7 +115,7 @@ function showPage(name, el) {
   if(pg) pg.classList.add('active');
   if(el) el.classList.add('active');
   $('sidebar').classList.remove('open');
-  const map={dashboard:renderDashboard,customers:loadCustomers,customerDetail:loadCustomerDetail,projects:loadProjects,projectDetail:loadProjectDetail,myTimecards:renderMyTimecards,announcements:renderAnnouncements,news:renderNews,oncall:renderOncall,directory:renderDirectory,pto:renderPto,ptoCalendar:renderPtoCalendar,myDocs:renderMyDocs,policies:renderPolicies,timeclock:initTimeclock,adminTimeclock:loadAdminTimecards,adminAlerts:renderAlerts,adminAttendance:initAdminAttendance,adminUsers:renderAdminUsers,adminPto:renderAdminPto,adminBlackout:renderBlackouts,adminRotation:renderRotation,adminSettings:loadSettings};
+  const map={dashboard:renderDashboard,customers:loadCustomers,customerDetail:loadCustomerDetail,projects:loadProjects,projectDetail:loadProjectDetail,sales:quotesShowList,myTimecards:renderMyTimecards,announcements:renderAnnouncements,news:renderNews,oncall:renderOncall,directory:renderDirectory,pto:renderPto,ptoCalendar:renderPtoCalendar,myDocs:renderMyDocs,policies:renderPolicies,timeclock:initTimeclock,adminTimeclock:loadAdminTimecards,adminAlerts:renderAlerts,adminAttendance:initAdminAttendance,adminUsers:renderAdminUsers,adminPto:renderAdminPto,adminBlackout:renderBlackouts,adminRotation:renderRotation,adminSettings:loadSettings};
   if(map[name]) map[name]();
 }
 
@@ -729,10 +729,27 @@ async function loadSettings() {
     const s=await api('GET','/api/settings');
     ['smtp_host','smtp_port','smtp_user','smtp_from_name'].forEach(k=>{ if(s[k]&&$(k)) $(k).value=s[k]; });
     if(s.gcal_id&&$('gcalId')) $('gcalId').value=s.gcal_id;
+    if(s.po_format&&$('poFormat')) $('poFormat').value=s.po_format;
+    if(s.po_prefix&&$('poPrefix')) $('poPrefix').value=s.po_prefix||'';
+    updatePoPreview();
   } catch(e){}
 }
 async function saveSmtpSettings() {
   try { await api('POST','/api/settings',{smtp_host:$('smtpHost').value,smtp_port:$('smtpPort').value,smtp_user:$('smtpUser').value,smtp_pass:$('smtpPass').value,smtp_from_name:$('smtpFromName').value}); showToast('Email settings saved!','success'); } catch(e){showToast(e.message,'error');}
+}
+async function savePoSettings() {
+  const fmt = ($('poFormat')&&$('poFormat').value.trim())||'MMYY-###';
+  const pfx = ($('poPrefix')&&$('poPrefix').value.trim())||'';
+  try { await api('POST','/api/settings',{po_format:fmt,po_prefix:pfx}); showToast('PO settings saved!','success'); updatePoPreview(); } catch(e){showToast(e.message,'error');}
+}
+function updatePoPreview() {
+  const el=$('poFormatPreview'); if(!el) return;
+  const fmt=($('poFormat')&&$('poFormat').value)||'MMYY-###';
+  const pfx=($('poPrefix')&&$('poPrefix').value)||'';
+  const now=new Date(); const mm=String(now.getMonth()+1).padStart(2,'0'); const yy=String(now.getFullYear()).slice(-2);
+  const hc=(fmt.match(/#+/)||['###'])[0].length;
+  let ex=fmt.replace('MMYY',mm+yy).replace('MM',mm).replace('YY',yy).replace(/#+/,'1'.padStart(hc,'0'));
+  el.textContent='Preview: '+(pfx||'')+ex+', '+(pfx||'')+ex.replace(/\d+$/, n=>String(parseInt(n)+1).padStart(hc,'0'));
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
@@ -4108,3 +4125,369 @@ async function confirmAiInvoice() {
     renderCostTab();
   }, 1200);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── SALES & QUOTES ───────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let quotesAllQuotes = [];
+let quotesCurrentId = null;
+let quotesCurrentScopes = [];
+let quotesCurrentOptions = [];
+let quotesCurrentFile = null;
+
+function quotesShowList() {
+  $('quotes-list-view').style.display = 'block';
+  $('quotes-builder-view').style.display = 'none';
+  $('salesHeaderBtns').style.display = 'flex';
+  $('salesPageSub').textContent = 'Create, manage, and track service quotes';
+  quotesCurrentId = null;
+  quotesLoadList();
+}
+
+function quotesNewQuote() {
+  quotesCurrentId = null;
+  quotesCurrentScopes = [];
+  quotesCurrentOptions = [];
+  quotesCurrentFile = null;
+  $('quotes-list-view').style.display = 'none';
+  $('quotes-builder-view').style.display = 'block';
+  $('salesPageSub').textContent = 'New Quote';
+  // Reset fields
+  const today = new Date().toISOString().split('T')[0];
+  ['q-num','q-client','q-contact','q-phone','q-email','q-addr','q-project','q-scope-summary','q-notes','q-subtotal','q-tax','q-total'].forEach(id => { const el=$(id); if(el) el.value=''; });
+  if($('q-date')) $('q-date').value = today;
+  if($('q-valid')) $('q-valid').value = '30 days';
+  if($('q-status')) $('q-status').value = 'draft';
+  if($('q-save-status')) $('q-save-status').textContent = '';
+  if($('ai-status-msg')) $('ai-status-msg').textContent = 'Paste notes or upload a file, then click Analyze.';
+  if($('ai-file-preview-tag')) { $('ai-file-preview-tag').style.display='none'; $('ai-file-preview-tag').textContent=''; }
+  $('q-scopes-container').innerHTML = '';
+  $('q-options-container').innerHTML = '';
+  quotesAddScope();
+}
+
+async function quotesLoadList() {
+  const body = $('quotes-table-body');
+  const countEl = $('quotes-count');
+  if (!body) return;
+  body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-faint);font-size:13px">Loading...</div>';
+  try {
+    quotesAllQuotes = await api('GET', '/api/quotes');
+    quotesRenderList();
+  } catch(e) { body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--danger);font-size:13px">Error loading quotes: ' + e.message + '</div>'; }
+}
+
+function quotesFilter() { quotesRenderList(); }
+
+function quotesRenderList() {
+  const body = $('quotes-table-body');
+  const countEl = $('quotes-count');
+  const search = ($('quotes-search') && $('quotes-search').value.toLowerCase()) || '';
+  const statusF = ($('quotes-status-filter') && $('quotes-status-filter').value) || '';
+  let filtered = quotesAllQuotes;
+  if (search) filtered = filtered.filter(q => (q.client_name||'').toLowerCase().includes(search) || (q.project_name||'').toLowerCase().includes(search) || (q.quote_number||'').toLowerCase().includes(search) || (q.rep_name||'').toLowerCase().includes(search));
+  if (statusF) filtered = filtered.filter(q => q.status === statusF);
+  if (countEl) countEl.textContent = filtered.length + ' quote' + (filtered.length !== 1 ? 's' : '');
+  if (!filtered.length) {
+    body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-faint);font-size:13px">' + (quotesAllQuotes.length ? 'No quotes match your filter.' : 'No quotes yet. Click + New Quote to create your first one.') + '</div>';
+    return;
+  }
+  const statusColors = { draft:'#888', sent:'#2980b9', accepted:'#27ae60', declined:'#e74c3c' };
+  body.innerHTML = `<div class="table-wrap"><table class="data-table">
+    <thead><tr><th>Quote #</th><th>Client</th><th>Project</th><th>Rep</th><th>Total</th><th>Status</th><th>Date</th><th></th></tr></thead>
+    <tbody>${filtered.map(q => {
+      const sc = statusColors[q.status] || '#888';
+      return `<tr style="cursor:pointer" onclick="quotesOpenEdit(${q.id})">
+        <td style="font-family:monospace;font-size:12px;color:var(--amber)">${q.quote_number||'—'}</td>
+        <td><strong>${q.client_name||'—'}</strong></td>
+        <td style="font-size:12px;color:var(--text-muted)">${q.project_name||'—'}</td>
+        <td style="font-size:12px;color:var(--text-muted)">${q.rep_name||'—'}</td>
+        <td style="font-weight:600">${q.total ? '$'+q.total : '—'}</td>
+        <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;text-transform:uppercase;background:${sc}22;color:${sc};border:1px solid ${sc}44">${q.status||'draft'}</span></td>
+        <td style="font-size:12px;color:var(--text-muted)">${q.updated_at ? fmtDate(q.updated_at.split(' ')[0]) : '—'}</td>
+        <td style="display:flex;gap:4px">
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();quotesOpenEdit(${q.id})">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();quotesDelete(${q.id})">✕</button>
+        </td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
+}
+
+async function quotesOpenEdit(id) {
+  try {
+    const q = await api('GET', '/api/quotes/' + id);
+    quotesCurrentId = id;
+    quotesCurrentScopes = q.scopes || [];
+    quotesCurrentOptions = q.options || [];
+    $('quotes-list-view').style.display = 'none';
+    $('quotes-builder-view').style.display = 'block';
+    $('salesPageSub').textContent = 'Edit Quote';
+    if($('q-num')) $('q-num').value = q.quote_number || '';
+    if($('q-date')) $('q-date').value = q.created_at ? q.created_at.split(' ')[0] : '';
+    if($('q-valid')) $('q-valid').value = q.valid_for || '30 days';
+    if($('q-status')) $('q-status').value = q.status || 'draft';
+    if($('q-client')) $('q-client').value = q.client_name || '';
+    if($('q-contact')) $('q-contact').value = q.contact_name || '';
+    if($('q-phone')) $('q-phone').value = q.phone || '';
+    if($('q-email')) $('q-email').value = q.email || '';
+    if($('q-addr')) $('q-addr').value = q.address || '';
+    if($('q-project')) $('q-project').value = q.project_name || '';
+    if($('q-scope-summary')) $('q-scope-summary').value = q.scope_summary || '';
+    if($('q-notes')) $('q-notes').value = q.notes || '';
+    if($('q-subtotal')) $('q-subtotal').value = q.subtotal || '';
+    if($('q-tax')) $('q-tax').value = q.tax || '';
+    if($('q-total')) $('q-total').value = q.total || '';
+    if($('q-save-status')) $('q-save-status').textContent = '';
+    $('q-scopes-container').innerHTML = '';
+    $('q-options-container').innerHTML = '';
+    quotesCurrentScopes.forEach(() => {});
+    quotesRenderScopes();
+    quotesRenderOptions();
+  } catch(e) { showToast('Error loading quote: ' + e.message, 'error'); }
+}
+
+async function quotesSave() {
+  const statusEl = $('q-save-status');
+  if (statusEl) statusEl.textContent = 'Saving...';
+  const scopes = quotesGetScopes();
+  const options = quotesGetOptions();
+  const payload = {
+    quote_number: $('q-num') ? $('q-num').value.trim() : '',
+    client_name: $('q-client') ? $('q-client').value.trim() : '',
+    contact_name: $('q-contact') ? $('q-contact').value.trim() : '',
+    phone: $('q-phone') ? $('q-phone').value.trim() : '',
+    email: $('q-email') ? $('q-email').value.trim() : '',
+    address: $('q-addr') ? $('q-addr').value.trim() : '',
+    project_name: $('q-project') ? $('q-project').value.trim() : '',
+    scope_summary: $('q-scope-summary') ? $('q-scope-summary').value.trim() : '',
+    notes: $('q-notes') ? $('q-notes').value.trim() : '',
+    subtotal: $('q-subtotal') ? $('q-subtotal').value.trim() : '',
+    tax: $('q-tax') ? $('q-tax').value.trim() : '',
+    total: $('q-total') ? $('q-total').value.trim() : '',
+    valid_for: $('q-valid') ? $('q-valid').value.trim() : '30 days',
+    status: $('q-status') ? $('q-status').value : 'draft',
+    scopes, options
+  };
+  try {
+    if (quotesCurrentId) {
+      await api('PUT', '/api/quotes/' + quotesCurrentId, payload);
+    } else {
+      const r = await api('POST', '/api/quotes', payload);
+      quotesCurrentId = r.id;
+    }
+    if (statusEl) statusEl.textContent = '✓ Saved ' + new Date().toLocaleTimeString();
+    showToast('Quote saved!', 'success');
+  } catch(e) { if (statusEl) statusEl.textContent = '✗ Error'; showToast(e.message, 'error'); }
+}
+
+async function quotesDelete(id) {
+  if (!confirm('Delete this quote?')) return;
+  try { await api('DELETE', '/api/quotes/' + id); showToast('Quote deleted.', 'success'); quotesLoadList(); } catch(e) { showToast(e.message, 'error'); }
+}
+
+// ─── SCOPE BUILDER ───────────────────────────────────────────────────────────
+function quotesAddScope() {
+  quotesCurrentScopes.push({ title: '', lines: [{ desc: '', price: '' }] });
+  quotesRenderScopes();
+}
+
+function quotesRenderScopes() {
+  const el = $('q-scopes-container');
+  if (!el) return;
+  el.innerHTML = quotesCurrentScopes.map((sc, si) => `
+    <div class="q-scope-block">
+      <div class="q-scope-hdr">
+        <input value="${sc.title||''}" placeholder="Section title (e.g. Door 1 — Overhead Door)" oninput="quotesCurrentScopes[${si}].title=this.value"
+          style="flex:1;background:transparent;border:none;border-bottom:1px solid var(--amber);color:var(--white);font-size:13px;font-weight:600;padding:2px 0;outline:none;font-family:inherit" />
+        <button class="q-rm-btn" onclick="quotesRemoveScope(${si})" title="Remove section">✕</button>
+      </div>
+      <div class="q-scope-body" id="q-scope-lines-${si}">
+        ${(sc.lines||[]).map((ln, li) => `
+          <div class="q-line-row">
+            <input value="${ln.desc||''}" placeholder="Line item description" oninput="quotesCurrentScopes[${si}].lines[${li}].desc=this.value" style="flex:3" />
+            <input value="${ln.price||''}" placeholder="$0.00" oninput="quotesCurrentScopes[${si}].lines[${li}].price=this.value;quotesCalcTotal()" style="flex:1;text-align:right;max-width:100px" />
+            <button class="q-rm-btn" onclick="quotesRemoveLine(${si},${li})">✕</button>
+          </div>`).join('')}
+        <button class="q-add-line-btn" onclick="quotesAddLine(${si})">+ Add line</button>
+      </div>
+    </div>`).join('');
+}
+
+function quotesRemoveScope(si) { quotesCurrentScopes.splice(si,1); quotesRenderScopes(); }
+function quotesAddLine(si) { quotesCurrentScopes[si].lines.push({desc:'',price:''}); quotesRenderScopes(); }
+function quotesRemoveLine(si,li) { quotesCurrentScopes[si].lines.splice(li,1); quotesRenderScopes(); }
+
+function quotesAddOption() {
+  quotesCurrentOptions.push({ desc: '', price: '' });
+  quotesRenderOptions();
+}
+
+function quotesRenderOptions() {
+  const el = $('q-options-container');
+  if (!el) return;
+  el.innerHTML = quotesCurrentOptions.map((op, oi) => `
+    <div class="q-line-row">
+      <input value="${op.desc||''}" placeholder="Option description" oninput="quotesCurrentOptions[${oi}].desc=this.value" style="flex:3" />
+      <input value="${op.price||''}" placeholder="$0.00" oninput="quotesCurrentOptions[${oi}].price=this.value;quotesCalcTotal()" style="flex:1;text-align:right;max-width:100px" />
+      <button class="q-rm-btn" onclick="quotesCurrentOptions.splice(${oi},1);quotesRenderOptions()">✕</button>
+    </div>`).join('');
+}
+
+function quotesGetScopes() { return quotesCurrentScopes; }
+function quotesGetOptions() { return quotesCurrentOptions; }
+
+function quotesCalcTotal() {
+  let total = 0;
+  quotesCurrentScopes.forEach(sc => (sc.lines||[]).forEach(ln => { const v=parseFloat((ln.price||'').replace(/[^0-9.]/g,'')); if(!isNaN(v)) total+=v; }));
+  quotesCurrentOptions.forEach(op => { const v=parseFloat((op.price||'').replace(/[^0-9.]/g,'')); if(!isNaN(v)) total+=v; });
+  const taxStr = $('q-tax') ? $('q-tax').value : '';
+  const tax = parseFloat(taxStr.replace(/[^0-9.]/g,''))||0;
+  if($('q-subtotal')) $('q-subtotal').value = total.toFixed(2);
+  if($('q-total')) $('q-total').value = (total+tax).toFixed(2);
+}
+
+// ─── AI ASSISTANT ─────────────────────────────────────────────────────────────
+function quotesHandleFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  quotesCurrentFile = file;
+  const tag = $('ai-file-preview-tag');
+  if (tag) { tag.textContent = '📎 ' + file.name; tag.style.display = 'inline-block'; }
+}
+
+async function quotesRunAI() {
+  const btn = $('ai-analyze-btn');
+  const statusEl = $('ai-status-msg');
+  const notes = $('ai-notes-input') ? $('ai-notes-input').value.trim() : '';
+  if (!notes && !quotesCurrentFile) { if(statusEl) statusEl.textContent = 'Paste notes or upload a file first.'; return; }
+  if (btn) btn.disabled = true;
+  if (statusEl) { statusEl.textContent = '🤖 Analyzing...'; statusEl.className = 'quotes-ai-status thinking'; }
+  try {
+    let messages;
+    if (quotesCurrentFile) {
+      const base64 = await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(',')[1]); r.onerror=()=>rej(new Error('Read failed')); r.readAsDataURL(quotesCurrentFile); });
+      const mt = quotesCurrentFile.type || 'image/jpeg';
+      messages = [{ role:'user', content:[
+        { type: mt==='application/pdf'?'document':'image', source:{ type:'base64', media_type:mt, data:base64 } },
+        { type:'text', text: 'Extract all quote/estimate line items from this document. Return JSON only:\n{"client_name":"","contact_name":"","phone":"","email":"","address":"","project_name":"","scope_summary":"","scopes":[{"title":"","lines":[{"desc":"","price":""}]}],"subtotal":"","tax":"","total":"","notes":""}' }
+      ]}];
+    } else {
+      messages = [{ role:'user', content: `Extract quote info from these notes and return JSON only:\n{"client_name":"","contact_name":"","phone":"","email":"","address":"","project_name":"","scope_summary":"","scopes":[{"title":"","lines":[{"desc":"","price":""}]}],"subtotal":"","tax":"","total":"","notes":""}\n\nNotes:\n${notes}` }];
+    }
+    const res = await fetch('/api/claude', { method:'POST', credentials:'include', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:2000, messages }) });
+    const data = await res.json();
+    const text = (data.content||[]).map(c=>c.text||'').join('');
+    const clean = text.replace(/```json|```/g,'').trim();
+    const parsed = JSON.parse(clean);
+    // Fill form
+    if(parsed.client_name&&$('q-client')) $('q-client').value=parsed.client_name;
+    if(parsed.contact_name&&$('q-contact')) $('q-contact').value=parsed.contact_name;
+    if(parsed.phone&&$('q-phone')) $('q-phone').value=parsed.phone;
+    if(parsed.email&&$('q-email')) $('q-email').value=parsed.email;
+    if(parsed.address&&$('q-addr')) $('q-addr').value=parsed.address;
+    if(parsed.project_name&&$('q-project')) $('q-project').value=parsed.project_name;
+    if(parsed.scope_summary&&$('q-scope-summary')) $('q-scope-summary').value=parsed.scope_summary;
+    if(parsed.notes&&$('q-notes')) $('q-notes').value=parsed.notes;
+    if(parsed.subtotal&&$('q-subtotal')) $('q-subtotal').value=parsed.subtotal;
+    if(parsed.tax&&$('q-tax')) $('q-tax').value=parsed.tax;
+    if(parsed.total&&$('q-total')) $('q-total').value=parsed.total;
+    if(parsed.scopes&&parsed.scopes.length) { quotesCurrentScopes=parsed.scopes; quotesRenderScopes(); }
+    if(parsed.options&&parsed.options.length) { quotesCurrentOptions=parsed.options; quotesRenderOptions(); }
+    if(statusEl) { statusEl.textContent='✓ Done! Review and adjust the quote below.'; statusEl.className='quotes-ai-status done'; }
+  } catch(e) {
+    if(statusEl) { statusEl.textContent='✗ Error: '+e.message; statusEl.className='quotes-ai-status error'; }
+  } finally { if(btn) btn.disabled=false; }
+}
+
+// ─── PRINT QUOTE ─────────────────────────────────────────────────────────────
+function quotesPrint() {
+  const scopes = quotesGetScopes();
+  const options = quotesGetOptions();
+  const client = $('q-client')?$('q-client').value:'';
+  const contact = $('q-contact')?$('q-contact').value:'';
+  const phone = $('q-phone')?$('q-phone').value:'';
+  const email = $('q-email')?$('q-email').value:'';
+  const addr = $('q-addr')?$('q-addr').value:'';
+  const project = $('q-project')?$('q-project').value:'';
+  const qnum = $('q-num')?$('q-num').value:'';
+  const qdate = $('q-date')?$('q-date').value:'';
+  const valid = $('q-valid')?$('q-valid').value:'30 days';
+  const notes = $('q-notes')?$('q-notes').value:'';
+  const subtotal = $('q-subtotal')?$('q-subtotal').value:'';
+  const tax = $('q-tax')?$('q-tax').value:'';
+  const total = $('q-total')?$('q-total').value:'';
+  const scopeSummary = $('q-scope-summary')?$('q-scope-summary').value:'';
+  const win = window.open('','_blank');
+  win.document.write(`<!DOCTYPE html><html><head><title>KVM Quote ${qnum}</title>
+  <style>
+    body{font-family:Arial,sans-serif;color:#000;margin:0;padding:24px;font-size:13px}
+    .logo-bar{background:#0d0d0d;padding:16px 24px;display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+    .logo-bar img{height:40px}
+    .logo-bar .co{color:#fff;font-family:Arial,sans-serif;font-size:20px;font-weight:700;letter-spacing:2px}
+    .logo-bar .doc-type{color:#F5A623;font-size:14px;font-weight:700;letter-spacing:1px}
+    h2{font-size:14px;font-weight:700;border-bottom:2px solid #F5A623;padding-bottom:4px;margin:16px 0 8px;text-transform:uppercase}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+    .info-row{display:flex;gap:8px;margin-bottom:4px;font-size:12px}
+    .info-label{font-weight:700;min-width:80px;color:#555}
+    table{width:100%;border-collapse:collapse;margin-bottom:8px;font-size:12px}
+    th{background:#f0f0f0;padding:7px 10px;text-align:left;font-weight:700;border:1px solid #ddd}
+    td{padding:6px 10px;border:1px solid #eee}
+    .section-title{background:#fafafa;font-weight:700;padding:6px 10px;border:1px solid #ddd;font-size:12px;color:#333}
+    .totals{margin-left:auto;width:280px;margin-top:8px}
+    .tot-row{display:flex;justify-content:space-between;padding:4px 0;font-size:13px;border-bottom:1px solid #eee}
+    .tot-total{font-weight:700;font-size:15px;color:#000;border-top:2px solid #F5A623;padding-top:6px;margin-top:4px}
+    .notes-box{background:#fafafa;border:1px solid #ddd;padding:12px;font-size:12px;margin-top:12px;white-space:pre-line}
+    .footer{margin-top:24px;font-size:11px;color:#888;text-align:center;border-top:1px solid #eee;padding-top:8px}
+    @media print{body{padding:0}}
+  </style></head><body>
+  <div class="logo-bar">
+    <span class="co">KVM DOOR SYSTEMS</span>
+    <span class="doc-type">QUOTE / PROPOSAL</span>
+  </div>
+  <div class="grid2">
+    <div>
+      <h2>Client Information</h2>
+      <div class="info-row"><span class="info-label">Company</span><span>${client}</span></div>
+      <div class="info-row"><span class="info-label">Contact</span><span>${contact}</span></div>
+      <div class="info-row"><span class="info-label">Phone</span><span>${phone}</span></div>
+      <div class="info-row"><span class="info-label">Email</span><span>${email}</span></div>
+      <div class="info-row"><span class="info-label">Address</span><span>${addr}</span></div>
+      ${project?`<div class="info-row"><span class="info-label">Project</span><span><strong>${project}</strong></span></div>`:''}
+    </div>
+    <div>
+      <h2>Quote Details</h2>
+      <div class="info-row"><span class="info-label">Quote #</span><span><strong>${qnum}</strong></span></div>
+      <div class="info-row"><span class="info-label">Date</span><span>${qdate?fmtDate(qdate):''}</span></div>
+      <div class="info-row"><span class="info-label">Valid For</span><span>${valid}</span></div>
+      ${scopeSummary?`<div class="info-row" style="margin-top:8px"><span class="info-label">Scope</span><span style="font-style:italic">${scopeSummary}</span></div>`:''}
+    </div>
+  </div>
+  <h2>Scope of Work</h2>
+  ${scopes.map(sc=>`
+    ${sc.title?`<div class="section-title">${sc.title}</div>`:''}
+    <table><tbody>${(sc.lines||[]).map(ln=>`<tr><td>${ln.desc||''}</td><td style="text-align:right;width:100px;font-weight:600">${ln.price?'$'+ln.price:''}</td></tr>`).join('')}</tbody></table>
+  `).join('')}
+  ${options&&options.length?`<h2>Options &amp; Add-Ons</h2>
+    <table><tbody>${options.map(op=>`<tr><td>${op.desc||''}</td><td style="text-align:right;width:100px;font-weight:600">${op.price?'$'+op.price:''}</td></tr>`).join('')}</tbody></table>`:''}
+  <div class="totals">
+    ${subtotal?`<div class="tot-row"><span>Subtotal</span><span>$${subtotal}</span></div>`:''}
+    ${tax?`<div class="tot-row"><span>Tax</span><span>$${tax}</span></div>`:''}
+    <div class="tot-row tot-total"><span>Total Contract</span><span>$${total}</span></div>
+  </div>
+  ${notes?`<h2>Notes</h2><div class="notes-box">${notes}</div>`:''}
+  <div class="footer">KVM Door Systems &mdash; This proposal is valid for ${valid} from the date issued. &mdash; Thank you for your business.</div>
+  <script>window.onload=()=>window.print();</script>
+  </body></html>`);
+  win.document.close();
+}
+
+// Wire sales page into showPage on load
+(function() {
+  const origShowPage = showPage;
+  // Patch: when navigating to sales, load quotes list
+  const _sp = showPage;
+  window._salesPageInited = false;
+})();
