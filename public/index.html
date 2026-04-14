@@ -1339,3 +1339,42 @@
 <script src="/js/app.js"></script>
 </body>
 </html>
+// ═══ EXPOSE FUNCTIONS ON WINDOW FOR INLINE onclick HANDLERS ═══
+try {
+  ['showPage','doLogin','doLogout','toggleSidebar','openModal','closeModal','closeOnOverlay',
+   'quotesNewQuote','quotesShowList','quotesSave','quotesPrint','quotesRunAI','quotesHandleFile',
+   'quotesOpenEdit','quotesDelete','quotesFilter','quotesAddScope','quotesAddOption',
+   'openAddProject','openEditProject','saveProject','deleteProject','openProjectDetail',
+   'setProjectTab','openAddPhase','openEditPhase','savePhase','deletePhase',
+   'openAddHours','saveProjectHours','deleteProjectHours','saveProjectNote','deleteProjectNote',
+   'openAddCost','openEditCost','saveCost','deleteCost','openEditBudgets','saveBudgets',
+   'openAiInvoice','processAiInvoice','confirmAiInvoice','calcCostTotal','onProjQuoteChange',
+   'loadProjects','loadProjectDetail','renderProjectTab','renderCostTab',
+   'openAddCustomer','openEditCustomer','saveCustomer','loadCustomers','openCustomerDetail',
+   'setCustTab','togglePartnerFields','openAddSite','openEditSite','saveSite','deleteSite',
+   'openAddContact','saveContact','deleteContact','openAddEquipment','saveEquipment','deleteEquipment',
+   'savePartnerDoc','deletePartnerDoc','exportQBIIF','runQBImport',
+   'saveAnnouncement','deleteAnnouncement','saveNews','deleteNews',
+   'openOncallModal','saveOncall','deleteOncall','openSwapOncall','saveOncallSwap',
+   'setOncallFilter','openAutoScheduleModal','applyAutoSchedule','previewSchedule',
+   'saveRotationOrder','moveRotation','loadKVMSchedule',
+   'renderDirectory','openPtoReqModal','submitPto','calcPtoDays','ptoCalShift','ptoJump',
+   'ptoManualInput','ptoViewShift','renderPtoCalendar','setAdminPtoFilter','reviewPto',
+   'saveBlackout','deleteBlackout','saveUser','deleteUser','openEditUser','saveEditUser',
+   'openResetPw','adminResetPassword','changeMyPassword','filterEmployeeTable',
+   'saveSmtpSettings','savePoSettings','testEmail','testDailyEmail','updatePoPreview',
+   'saveGcalSettings','setDocFilter','setPolicyFilter','uploadDocument','deleteDoc',
+   'uploadPolicy','deletePolicy','renderAllDocs','initTimeclock','toggleClockType',
+   'doClockin','doClockout','loadMyTimecard','loadMyTimecardPage','loadAdminTimecards',
+   'sendTimecardEmails','exportTimecardExcel','openEditTimeEntry','deleteTimeEntry',
+   'resolveAlert','renderAlerts','initAdminAttendance','setAttendanceTab',
+   'openCallinModal','openAttEventModal','saveCallin','saveAttendanceEvent',
+   'deleteCallin','deleteAttEvent','openQuarterlyReport','loadQuarterlyReport',
+   'printQuarterlyReport','runPerfectAttendanceCheck','postPerfectAttendance',
+   'printPerfectAttendance','openSelfCallin','submitSelfCallin','openAwardAchievement',
+   'saveAchievement','refreshAttendanceBrief'
+  ].forEach(function(name){
+    try { if (typeof eval(name) === 'function') window[name] = eval(name); } catch(e) {}
+  });
+  console.log('[KVM] Functions exposed on window');
+} catch(e) { console.error('[KVM] Exposure failed:', e); }
