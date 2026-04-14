@@ -115,7 +115,7 @@ function showPage(name, el) {
   if(pg) pg.classList.add('active');
   if(el) el.classList.add('active');
   $('sidebar').classList.remove('open');
-  const map={dashboard:renderDashboard,customers:loadCustomers,customerDetail:loadCustomerDetail,myTimecards:renderMyTimecards,announcements:renderAnnouncements,news:renderNews,oncall:renderOncall,directory:renderDirectory,pto:renderPto,ptoCalendar:renderPtoCalendar,myDocs:renderMyDocs,policies:renderPolicies,timeclock:initTimeclock,adminTimeclock:loadAdminTimecards,adminAlerts:renderAlerts,adminAttendance:initAdminAttendance,adminUsers:renderAdminUsers,adminPto:renderAdminPto,adminBlackout:renderBlackouts,adminRotation:renderRotation,adminSettings:loadSettings};
+  const map={dashboard:renderDashboard,customers:loadCustomers,customerDetail:loadCustomerDetail,projects:loadProjects,projectDetail:loadProjectDetail,myTimecards:renderMyTimecards,announcements:renderAnnouncements,news:renderNews,oncall:renderOncall,directory:renderDirectory,pto:renderPto,ptoCalendar:renderPtoCalendar,myDocs:renderMyDocs,policies:renderPolicies,timeclock:initTimeclock,adminTimeclock:loadAdminTimecards,adminAlerts:renderAlerts,adminAttendance:initAdminAttendance,adminUsers:renderAdminUsers,adminPto:renderAdminPto,adminBlackout:renderBlackouts,adminRotation:renderRotation,adminSettings:loadSettings};
   if(map[name]) map[name]();
 }
 
@@ -3208,4 +3208,543 @@ async function refreshAttendanceBrief() {
     gridEl.innerHTML = '<div style="color:var(--text-muted);font-size:13px">Could not load attendance data.</div>';
     console.error(e);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── PROJECT MANAGEMENT ───────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let currentProjectId = null;
+let currentProjectData = null;
+let projectTabActive = 'overview';
+
+const PROJECT_STATUSES = ['awarded','shop_drawings','scheduled','in_progress','punch_list','complete'];
+const PROJECT_STATUS_LABELS = {
+  awarded:'Awarded', shop_drawings:'Shop Drawings', scheduled:'Scheduled',
+  in_progress:'In Progress', punch_list:'Punch List', complete:'Complete'
+};
+const PROJECT_STATUS_COLORS = {
+  awarded:'#7a5010', shop_drawings:'#8e44ad', scheduled:'#2980b9',
+  in_progress:'#e67e22', punch_list:'#e74c3c', complete:'#27ae60'
+};
+const PHASE_STATUSES = ['pending','in_progress','complete'];
+const PHASE_STATUS_LABELS = { pending:'Pending', in_progress:'In Progress', complete:'Complete' };
+
+function projectStatusBadge(status) {
+  const color = PROJECT_STATUS_COLORS[status] || '#888';
+  const label = PROJECT_STATUS_LABELS[status] || status;
+  return `<span style="display:inline-block;padding:2px 9px;border-radius:4px;font-size:11px;font-weight:700;text-transform:uppercase;background:${color}22;color:${color};border:1px solid ${color}44">${label}</span>`;
+}
+
+// ─── PROJECT LIST ─────────────────────────────────────────────────────────────
+async function loadProjects() {
+  const statusFilter = $('projStatusFilter') ? $('projStatusFilter').value : '';
+  const search = $('projSearch') ? $('projSearch').value.trim() : '';
+  const el = $('projectsList');
+  if (!el) return;
+  el.innerHTML = '<div class="empty-state">Loading...</div>';
+  try {
+    let url = '/api/projects?';
+    if (statusFilter) url += 'status=' + encodeURIComponent(statusFilter) + '&';
+    if (search) url += 'search=' + encodeURIComponent(search) + '&';
+    const projects = await api('GET', url.replace(/[?&]$/,''));
+    if (!projects.length) {
+      el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🏗️</div>No projects found. Create your first project to get started.</div>';
+      return;
+    }
+    el.innerHTML = `<div class="table-wrap"><table class="data-table">
+      <thead><tr>
+        <th>Job #</th><th>Project</th><th>Customer / Location</th><th>Status</th>
+        <th>Scope</th><th>Value</th><th>Start Date</th><th>Hours</th><th></th>
+      </tr></thead>
+      <tbody>${projects.map(p => `<tr style="cursor:pointer" onclick="openProjectDetail(${p.id})">
+        <td style="font-family:monospace;font-size:12px;color:var(--amber)">${p.job_number||'—'}</td>
+        <td>
+          <div style="font-weight:600;color:var(--white)">${p.project_name}</div>
+          ${p.foreman_name ? `<div style="font-size:11px;color:var(--text-faint)">Foreman: ${p.foreman_name}</div>` : ''}
+        </td>
+        <td>
+          <div style="font-size:13px">${p.customer_name||'—'}</div>
+          ${p.location ? `<div style="font-size:11px;color:var(--text-muted)">${p.location}</div>` : ''}
+        </td>
+        <td>${projectStatusBadge(p.status)}</td>
+        <td style="font-size:12px;color:var(--text-muted);max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.scope_brief||'—'}</td>
+        <td style="font-size:13px;color:var(--amber);font-weight:600">${p.contract_value ? '$'+p.contract_value : '—'}</td>
+        <td style="font-size:12px;color:var(--text-muted)">${p.start_date ? fmtDate(p.start_date) : '—'}</td>
+        <td style="font-size:12px;color:var(--text-muted)">${parseFloat(p.total_hours||0).toFixed(1)}h</td>
+        <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openProjectDetail(${p.id})">View ›</button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    <div style="font-size:12px;color:var(--text-faint);padding:.5rem 0">${projects.length} project${projects.length!==1?'s':''}</div>`;
+  } catch(e) { el.innerHTML = '<div class="empty-state">Error loading projects.</div>'; console.error(e); }
+}
+
+// ─── PROJECT DETAIL ───────────────────────────────────────────────────────────
+async function openProjectDetail(id) {
+  currentProjectId = id;
+  projectTabActive = 'overview';
+  showPage('projectDetail', null);
+}
+
+async function loadProjectDetail() {
+  if (!currentProjectId) return;
+  try {
+    currentProjectData = await api('GET', '/api/projects/' + currentProjectId);
+    const p = currentProjectData;
+
+    // Header
+    if ($('projDetailName')) $('projDetailName').textContent = p.project_name;
+    if ($('projDetailStatus')) $('projDetailStatus').innerHTML = projectStatusBadge(p.status);
+    if ($('projDetailJob')) $('projDetailJob').textContent = p.job_number || '—';
+    if ($('projDetailCustomer')) $('projDetailCustomer').textContent = p.customer_name || '—';
+    if ($('projDetailHours')) $('projDetailHours').textContent = parseFloat(p.total_hours||0).toFixed(1) + 'h logged';
+    if ($('projDetailValue')) $('projDetailValue').textContent = p.contract_value ? '$' + p.contract_value : '—';
+
+    renderProjectTab();
+  } catch(e) { console.error(e); showToast('Error loading project', 'error'); }
+}
+
+function setProjectTab(tab, el) {
+  projectTabActive = tab;
+  document.querySelectorAll('#projTabBar .tab-btn').forEach(b => b.classList.remove('active'));
+  if (el) el.classList.add('active');
+  renderProjectTab();
+}
+
+async function renderProjectTab() {
+  const p = currentProjectData;
+  if (!p) return;
+  const el = $('projDetailContent');
+  if (!el) return;
+
+  if (projectTabActive === 'overview') {
+    const billingLabel = p.billing_type === 'new_construction' ? '🏗️ New Construction (Monthly Billing)' : p.billing_type === 'aftermarket_monthly' ? '🔧 Aftermarket (Monthly Billing)' : '🔧 Aftermarket (Billed on Completion)';
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+        <div class="card">
+          <div class="card-header"><span class="card-title">Project Info</span>
+            <button class="btn btn-ghost btn-sm" onclick="openEditProject()">Edit</button>
+          </div>
+          <div class="info-grid">
+            <div class="info-row"><span class="info-label">Job Number</span><span class="info-val" style="font-family:monospace;color:var(--amber)">${p.job_number||'—'}</span></div>
+            <div class="info-row"><span class="info-label">Customer</span><span class="info-val">${p.customer_name||'—'}</span></div>
+            <div class="info-row"><span class="info-label">Location</span><span class="info-val">${p.location||'—'}</span></div>
+            <div class="info-row"><span class="info-label">Status</span><span class="info-val">${projectStatusBadge(p.status)}</span></div>
+            <div class="info-row"><span class="info-label">Billing</span><span class="info-val" style="font-size:12px">${billingLabel}</span></div>
+            <div class="info-row"><span class="info-label">Contract Value</span><span class="info-val" style="color:var(--amber);font-weight:700">${p.contract_value ? '$'+p.contract_value : '—'}</span></div>
+            ${p.quote_number ? `<div class="info-row"><span class="info-label">Quote #</span><span class="info-val" style="font-family:monospace">${p.quote_number}</span></div>` : ''}
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">Schedule &amp; Team</span></div>
+          <div class="info-grid">
+            <div class="info-row"><span class="info-label">Start Date</span><span class="info-val">${p.start_date ? fmtDate(p.start_date) : '—'}</span></div>
+            <div class="info-row"><span class="info-label">Target End</span><span class="info-val">${p.target_end_date ? fmtDate(p.target_end_date) : '—'}</span></div>
+            ${p.actual_end_date ? `<div class="info-row"><span class="info-label">Completed</span><span class="info-val" style="color:#27ae60">${fmtDate(p.actual_end_date)}</span></div>` : ''}
+            <div class="info-row"><span class="info-label">Foreman</span><span class="info-val">${p.foreman_name||'—'}</span></div>
+            <div class="info-row"><span class="info-label">Total Hours</span><span class="info-val" style="color:var(--amber);font-weight:700">${parseFloat(p.total_hours||0).toFixed(1)}h</span></div>
+            <div class="info-row"><span class="info-label">Phases</span><span class="info-val">${(p.phases||[]).length}</span></div>
+          </div>
+        </div>
+        ${p.scope_brief ? `<div class="card" style="grid-column:1/-1">
+          <div class="card-header"><span class="card-title">Scope of Work</span></div>
+          <div style="font-size:13px;white-space:pre-line;color:var(--text-muted)">${p.scope_brief}</div>
+        </div>` : ''}
+        ${(p.assigned_techs||[]).length ? `<div class="card" style="grid-column:1/-1">
+          <div class="card-header"><span class="card-title">Assigned Technicians</span></div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            ${(p.assigned_techs||[]).map(t => {
+              const u = allUsers.find(u => u.id === t.id) || t;
+              const ac = u.avatar_color || avatarBg((u.first_name||'')+(u.last_name||''));
+              return `<div style="display:flex;align-items:center;gap:6px;background:${ac}18;border:1px solid ${ac}44;border-radius:20px;padding:5px 10px">
+                <div style="width:22px;height:22px;border-radius:50%;background:${ac};color:#000;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700">${initials(u.first_name||'',u.last_name||'')}</div>
+                <span style="font-size:12px;font-weight:600">${u.first_name||''} ${u.last_name||''}</span>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>` : ''}
+        ${p.notes ? `<div class="card" style="grid-column:1/-1">
+          <div class="card-header"><span class="card-title">Internal Notes</span></div>
+          <div style="font-size:13px;white-space:pre-line;color:var(--text-muted)">${p.notes}</div>
+        </div>` : ''}
+      </div>`;
+
+  } else if (projectTabActive === 'phases') {
+    const phases = p.phases || [];
+    el.innerHTML = `
+      <div style="display:flex;justify-content:flex-end;margin-bottom:.75rem">
+        <button class="btn btn-primary" onclick="openAddPhase()">+ Add Phase</button>
+      </div>
+      ${phases.length ? phases.map((ph,i) => {
+        const phColor = ph.status==='complete' ? '#27ae60' : ph.status==='in_progress' ? '#e67e22' : '#888';
+        const phLabel = PHASE_STATUS_LABELS[ph.status] || ph.status;
+        return `<div class="card" style="margin-bottom:.75rem;border-left:3px solid ${phColor}">
+          <div class="card-header">
+            <div>
+              <div style="font-family:Oswald,sans-serif;font-size:15px;font-weight:600;color:var(--white)">Phase ${i+1}: ${ph.phase_name}</div>
+              ${ph.description ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px">${ph.description}</div>` : ''}
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;background:${phColor}22;color:${phColor}">${phLabel}</span>
+              <button class="btn btn-ghost btn-sm" onclick="openEditPhase(${ph.id})">Edit</button>
+              <button class="btn btn-danger btn-sm" onclick="deletePhase(${ph.id})">✕</button>
+            </div>
+          </div>
+          <div style="display:flex;gap:1.5rem;font-size:12px;color:var(--text-muted);margin-top:.25rem">
+            ${ph.start_date ? `<span>Start: ${fmtDate(ph.start_date)}</span>` : ''}
+            ${ph.end_date ? `<span>End: ${fmtDate(ph.end_date)}</span>` : ''}
+          </div>
+        </div>`;
+      }).join('') : '<div class="empty-state">No phases added yet. Add phases to break the project into stages.</div>'}`;
+
+  } else if (projectTabActive === 'hours') {
+    const hours = p.hours || [];
+    const totalHrs = hours.reduce((s,h) => s+(h.hours||0), 0);
+    // Group by tech
+    const byTech = {};
+    hours.forEach(h => {
+      if (!byTech[h.user_id]) byTech[h.user_id] = {name:h.user_name, hrs:0};
+      byTech[h.user_id].hrs += h.hours||0;
+    });
+    el.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem;flex-wrap:wrap;gap:.5rem">
+        <div style="display:flex;gap:1rem">
+          <div style="background:var(--amber-bg2);border:1px solid var(--amber-dim);border-radius:var(--radius);padding:8px 16px;text-align:center">
+            <div style="font-size:20px;font-weight:700;color:var(--amber)">${totalHrs.toFixed(1)}</div>
+            <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em">Total Hours</div>
+          </div>
+          <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:8px 16px;text-align:center">
+            <div style="font-size:20px;font-weight:700;color:var(--white)">${Object.keys(byTech).length}</div>
+            <div style="font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em">Technicians</div>
+          </div>
+        </div>
+        <button class="btn btn-primary" onclick="openAddHours()">+ Log Hours</button>
+      </div>
+      ${Object.keys(byTech).length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:1rem">
+        ${Object.values(byTech).map(t => `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:20px;padding:4px 12px;font-size:12px">
+          <strong>${t.name}</strong> <span style="color:var(--amber)">${t.hrs.toFixed(1)}h</span>
+        </div>`).join('')}
+      </div>` : ''}
+      ${hours.length ? `<div class="table-wrap"><table class="data-table">
+        <thead><tr><th>Date</th><th>Technician</th><th>Hours</th><th>Phase</th><th>Type</th><th>Notes</th><th>Logged By</th><th></th></tr></thead>
+        <tbody>${hours.map(h => {
+          const phase = (p.phases||[]).find(ph => ph.id === h.phase_id);
+          return `<tr>
+            <td style="font-size:13px">${fmtDate(h.work_date)}</td>
+            <td><strong>${h.user_name}</strong></td>
+            <td style="color:var(--amber);font-weight:700">${parseFloat(h.hours).toFixed(1)}h</td>
+            <td style="font-size:12px;color:var(--text-muted)">${phase ? phase.phase_name : '—'}</td>
+            <td><span class="badge ${h.entry_type==='timeclock'?'badge-blue':'badge-gray'}" style="font-size:10px">${h.entry_type==='timeclock'?'⏱ Auto':'✏ Manual'}</span></td>
+            <td style="font-size:12px;color:var(--text-muted)">${h.notes||'—'}</td>
+            <td style="font-size:11px;color:var(--text-faint)">${h.logged_by||'—'}</td>
+            <td><button class="btn btn-danger btn-sm" onclick="deleteProjectHours(${h.id})">✕</button></td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>` : '<div class="empty-state">No hours logged yet.</div>'}`;
+
+  } else if (projectTabActive === 'log') {
+    const notes = p.notes || [];
+    el.innerHTML = `
+      <div class="card" style="margin-bottom:1rem">
+        <div class="card-header"><span class="card-title">Add Note</span></div>
+        <textarea id="projNewNote" rows="3" style="width:100%;background:#0a0a0a;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:10px;font-size:13px;resize:vertical;outline:none;font-family:inherit;box-sizing:border-box" placeholder="Add a project note, update, or log entry..."></textarea>
+        <div style="margin-top:.5rem;display:flex;justify-content:flex-end">
+          <button class="btn btn-primary" onclick="saveProjectNote()">Post Note</button>
+        </div>
+      </div>
+      ${notes.length ? notes.map(n => `
+        <div class="card" style="margin-bottom:.5rem">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div>
+              <div style="font-size:12px;font-weight:700;color:var(--amber)">${n.author_name}</div>
+              <div style="font-size:11px;color:var(--text-faint)">${n.created_at ? new Date(n.created_at).toLocaleString() : ''}</div>
+            </div>
+            <button class="btn btn-danger btn-sm" onclick="deleteProjectNote(${n.id})">✕</button>
+          </div>
+          <div style="margin-top:.5rem;font-size:13px;white-space:pre-line;color:var(--text-muted)">${n.note}</div>
+        </div>`).join('') : '<div class="empty-state">No notes yet. Use this log to track progress, issues, and updates.</div>'}`;
+  }
+}
+
+// ─── PROJECT CRUD ─────────────────────────────────────────────────────────────
+async function openAddProject() {
+  if (!allUsers.length) try { allUsers = await api('GET', '/api/users'); } catch(e){}
+  let customers = [];
+  try { customers = await api('GET', '/api/customers'); } catch(e){}
+  let quotes = [];
+  try { quotes = await api('GET', '/api/quotes'); } catch(e){}
+
+  $('projModalId').value = '';
+  $('projModalTitle').textContent = 'New Project';
+  ['projModalJobNum','projModalName','projModalLocation','projModalValue',
+   'projModalScopeBrief','projModalNotes','projModalStartDate','projModalEndDate'].forEach(id => { const el=$(id); if(el) el.value=''; });
+  if ($('projModalStatus')) $('projModalStatus').value = 'awarded';
+  if ($('projModalBilling')) $('projModalBilling').value = 'aftermarket';
+
+  const custSel = $('projModalCustomer');
+  if (custSel) custSel.innerHTML = '<option value="">— Select Customer —</option>' + customers.map(c=>`<option value="${c.id}" data-name="${c.company_name}">${c.company_name}</option>`).join('');
+
+  const quoteSel = $('projModalQuote');
+  if (quoteSel) quoteSel.innerHTML = '<option value="">— No Quote —</option>' + quotes.map(q=>`<option value="${q.id}" data-num="${q.quote_number||''}" data-val="${q.total||''}">${q.quote_number||'Q-'+q.id} — ${q.client_name} — ${q.project_name||'Unnamed'}</option>`).join('');
+
+  const foremanSel = $('projModalForeman');
+  if (foremanSel) foremanSel.innerHTML = '<option value="">— No Foreman —</option>' + allUsers.map(u=>`<option value="${u.id}">${displayName(u)}</option>`).join('');
+
+  renderTechCheckboxes([]);
+  openModal('projectModal');
+}
+
+async function openEditProject() {
+  const p = currentProjectData;
+  if (!p) return;
+  if (!allUsers.length) try { allUsers = await api('GET', '/api/users'); } catch(e){}
+  let customers = [];
+  try { customers = await api('GET', '/api/customers'); } catch(e){}
+  let quotes = [];
+  try { quotes = await api('GET', '/api/quotes'); } catch(e){}
+
+  $('projModalId').value = p.id;
+  $('projModalTitle').textContent = 'Edit Project';
+  $('projModalJobNum').value = p.job_number || '';
+  $('projModalName').value = p.project_name || '';
+  $('projModalLocation').value = p.location || '';
+  $('projModalValue').value = p.contract_value || '';
+  $('projModalScopeBrief').value = p.scope_brief || '';
+  $('projModalNotes').value = p.notes || '';
+  $('projModalStartDate').value = p.start_date || '';
+  $('projModalEndDate').value = p.target_end_date || '';
+  if ($('projModalStatus')) $('projModalStatus').value = p.status || 'awarded';
+  if ($('projModalBilling')) $('projModalBilling').value = p.billing_type || 'aftermarket';
+
+  const custSel = $('projModalCustomer');
+  if (custSel) { custSel.innerHTML = '<option value="">— Select Customer —</option>' + customers.map(c=>`<option value="${c.id}">${c.company_name}</option>`).join(''); custSel.value = p.customer_id || ''; }
+
+  const quoteSel = $('projModalQuote');
+  if (quoteSel) { quoteSel.innerHTML = '<option value="">— No Quote —</option>' + quotes.map(q=>`<option value="${q.id}" data-num="${q.quote_number||''}" data-val="${q.total||''}">${q.quote_number||'Q-'+q.id} — ${q.client_name} — ${q.project_name||'Unnamed'}</option>`).join(''); quoteSel.value = p.quote_id || ''; }
+
+  const foremanSel = $('projModalForeman');
+  if (foremanSel) { foremanSel.innerHTML = '<option value="">— No Foreman —</option>' + allUsers.map(u=>`<option value="${u.id}">${displayName(u)}</option>`).join(''); foremanSel.value = p.foreman_id || ''; }
+
+  renderTechCheckboxes(p.assigned_techs || []);
+  openModal('projectModal');
+}
+
+function renderTechCheckboxes(selected) {
+  const el = $('projTechCheckboxes');
+  if (!el) return;
+  const selectedIds = new Set((selected||[]).map(t => t.id || t));
+  const techs = allUsers.filter(u => !['global_admin','admin'].includes(u.role_type||''));
+  el.innerHTML = techs.map(u => {
+    const ac = u.avatar_color || avatarBg(u.first_name+(u.last_name||''));
+    return `<label style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;border:1px solid ${selectedIds.has(u.id)?'var(--amber)':'var(--border)'};background:${selectedIds.has(u.id)?'var(--amber-bg2)':'transparent'};margin-bottom:4px">
+      <input type="checkbox" value="${u.id}" ${selectedIds.has(u.id)?'checked':''} onchange="this.closest('label').style.borderColor=this.checked?'var(--amber)':'var(--border)';this.closest('label').style.background=this.checked?'var(--amber-bg2)':'transparent'" />
+      <div style="width:22px;height:22px;border-radius:50%;background:${ac};color:#000;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">${initials(u.first_name,u.last_name||'')}</div>
+      <span style="font-size:13px">${displayName(u)}</span>
+    </label>`;
+  }).join('');
+}
+
+function getSelectedTechs() {
+  const el = $('projTechCheckboxes');
+  if (!el) return [];
+  return Array.from(el.querySelectorAll('input[type=checkbox]:checked')).map(cb => {
+    const u = allUsers.find(u => u.id === parseInt(cb.value));
+    return u ? {id:u.id, first_name:u.first_name, last_name:u.last_name||''} : {id:parseInt(cb.value)};
+  });
+}
+
+function onProjQuoteChange() {
+  const sel = $('projModalQuote');
+  if (!sel || !sel.value) return;
+  const opt = sel.options[sel.selectedIndex];
+  const val = opt.getAttribute('data-val');
+  if (val && $('projModalValue') && !$('projModalValue').value) $('projModalValue').value = val.replace(/[^0-9.]/g,'');
+}
+
+async function saveProject() {
+  const id = $('projModalId').value;
+  const custSel = $('projModalCustomer');
+  const custOpt = custSel && custSel.value ? custSel.options[custSel.selectedIndex] : null;
+  const quoteSel = $('projModalQuote');
+  const quoteOpt = quoteSel && quoteSel.value ? quoteSel.options[quoteSel.selectedIndex] : null;
+  const foremanSel = $('projModalForeman');
+  const foremanOpt = foremanSel && foremanSel.value ? foremanSel.options[foremanSel.selectedIndex] : null;
+
+  const payload = {
+    job_number: $('projModalJobNum').value.trim(),
+    project_name: $('projModalName').value.trim(),
+    customer_id: custSel ? parseInt(custSel.value)||0 : 0,
+    customer_name: custOpt ? custOpt.textContent.trim() : '',
+    location: $('projModalLocation').value.trim(),
+    quote_id: quoteSel ? parseInt(quoteSel.value)||0 : 0,
+    quote_number: quoteOpt ? (quoteOpt.getAttribute('data-num')||'') : '',
+    contract_value: $('projModalValue').value.trim(),
+    billing_type: $('projModalBilling') ? $('projModalBilling').value : 'aftermarket',
+    scope_brief: $('projModalScopeBrief').value.trim(),
+    status: $('projModalStatus') ? $('projModalStatus').value : 'awarded',
+    start_date: $('projModalStartDate').value,
+    target_end_date: $('projModalEndDate').value,
+    foreman_id: foremanSel ? parseInt(foremanSel.value)||0 : 0,
+    foreman_name: foremanOpt ? foremanOpt.textContent.trim() : '',
+    assigned_techs: getSelectedTechs(),
+    notes: $('projModalNotes').value.trim()
+  };
+  if (!payload.project_name) return showToast('Project name is required.', 'error');
+  try {
+    if (id) {
+      await api('PUT', '/api/projects/' + id, payload);
+      showToast('Project updated!', 'success');
+      closeModal('projectModal');
+      await loadProjectDetail();
+    } else {
+      const r = await api('POST', '/api/projects', payload);
+      showToast('Project created!', 'success');
+      closeModal('projectModal');
+      openProjectDetail(r.id);
+      loadProjects();
+    }
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function deleteProject() {
+  if (!currentProjectId) return;
+  if (!confirm('Delete this project? All phases, hours, and notes will be permanently removed.')) return;
+  try {
+    await api('DELETE', '/api/projects/' + currentProjectId);
+    showToast('Project deleted.', 'success');
+    currentProjectId = null; currentProjectData = null;
+    showPage('projects', null);
+    loadProjects();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+// ─── PHASE CRUD ───────────────────────────────────────────────────────────────
+function openAddPhase() {
+  $('phaseModalId').value = '';
+  $('phaseModalTitle').textContent = 'Add Phase';
+  ['phaseModalName','phaseModalDesc','phaseModalStart','phaseModalEnd'].forEach(id => { const el=$(id); if(el) el.value=''; });
+  if ($('phaseModalStatus')) $('phaseModalStatus').value = 'pending';
+  openModal('phaseModal');
+}
+
+function openEditPhase(phaseId) {
+  const ph = (currentProjectData.phases||[]).find(p => p.id === phaseId);
+  if (!ph) return;
+  $('phaseModalId').value = ph.id;
+  $('phaseModalTitle').textContent = 'Edit Phase';
+  $('phaseModalName').value = ph.phase_name || '';
+  $('phaseModalDesc').value = ph.description || '';
+  $('phaseModalStart').value = ph.start_date || '';
+  $('phaseModalEnd').value = ph.end_date || '';
+  if ($('phaseModalStatus')) $('phaseModalStatus').value = ph.status || 'pending';
+  openModal('phaseModal');
+}
+
+async function savePhase() {
+  const id = $('phaseModalId').value;
+  const payload = {
+    phase_name: $('phaseModalName').value.trim(),
+    description: $('phaseModalDesc').value.trim(),
+    status: $('phaseModalStatus') ? $('phaseModalStatus').value : 'pending',
+    start_date: $('phaseModalStart').value,
+    end_date: $('phaseModalEnd').value,
+    sort_order: id ? ((currentProjectData.phases||[]).find(p=>p.id===parseInt(id))||{}).sort_order||0 : (currentProjectData.phases||[]).length
+  };
+  if (!payload.phase_name) return showToast('Phase name is required.', 'error');
+  try {
+    if (id) await api('PUT', '/api/projects/' + currentProjectId + '/phases/' + id, payload);
+    else await api('POST', '/api/projects/' + currentProjectId + '/phases', payload);
+    showToast('Phase saved!', 'success');
+    closeModal('phaseModal');
+    currentProjectData = await api('GET', '/api/projects/' + currentProjectId);
+    renderProjectTab();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function deletePhase(phaseId) {
+  if (!confirm('Delete this phase?')) return;
+  try {
+    await api('DELETE', '/api/projects/' + currentProjectId + '/phases/' + phaseId);
+    showToast('Phase deleted.', 'success');
+    currentProjectData = await api('GET', '/api/projects/' + currentProjectId);
+    renderProjectTab();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+// ─── HOURS CRUD ───────────────────────────────────────────────────────────────
+async function openAddHours() {
+  if (!allUsers.length) try { allUsers = await api('GET', '/api/users'); } catch(e){}
+  const p = currentProjectData;
+  const today = new Date().toISOString().split('T')[0];
+  $('hoursModalDate').value = today;
+  $('hoursModalHours').value = '8';
+  $('hoursModalNotes').value = '';
+
+  const techSel = $('hoursModalTech');
+  if (techSel) techSel.innerHTML = '<option value="">— Select Tech —</option>' +
+    allUsers.filter(u=>!['global_admin','admin'].includes(u.role_type||'')).map(u=>`<option value="${u.id}" data-name="${displayName(u)}">${displayName(u)}</option>`).join('');
+
+  const phaseSel = $('hoursModalPhase');
+  if (phaseSel) phaseSel.innerHTML = '<option value="">— No Phase —</option>' +
+    (p.phases||[]).map(ph=>`<option value="${ph.id}">${ph.phase_name}</option>`).join('');
+
+  openModal('hoursModal');
+}
+
+async function saveProjectHours() {
+  const techSel = $('hoursModalTech');
+  const techOpt = techSel && techSel.value ? techSel.options[techSel.selectedIndex] : null;
+  const payload = {
+    user_id: techSel ? parseInt(techSel.value)||0 : 0,
+    user_name: techOpt ? techOpt.getAttribute('data-name') || techOpt.textContent.trim() : '',
+    work_date: $('hoursModalDate').value,
+    hours: parseFloat($('hoursModalHours').value)||0,
+    phase_id: $('hoursModalPhase') ? parseInt($('hoursModalPhase').value)||0 : 0,
+    entry_type: 'manual',
+    notes: $('hoursModalNotes').value.trim()
+  };
+  if (!payload.user_id) return showToast('Select a technician.', 'error');
+  if (!payload.work_date) return showToast('Select a date.', 'error');
+  if (!payload.hours || payload.hours <= 0) return showToast('Enter valid hours.', 'error');
+  try {
+    await api('POST', '/api/projects/' + currentProjectId + '/hours', payload);
+    showToast('Hours logged!', 'success');
+    closeModal('hoursModal');
+    currentProjectData = await api('GET', '/api/projects/' + currentProjectId);
+    if ($('projDetailHours')) $('projDetailHours').textContent = parseFloat(currentProjectData.total_hours||0).toFixed(1) + 'h logged';
+    renderProjectTab();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function deleteProjectHours(hid) {
+  if (!confirm('Remove this hours entry?')) return;
+  try {
+    await api('DELETE', '/api/projects/' + currentProjectId + '/hours/' + hid);
+    showToast('Entry removed.', 'success');
+    currentProjectData = await api('GET', '/api/projects/' + currentProjectId);
+    if ($('projDetailHours')) $('projDetailHours').textContent = parseFloat(currentProjectData.total_hours||0).toFixed(1) + 'h logged';
+    renderProjectTab();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+// ─── NOTES CRUD ───────────────────────────────────────────────────────────────
+async function saveProjectNote() {
+  const note = $('projNewNote') ? $('projNewNote').value.trim() : '';
+  if (!note) return showToast('Enter a note.', 'error');
+  try {
+    await api('POST', '/api/projects/' + currentProjectId + '/notes', { note });
+    showToast('Note added!', 'success');
+    currentProjectData = await api('GET', '/api/projects/' + currentProjectId);
+    renderProjectTab();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+async function deleteProjectNote(nid) {
+  if (!confirm('Delete this note?')) return;
+  try {
+    await api('DELETE', '/api/projects/' + currentProjectId + '/notes/' + nid);
+    showToast('Note deleted.', 'success');
+    currentProjectData = await api('GET', '/api/projects/' + currentProjectId);
+    renderProjectTab();
+  } catch(e) { showToast(e.message, 'error'); }
 }
