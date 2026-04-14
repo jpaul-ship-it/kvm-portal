@@ -1,3211 +1,1110 @@
-/* ═══ KVM DOOR SYSTEMS PORTAL v3 ═══ */
-let currentUser = null;
-let oncallFilter = 'current';
-let adminPtoFilter = 'pending';
-let allUsers = [], allBlackouts = [], rotationData = null;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>KVM Door Systems — Employee Portal</title>
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#F5A623" />
+  <meta name="background-color" content="#0a0a0a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="KVM Portal" />
+  <link rel="apple-touch-icon" href="/icons/icon-152.png" />
+  <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152.png" />
+  <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png" />
+  <meta name="apple-touch-fullscreen" content="yes" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-96.png" />
+  <meta name="description" content="KVM Door Systems Employee Portal — Time clock, scheduling, PTO, and more" />
+  <meta name="application-name" content="KVM Portal" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <link rel="stylesheet" href="/css/style.css" />
 
-const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const DOW    = ['Su','Mo','Tu','We','Th','Fr','Sa'];
-
-const $ = id => document.getElementById(id);
-
-async function api(method, url, body) {
-  const opts = { method, credentials: 'include', headers: {} };
-  if (body) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
-  const res = await fetch(url, opts);
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Request failed');
-  return data;
-}
-
-function fmtDate(str) {
-  if (!str) return '—';
-  return new Date(str + (str.length === 10 ? 'T00:00:00' : '')).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-function initials(f, l) { return ((f||'')[0] + (l||'')[0]).toUpperCase(); }
-function displayName(u) { return u.first_name + (u.last_name ? ' ' + u.last_name : ''); }
-function avatarBg(str) {
-  const c=['#7a5010','#2980b9','#5d4e8a','#16a085','#b8860b','#1a6e3a','#7f8c8d','#4a6741'];
-  let h=0; for(let ch of (str||'')) h=ch.charCodeAt(0)+((h<<5)-h);
-  return c[Math.abs(h)%c.length];
-}
-function businessDays(start, end) {
-  let count=0, cur=new Date(start+'T00:00:00');
-  const e=new Date(end+'T00:00:00');
-  while(cur<=e){const d=cur.getDay();if(d&&d<6)count++;cur.setDate(cur.getDate()+1);}
-  return count;
-}
-function addDays(dateStr, n) {
-  const d=new Date(dateStr+'T00:00:00'); d.setDate(d.getDate()+n); return d.toISOString().split('T')[0];
-}
-function showToast(msg, type='') {
-  const t=$('toast'); t.textContent=msg; t.className='toast show '+(type||'');
-  setTimeout(()=>t.className='toast', 3000);
-}
-function openModal(id) { $(id).classList.add('open'); }
-function closeModal(id) { $(id).classList.remove('open'); }
-function closeOnOverlay(e, id) { if(e.target===$(id)) closeModal(id); }
-function toggleSidebar() { $('sidebar').classList.toggle('open'); }
-
-// ─── AUTH ─────────────────────────────────────────────────────────────────────
-async function doLogin() {
-  const username=$('loginUser').value.trim(), password=$('loginPass').value;
-  const errEl=$('loginError'); errEl.style.display='none';
-  try {
-    currentUser=await api('POST','/api/login',{username,password});
-    $('loginScreen').style.display='none'; $('mainApp').style.display='block';
-    setupUI(); showPage('dashboard',null);
-  } catch(e){ errEl.textContent=e.message; errEl.style.display='block'; }
-}
-async function doLogout() {
-  await api('POST','/api/logout');
-  currentUser=null; allUsers=[]; allBlackouts=[]; rotationData=null;
-  $('mainApp').style.display='none'; $('loginScreen').style.display='flex';
-  $('loginUser').value=''; $('loginPass').value=''; $('loginError').style.display='none';
-}
-document.addEventListener('keydown', e => { if(e.key==='Enter'&&$('loginScreen').style.display!=='none') doLogin(); });
-
-function setupUI() {
-  const u = currentUser;
-  const role = u.role_type || 'technician';
-  const isAdmin   = ['global_admin','admin'].includes(role);
-  const isManager = ['global_admin','admin','manager'].includes(role);
-
-  // Topbar
-  const av = $('topAvatar');
-  if (av) { av.textContent = initials(u.first_name, u.last_name); av.style.background = u.avatar_color || avatarBg(u.first_name+u.last_name); }
-  if ($('topName')) $('topName').textContent = u.first_name;
-
-  // Admin sidebar section — managers and above only
-  const adminSection = $('adminSection');
-  if (adminSection) adminSection.style.display = isManager ? 'block' : 'none';
-
-  // Admin action buttons — admins only
-  if (isAdmin) {
-    ['btnNewAnn','btnNewNews','btnNewOncall','btnAutoSchedule','btnLoadSchedule','btnUploadPolicy'].forEach(id => {
-      const el = $(id); if (el) el.style.display = 'inline-flex';
-    });
-    const allDocsSection = $('allDocsSection');
-    if (allDocsSection) allDocsSection.style.display = 'block';
-  }
-
-  // All employees see customers
-  document.querySelectorAll('.nav-item[data-page="customers"]').forEach(el => el.style.display='flex');
-
-  // Time Off Calendar — managers and above only (it's in admin section but double-check)
-  // Admin section already handles this since ptoCalendar is inside adminSection
-
-  updatePtoBadge();
-}
-
-async function updatePtoBadge() {
-  try {
-    const reqs=await api('GET','/api/pto');
-    const n=reqs.filter(r=>r.status==='pending').length;
-    const b=$('ptoPendingBadge');
-    if(b){ b.textContent=n; b.style.display=n>0?'inline-block':'none'; }
-  } catch(e){}
-}
-
-// ─── PAGE ROUTING ─────────────────────────────────────────────────────────────
-function showPage(name, el) {
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
-  const pg=$('page-'+name);
-  if(pg) pg.classList.add('active');
-  if(el) el.classList.add('active');
-  $('sidebar').classList.remove('open');
-  const map={dashboard:renderDashboard,customers:loadCustomers,customerDetail:loadCustomerDetail,myTimecards:renderMyTimecards,announcements:renderAnnouncements,news:renderNews,oncall:renderOncall,directory:renderDirectory,pto:renderPto,ptoCalendar:renderPtoCalendar,myDocs:renderMyDocs,policies:renderPolicies,timeclock:initTimeclock,adminTimeclock:loadAdminTimecards,adminAlerts:renderAlerts,adminAttendance:initAdminAttendance,adminUsers:renderAdminUsers,adminPto:renderAdminPto,adminBlackout:renderBlackouts,adminRotation:renderRotation,adminSettings:loadSettings};
-  if(map[name]) map[name]();
-}
-
-// ─── DASHBOARD ────────────────────────────────────────────────────────────────
-async function renderDashboard() {
-  const h=new Date().getHours();
-  $('dashGreeting').textContent=`${h<12?'Good morning':h<17?'Good afternoon':'Good evening'}, ${currentUser.first_name}. Welcome to the KVM employee portal.`;
-  try {
-    const [me,ann,oncall]=await Promise.all([api('GET','/api/me'),api('GET','/api/announcements'),api('GET','/api/oncall')]);
-    const today=new Date().toISOString().split('T')[0];
-    const cur=oncall.filter(o=>o.start_date<=today&&o.end_date>=today);
-    const pct=Math.round(me.pto_left/Math.max(me.pto_total,1)*100);
-    // Load attendance for dashboard
-let myAttendance = null;
-try { myAttendance = await api('GET','/api/attendance/my'); } catch(e){}
-const tardiesQ = myAttendance ? myAttendance.thisQEvents.filter(e=>e.event_type==='tardy').length : 0;
-const callinsQ = myAttendance ? myAttendance.thisQCallins.length : 0;
-const hasPerfect = myAttendance && myAttendance.recognition && myAttendance.recognition.length > 0;
-$('dashStats').innerHTML=`
-      <div class="stat-card"><div class="stat-label">PTO Remaining</div><div class="stat-value" style="color:${pct<20?'var(--danger)':pct<50?'var(--amber)':'var(--green)'}">${me.pto_left}</div><div class="stat-sub">of ${me.pto_total} days this year</div></div>
-      <div class="stat-card"><div class="stat-label">On-Call Now</div><div class="stat-value">${cur.length}</div><div class="stat-sub">active across both divisions</div></div>
-      <div class="stat-card"><div class="stat-label">Announcements</div><div class="stat-value">${ann.length}</div><div class="stat-sub">total posts</div></div>`;
-    $('dashAnnPreview').innerHTML=ann.slice(0,3).map(a=>annItemHTML(a,false)).join('')||'<div class="empty-state">No announcements.</div>';
-    const byDept={};
-    cur.forEach(o=>{if(!byDept[o.department])byDept[o.department]=[];byDept[o.department].push(o);});
-    let ocHtml='';
-    if(!cur.length){ ocHtml='<div class="empty-state"><div class="empty-state-icon">📞</div>No one scheduled on call today.</div>'; }
-    else {
-      ['Automatic Door Division','Overhead Door Division'].forEach(dept=>{
-        const entries=byDept[dept]||[];
-        if(!entries.length) return;
-        ocHtml+=`<div style="margin-bottom:12px"><div class="dept-sub-label">${dept}</div>`;
-        entries.forEach(o=>{
-          const ac=avatarBg(o.name);
-          const inits=o.name.split(' ').map(p=>p[0]).join('').slice(0,2).toUpperCase();
-          ocHtml+=`<div class="oncall-card" style="margin-bottom:6px"><div class="oncall-avatar" style="background:${ac}22;color:${ac}">${inits}</div><div class="oncall-info"><div class="oncall-name">${o.name}</div><div class="oncall-role">${o.role}</div></div><div class="oncall-phone">${o.phone}</div></div>`;
-        });
-        ocHtml+='</div>';
-      });
-    }
-    $('dashOncallPreview').innerHTML=ocHtml;
-    // Load manager-only attendance brief
-    loadAttendanceBrief();
-    // Load achievements
-    loadMyAchievements();
-  } catch(e){ console.error(e); }
-}
-
-// ─── ANNOUNCEMENTS ────────────────────────────────────────────────────────────
-function annItemHTML(a, showDelete) {
-  const cls=a.priority==='urgent'?'urgent':a.priority==='info'?'info':'';
-  const bc=a.priority==='urgent'?'badge-red':a.priority==='info'?'badge-blue':'badge-gray';
-  return `<div class="ann-item ${cls}"><div class="ann-item-head"><span class="ann-title">${a.title}</span><span class="badge ${bc}">${a.priority}</span>${showDelete&&['global_admin','admin'].includes(currentUser.role_type||'')?`<button class="btn btn-danger btn-sm" style="margin-left:auto" onclick="deleteAnnouncement(${a.id})">Delete</button>`:''}</div><div class="ann-body">${a.body}</div><div class="ann-meta">${a.author_name} &middot; ${fmtDate(a.created_at)}</div></div>`;
-}
-async function renderAnnouncements() {
-  try { const d=await api('GET','/api/announcements'); $('annList').innerHTML=d.length?d.map(a=>annItemHTML(a,true)).join(''):'<div class="empty-state"><div class="empty-state-icon">📢</div>No announcements yet.</div>'; } catch(e){}
-}
-async function saveAnnouncement() {
-  const title=$('annTitle').value.trim(),body=$('annBody').value.trim();
-  if(!title||!body) return showToast('Fill in all fields.','error');
-  try { await api('POST','/api/announcements',{title,body,priority:$('annPriority').value}); closeModal('annModal'); $('annTitle').value=''; $('annBody').value=''; showToast('Announcement posted!','success'); renderAnnouncements(); } catch(e){showToast(e.message,'error');}
-}
-async function deleteAnnouncement(id) { if(!confirm('Delete?'))return; await api('DELETE','/api/announcements/'+id); renderAnnouncements(); }
-
-// ─── NEWS ─────────────────────────────────────────────────────────────────────
-const catIcons={'Project Update':'📋','Safety':'⛑️','HR':'👔','Recognition':'🏆','General':'📰'};
-function newsItemHTML(n,showDelete) {
-  return `<div class="news-item"><div class="news-icon">${catIcons[n.category]||'📰'}</div><div style="flex:1"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div class="news-title">${n.title}</div>${showDelete&&['global_admin','admin'].includes(currentUser.role_type||'')?`<button class="btn btn-danger btn-sm" onclick="deleteNews(${n.id})">Delete</button>`:''}</div><div class="news-body">${n.body}</div><div class="news-meta"><span class="badge badge-green">${n.category}</span> &middot; ${n.author_name} &middot; ${fmtDate(n.created_at)}</div></div></div>`;
-}
-async function renderNews() {
-  try { const d=await api('GET','/api/news'); $('newsList').innerHTML=d.length?d.map(n=>newsItemHTML(n,true)).join(''):'<div class="empty-state"><div class="empty-state-icon">📰</div>No news yet.</div>'; } catch(e){}
-}
-async function saveNews() {
-  const title=$('newsTitle').value.trim(),body=$('newsBody').value.trim();
-  if(!title||!body) return showToast('Fill in all fields.','error');
-  try { await api('POST','/api/news',{title,body,category:$('newsCat').value}); closeModal('newsModal'); $('newsTitle').value=''; $('newsBody').value=''; showToast('News published!','success'); renderNews(); } catch(e){showToast(e.message,'error');}
-}
-async function deleteNews(id) { if(!confirm('Delete?'))return; await api('DELETE','/api/news/'+id); renderNews(); }
-
-// ─── ON-CALL ──────────────────────────────────────────────────────────────────
-function setOncallFilter(f,el) {
-  oncallFilter=f;
-  document.querySelectorAll('#page-oncall .tab').forEach(t=>t.classList.remove('active'));
-  if(el) el.classList.add('active');
-  renderOncall();
-}
-
-async function renderOncall() {
-  try {
-    const all=await api('GET','/api/oncall');
-    const today=new Date().toISOString().split('T')[0];
-    let list=[...all];
-    if(oncallFilter==='current') list=list.filter(o=>o.start_date<=today&&o.end_date>=today);
-    if(oncallFilter==='upcoming') list=list.filter(o=>o.start_date>today);
-    list.sort((a,b)=>a.start_date.localeCompare(b.start_date));
-    if(!list.length){$('oncallList').innerHTML='<div class="empty-state"><div class="empty-state-icon">📞</div>No entries for this period.</div>';return;}
-
-    // Group by week (start_date+end_date combo)
-    const weeks = {};
-    list.forEach(o => {
-      const key = o.start_date + '_' + o.end_date;
-      if (!weeks[key]) weeks[key] = { start: o.start_date, end: o.end_date, entries: [] };
-      weeks[key].entries.push(o);
-    });
-
-    let html = '';
-    Object.values(weeks).sort((a,b)=>a.start.localeCompare(b.start)).forEach(week => {
-      const isCurWeek = week.start <= today && week.end >= today;
-      html += `<div class="oncall-week ${isCurWeek?'oncall-week-active':''}">
-        <div class="oncall-week-header">
-          <span class="oncall-week-dates">${fmtDate(week.start)} – ${fmtDate(week.end)}</span>
-          ${isCurWeek?'<span class="badge badge-amber">CURRENT WEEK</span>':''}
-        </div>
-        <div class="oncall-week-body">`;
-
-      // Group by department within week
-      const byDept = {};
-      week.entries.forEach(o => {
-        const d = o.department || 'General';
-        if (!byDept[d]) byDept[d] = [];
-        byDept[d].push(o);
-      });
-
-      ['Overhead Door Division','Automatic Door Division','General'].forEach(dept => {
-        const entries = byDept[dept];
-        if (!entries || !entries.length) return;
-        html += `<div class="oncall-dept-row"><span class="oncall-dept-label">${dept.replace(' Division','')}</span><div class="oncall-people">`;
-        entries.forEach(o => {
-          const ac = avatarBg(o.name);
-          const inits = o.name.split(' ').map(p=>p[0]).join('').slice(0,2).toUpperCase();
-          html += `<div class="oncall-person-chip">
-            <div class="oncall-avatar-sm" style="background:${ac}22;color:${ac}">${inits}</div>
-            <div>
-              <div class="oncall-chip-name">${o.name}</div>
-              <div class="oncall-chip-phone">${o.phone}</div>
-            </div>
-            ${['global_admin','admin'].includes(currentUser.role_type||'')?`<button class="btn btn-ghost btn-sm" style="padding:2px 7px;font-size:11px" onclick="openSwapOncall(${o.id},'${o.name}','${o.department}')">Swap</button><button class="btn btn-danger btn-sm" style="padding:2px 7px;font-size:11px" onclick="deleteOncall(${o.id})">✕</button>`:''}
-          </div>`;
-        });
-        html += '</div></div>';
-      });
-      html += '</div></div>';
-    });
-    $('oncallList').innerHTML = html;
-  } catch(e) { console.error(e); }
-}
-
-// Open the add oncall modal and populate dropdowns
-async function openOncallModal() {
-  if (!allUsers.length) allUsers = await api('GET', '/api/users');
-
-  const ohUsers = allUsers.filter(u =>
-    u.oncall_dept === 'Overhead Door Division' || u.oncall_dept === 'Both Divisions'
-  );
-  const adUsers = allUsers.filter(u =>
-    u.oncall_dept === 'Automatic Door Division' || u.oncall_dept === 'Both Divisions'
-  );
-  // Fallback: if no dept assigned, show all non-admin
-  const fallback = allUsers.filter(u => !['global_admin','admin'].includes(u.role_type||''));
-
-  const makeOpts = (list) => (list.length ? list : fallback)
-    .map(u => `<option value="${u.id}" data-name="${displayName(u)}" data-role="${u.role}" data-phone="${u.phone||''}">${displayName(u)}${u.oncall_role?' — '+u.oncall_role:''}</option>`)
-    .join('');
-
-  $('ocOH1').innerHTML = '<option value="">— Select —</option>' + makeOpts(ohUsers);
-  $('ocOH2').innerHTML = '<option value="">— Select —</option>' + makeOpts(ohUsers);
-  $('ocAD1').innerHTML = '<option value="">— Select —</option>' + makeOpts(adUsers);
-
-  // Default dates: next Monday to Sunday
-  const now = new Date();
-  const day = now.getDay();
-  const toMon = day === 0 ? 1 : 8 - day;
-  const nextMon = new Date(now); nextMon.setDate(now.getDate() + toMon);
-  const nextSun = new Date(nextMon); nextSun.setDate(nextMon.getDate() + 6);
-  $('ocStart').value = nextMon.toISOString().split('T')[0];
-  $('ocEnd').value   = nextSun.toISOString().split('T')[0];
-
-  openModal('oncallModal');
-}
-
-async function saveOncall() {
-  const start_date = $('ocStart').value;
-  const end_date   = $('ocEnd').value;
-  if (!start_date || !end_date) return showToast('Select start and end dates.','error');
-
-  const getEmpData = (selId) => {
-    const sel = $(selId);
-    if (!sel || !sel.value) return null;
-    const opt = sel.options[sel.selectedIndex];
-    return { name: opt.dataset.name, role: opt.dataset.role, phone: opt.dataset.phone };
-  };
-
-  const oh1 = getEmpData('ocOH1');
-  const oh2 = getEmpData('ocOH2');
-  const ad1 = getEmpData('ocAD1');
-
-  if (!oh1 && !ad1) return showToast('Select at least one employee.','error');
-
-  const entries = [];
-  if (oh1) entries.push({ ...oh1, department: 'Overhead Door Division', start_date, end_date });
-  if (oh2 && oh2.name !== oh1?.name) entries.push({ ...oh2, department: 'Overhead Door Division', start_date, end_date });
-  if (ad1) entries.push({ ...ad1, department: 'Automatic Door Division', start_date, end_date });
-
-  try {
-    for (const e of entries) await api('POST', '/api/oncall', e);
-    closeModal('oncallModal');
-    $('ocStart').value = ''; $('ocEnd').value = '';
-    showToast(`${entries.length} on-call entries saved!`, 'success');
-    renderOncall();
-  } catch(e) { showToast(e.message, 'error'); }
-}
-
-async function deleteOncall(id) { if(!confirm('Remove this entry?'))return; await api('DELETE','/api/oncall/'+id); renderOncall(); }
-
-// SWAP FUNCTIONALITY
-async function openSwapOncall(id, currentName, dept) {
-  if (!allUsers.length) allUsers = await api('GET', '/api/users');
-  $('swapOncallId').value = id;
-  $('swapOncallCurrentName').textContent = currentName;
-
-  // Show relevant employees for the department
-  const relevant = allUsers.filter(u => {
-    if (dept === 'Overhead Door Division') return u.oncall_dept === 'Overhead Door Division' || u.oncall_dept === 'Both Divisions';
-    if (dept === 'Automatic Door Division') return u.oncall_dept === 'Automatic Door Division' || u.oncall_dept === 'Both Divisions';
-    return !['global_admin','admin'].includes(u.role_type||'');
-  });
-  const list = relevant.length ? relevant : allUsers.filter(u => !['global_admin','admin'].includes(u.role_type||''));
-  $('swapOncallNewEmp').innerHTML = list
-    .map(u => `<option value="${u.id}">${displayName(u)} — ${u.role||u.department}</option>`)
-    .join('');
-  openModal('swapOncallModal');
-}
-
-async function saveOncallSwap() {
-  const id = $('swapOncallId').value;
-  const user_id = $('swapOncallNewEmp').value;
-  try {
-    await api('PUT', '/api/oncall/' + id + '/swap', { user_id });
-    closeModal('swapOncallModal');
-    showToast('Employee swapped!', 'success');
-    renderOncall();
-  } catch(e) { showToast(e.message, 'error'); }
-}
-
-// Legacy populateOncallEmployees kept for compatibility
-async function populateOncallEmployees() { await openOncallModal(); }
-
-async function deleteOncall(id) { if(!confirm('Remove?'))return; await api('DELETE','/api/oncall/'+id); renderOncall(); }
-
-// ─── AUTO-SCHEDULE ────────────────────────────────────────────────────────────
-async function openAutoScheduleModal() {
-  try {
-    rotationData=await api('GET','/api/rotation');
-    $('schedStart').value=new Date().toISOString().split('T')[0];
-    renderRotationLists();
-    previewSchedule();
-    openModal('autoScheduleModal');
-  } catch(e){ showToast(e.message,'error'); }
-}
-
-function renderRotationLists() {
-  if(!rotationData) return;
-  const renderList=(emps, containerId)=>{
-    $(containerId).innerHTML=emps.length ? emps.map((e,i)=>{
-      const paired=e.paired_with&&parseInt(e.paired_with)>0;
-      const name=e.first_name+(e.last_name?' '+e.last_name:'');
-      return `<div class="rotation-row" data-uid="${e.id}" draggable="true" ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="dropOn(event,'${containerId}')">
-        <span class="rotation-pos">${i+1}</span>
-        <span class="rotation-drag">⠿</span>
-        <span class="rotation-name">${name}</span>
-        <span class="rotation-role">${e.oncall_role||''}</span>
-        ${paired?`<span class="badge badge-amber" style="font-size:9px">PAIRED</span>`:''}
-      </div>`;
-    }).join('') : '<div style="padding:8px;font-size:12px;color:var(--text-muted)">No employees assigned.</div>';
-  };
-  renderList(rotationData.overhead,'rotListOverhead');
-  renderList(rotationData.automatic,'rotListAutomatic');
-}
-
-// Drag and drop for rotation reorder
-let draggedEl=null;
-function dragStart(e) { draggedEl=e.currentTarget; e.dataTransfer.effectAllowed='move'; }
-function dragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect='move'; }
-function dropOn(e, containerId) {
-  e.preventDefault();
-  if(!draggedEl||draggedEl===e.currentTarget) return;
-  const container=$(containerId);
-  const rows=[...container.querySelectorAll('.rotation-row')];
-  const targetRow=e.currentTarget.closest('.rotation-row');
-  if(targetRow&&container.contains(targetRow)) {
-    container.insertBefore(draggedEl,targetRow);
-    updateRotationNumbers(containerId);
-    previewSchedule();
-  }
-}
-function updateRotationNumbers(containerId) {
-  document.querySelectorAll(`#${containerId} .rotation-pos`).forEach((el,i)=>el.textContent=i+1);
-}
-
-function getRotationOrder(containerId) {
-  return [...document.querySelectorAll(`#${containerId} .rotation-row`)].map(row=>({
-    id: row.dataset.uid,
-    name: row.querySelector('.rotation-name').textContent,
-    role: row.querySelector('.rotation-role').textContent,
-  }));
-}
-
-function previewSchedule() {
-  const start=$('schedStart').value;
-  const weeks=parseInt($('schedWeeks').value)||8;
-  const freq=parseInt($('schedFreq').value)||1;
-  if(!start){$('schedPreview').innerHTML='<div class="empty-state">Select a start date.</div>';return;}
-
-  if(!rotationData){$('schedPreview').innerHTML='<div class="empty-state">Loading rotation data...</div>';return;}
-  const ohOrder=getRotationOrder('rotListOverhead');
-  const auOrder=getRotationOrder('rotListAutomatic');
-  if(!ohOrder.length&&!auOrder.length){$('schedPreview').innerHTML='<div class="empty-state">No employees in rotation.</div>';return;}
-
-  // Figure out continuation index (where does the rotation currently stand)
-  const ohStart=parseInt($('ohStartIdx').value)||0;
-  const auStart=parseInt($('auStartIdx').value)||0;
-
-  const totalSlots=Math.ceil(weeks/freq);
-  let html='';
-  for(let i=0;i<totalSlots;i++){
-    const slotStart=addDays(start,i*freq*7);
-    const slotEnd=addDays(slotStart,freq*7-1);
-
-    // Overhead: find pair — if next person has a pair, include both
-    let ohNames=[], ohIdx=(ohStart+i)%Math.max(ohOrder.length,1);
-    if(ohOrder.length){
-      const p=ohOrder[ohIdx];
-      // Check if paired in rotationData
-      const fullEmp=rotationData.overhead.find(e=>String(e.id)===String(p.id));
-      ohNames=[p.name];
-      // Find partner
-      if(fullEmp&&fullEmp.paired_with&&parseInt(fullEmp.paired_with)>0){
-        const partner=ohOrder.find(e=>String(e.id)===String(fullEmp.paired_with));
-        if(partner) ohNames=[p.name, partner.name];
-      } else {
-        // Add second person (next in rotation)
-        const p2=ohOrder[(ohIdx+1)%ohOrder.length];
-        if(p2&&p2.id!==p.id) ohNames=[p.name, p2.name];
-      }
-    }
-
-    let auNames=[];
-    if(auOrder.length){
-      const auIdx=(auStart+i)%auOrder.length;
-      auNames=[auOrder[auIdx].name];
-    }
-
-    html+=`<div class="rotate-week">
-      <div class="rotate-week-header"><span class="rotate-week-title">Week ${i+1}: ${fmtDate(slotStart)} – ${fmtDate(slotEnd)}</span></div>
-      <div class="rotate-week-body">
-        ${auNames.length?`<div class="rotate-row"><span class="rotate-dept">Auto Door</span><span class="rotate-names">${auNames.join(', ')}</span></div>`:''}
-        ${ohNames.length?`<div class="rotate-row"><span class="rotate-dept">Overhead Door</span><span class="rotate-names">${ohNames.join(', ')}</span></div>`:''}
-      </div></div>`;
-  }
-  $('schedPreview').innerHTML=html;
-}
-
-async function saveRotationOrder() {
-  const ohOrder=getRotationOrder('rotListOverhead').map(e=>e.id);
-  const auOrder=getRotationOrder('rotListAutomatic').map(e=>e.id);
-  try {
-    if(ohOrder.length) await api('PUT','/api/rotation',{department:'Overhead Door Division',order:ohOrder});
-    if(auOrder.length) await api('PUT','/api/rotation',{department:'Automatic Door Division',order:auOrder});
-    showToast('Rotation order saved!','success');
-  } catch(e){ showToast(e.message,'error'); }
-}
-
-async function applyAutoSchedule() {
-  const start=$('schedStart').value;
-  const weeks=parseInt($('schedWeeks').value)||8;
-  const freq=parseInt($('schedFreq').value)||1;
-  const ohOrder=getRotationOrder('rotListOverhead');
-  const auOrder=getRotationOrder('rotListAutomatic');
-  if(!start) return showToast('Select a start date.','error');
-  if(!ohOrder.length&&!auOrder.length) return showToast('No employees in rotation.','error');
-  const totalSlots=Math.ceil(weeks/freq);
-  if(!confirm(`Create ${totalSlots} weeks of on-call entries?`)) return;
-
-  const ohStart=parseInt($('ohStartIdx').value)||0;
-  const auStart=parseInt($('auStartIdx').value)||0;
-  const entries=[];
-
-  for(let i=0;i<totalSlots;i++){
-    const slotStart=addDays(start,i*freq*7);
-    const slotEnd=addDays(slotStart,freq*7-1);
-    // Overhead
-    if(ohOrder.length){
-      const ohIdx=(ohStart+i)%ohOrder.length;
-      const p=ohOrder[ohIdx];
-      const fullEmp=rotationData.overhead.find(e=>String(e.id)===String(p.id));
-      const users=allUsers.length?allUsers:await api('GET','/api/users');
-      const userFull=users.find(u=>String(u.id)===String(p.id));
-      entries.push({name:p.name,role:userFull?userFull.role:'',phone:userFull?userFull.phone:'',department:'Overhead Door Division',start_date:slotStart,end_date:slotEnd});
-      // Pair or second
-      if(fullEmp&&fullEmp.paired_with&&parseInt(fullEmp.paired_with)>0){
-        const partnerFull=users.find(u=>String(u.id)===String(fullEmp.paired_with));
-        if(partnerFull) entries.push({name:displayName(partnerFull),role:partnerFull.role,phone:partnerFull.phone,department:'Overhead Door Division',start_date:slotStart,end_date:slotEnd});
-      } else {
-        const p2=ohOrder[(ohIdx+1)%ohOrder.length];
-        if(p2&&p2.id!==p.id){const u2=users.find(u=>String(u.id)===String(p2.id)); if(u2) entries.push({name:displayName(u2),role:u2.role,phone:u2.phone,department:'Overhead Door Division',start_date:slotStart,end_date:slotEnd});}
-      }
-    }
-    // Automatic
-    if(auOrder.length){
-      const auIdx=(auStart+i)%auOrder.length;
-      const p=auOrder[auIdx];
-      if(!allUsers.length) allUsers=await api('GET','/api/users');
-      const u=allUsers.find(x=>String(x.id)===String(p.id));
-      if(u) entries.push({name:displayName(u),role:u.role,phone:u.phone,department:'Automatic Door Division',start_date:slotStart,end_date:slotEnd});
-    }
-  }
-
-  try {
-    await saveRotationOrder();
-    for(const e of entries) await api('POST','/api/oncall',e);
-    closeModal('autoScheduleModal');
-    showToast(`Created ${entries.length} on-call entries!`,'success');
-    renderOncall();
-  } catch(e){ showToast(e.message,'error'); }
-}
-
-// ─── ROTATION MANAGEMENT ──────────────────────────────────────────────────────
-async function renderRotation() {
-  try {
-    rotationData=await api('GET','/api/rotation');
-    allUsers=await api('GET','/api/users');
-    const renderTable=(emps,dept,containerId)=>{
-      $(containerId).innerHTML=emps.length?`<table class="data-table"><thead><tr><th>#</th><th>Name</th><th>Role</th><th>Notes</th><th>Reorder</th></tr></thead><tbody>`+
-        emps.map((e,i)=>{
-          const name=e.first_name+(e.last_name?' '+e.last_name:'');
-          const paired=e.paired_with&&parseInt(e.paired_with)>0;
-          const partner=paired?emps.find(x=>String(x.id)===String(e.paired_with)):null;
-          return `<tr><td style="font-family:Oswald,sans-serif;font-weight:600;color:var(--danger)">${i+1}</td>
-            <td><strong>${name}</strong></td>
-            <td><span class="badge ${e.oncall_role==='Leader'?'badge-red':'badge-gray'}">${e.oncall_role||'—'}</span></td>
-            <td>${paired?`<span class="badge badge-amber">Paired with ${partner?partner.first_name+(partner.last_name?' '+partner.last_name:''):'partner'}</span>`:''}</td>
-            <td><button class="btn btn-ghost btn-sm" onclick="moveRotation('${dept}',${i},-1)">↑</button> <button class="btn btn-ghost btn-sm" onclick="moveRotation('${dept}',${i},1)">↓</button></td>
-          </tr>`;
-        }).join('')+'</tbody></table>'
-      :'<div class="empty-state">No employees in this rotation.</div>';
-    };
-    renderTable(rotationData.overhead,'Overhead Door Division','rotOhTable');
-    renderTable(rotationData.automatic,'Automatic Door Division','rotAuTable');
-  } catch(e){ console.error(e); }
-}
-
-async function moveRotation(dept, idx, dir) {
-  const list=dept==='Overhead Door Division'?[...rotationData.overhead]:[...rotationData.automatic];
-  const newIdx=idx+dir;
-  if(newIdx<0||newIdx>=list.length) return;
-  [list[idx],list[newIdx]]=[list[newIdx],list[idx]];
-  if(dept==='Overhead Door Division') rotationData.overhead=list;
-  else rotationData.automatic=list;
-  const order=list.map(e=>e.id);
-  await api('PUT','/api/rotation',{department:dept,order});
-  renderRotation();
-  showToast('Rotation updated.','success');
-}
-
-// ─── DIRECTORY ────────────────────────────────────────────────────────────────
-async function renderDirectory() {
-  try {
-    if(!allUsers.length) allUsers=await api('GET','/api/users');
-    const q=($('dirSearch').value||'').toLowerCase();
-    const filtered=allUsers.filter(u=>!q||(u.first_name+' '+u.last_name+' '+u.role+' '+u.department).toLowerCase().includes(q));
-    const deptColors={'Automatic Door':'badge-blue','Overhead Door':'badge-red','Both Divisions':'badge-purple','Management':'badge-gray'};
-    $('dirGrid').innerHTML=filtered.length?filtered.map(u=>{
-      const ac=u.avatar_color||avatarBg(u.first_name+u.last_name);
-      const name=displayName(u);
-      const deptBadge=u.oncall_dept?`<span class="badge ${deptColors[u.oncall_dept]||'badge-amber'}" style="font-size:9px;margin-top:4px">${u.oncall_dept.replace(' Division','')}</span>`:'';
-      const dirRole = currentUser.role_type||'technician';
-    const dirIsManager = ['global_admin','admin','manager'].includes(dirRole);
-    return `<div class="dir-card"><div class="dir-card-top"><div class="avatar" style="width:44px;height:44px;font-size:15px;background:${ac}">${initials(u.first_name,u.last_name)}</div><div><div style="font-weight:500;font-size:13.5px;font-family:Oswald,sans-serif">${name}</div><div style="font-size:11px;color:var(--text-muted)">${u.role||'—'}</div>${deptBadge}</div></div><div class="dir-info" style="margin-top:8px"><div>📞 ${u.phone||'—'}</div><div>✉ ${u.email||'—'}</div><div>🏢 ${u.department||'—'}</div>${dirIsManager&&u.hire_date?'<div class="dir-hire-date">📅 Hired: '+fmtDate(u.hire_date)+'</div>':''}</div></div>`;
-    }).join(''):'<div class="empty-state" style="grid-column:1/-1">No employees found.</div>';
-  } catch(e){ console.error(e); }
-}
-
-// ─── BLACKOUTS ────────────────────────────────────────────────────────────────
-async function loadBlackouts() { try { allBlackouts=await api('GET','/api/blackouts'); } catch(e){ allBlackouts=[]; } }
-async function renderBlackouts() {
-  await loadBlackouts();
-  const el=$('blackoutList');
-  if(!allBlackouts.length){el.innerHTML='<div class="empty-state">No blackout dates configured.</div>';return;}
-  el.innerHTML=`<table class="data-table"><thead><tr><th>Label</th><th>Start</th><th>End</th><th>Actions</th></tr></thead><tbody>`+
-    allBlackouts.map(b=>`<tr><td><strong>${b.label}</strong></td><td>${fmtDate(b.start_date)}</td><td>${fmtDate(b.end_date)}</td><td><button class="btn btn-danger btn-sm" onclick="deleteBlackout(${b.id})">Remove</button></td></tr>`).join('')+'</tbody></table>';
-}
-async function saveBlackout() {
-  const label=$('boLabel').value.trim(),start=$('boStart').value,end=$('boEnd').value;
-  if(!label||!start||!end) return showToast('Fill in all fields.','error');
-  try { await api('POST','/api/blackouts',{label,start_date:start,end_date:end}); closeModal('blackoutModal'); $('boLabel').value=''; $('boStart').value=''; $('boEnd').value=''; showToast('Blackout saved!','success'); renderBlackouts(); } catch(e){showToast(e.message,'error');}
-}
-async function deleteBlackout(id) { if(!confirm('Remove?'))return; await api('DELETE','/api/blackouts/'+id); renderBlackouts(); }
-function checkBlackout(s,e) { return allBlackouts.find(b=>s<=b.end_date&&e>=b.start_date)||null; }
-
-// ─── PTO ─────────────────────────────────────────────────────────────────────
-async function openPtoReqModal() { await loadBlackouts(); $('blackoutWarning').style.display='none'; $('ptoSubmitBtn').disabled=false; openModal('ptoReqModal'); }
-function calcPtoDays() {
-  const s=$('ptoStart').value,e=$('ptoEnd').value;
-  const calcEl=$('ptoDaysCalc'),warnEl=$('blackoutWarning'),btn=$('ptoSubmitBtn');
-  warnEl.style.display='none'; btn.disabled=false;
-  if(s&&e&&s<=e){
-    calcEl.style.display='block'; calcEl.textContent=`This covers ${businessDays(s,e)} business day${businessDays(s,e)!==1?'s':''}.`;
-    const bo=checkBlackout(s,e);
-    if(bo){warnEl.textContent=`⚠ Overlaps blackout: "${bo.label}" (${fmtDate(bo.start_date)} – ${fmtDate(bo.end_date)}). Cannot request PTO during this period.`; warnEl.style.display='block'; btn.disabled=true;}
-  } else { calcEl.style.display='none'; }
-}
-async function renderPto() {
-  try {
-    const [me,reqs]=await Promise.all([api('GET','/api/me'),api('GET','/api/pto')]);
-    const used=me.pto_total-me.pto_left, pct=Math.round(me.pto_left/Math.max(me.pto_total,1)*100);
-    const cls=pct<20?'low':pct<50?'warn':'';
-    $('ptoBalanceCard').innerHTML=`<div class="card-header" style="margin-bottom:.75rem"><span class="card-title">My PTO Balance — ${new Date().getFullYear()}</span></div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1rem">
-        <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value">${me.pto_total}</div><div class="stat-sub">days/year</div></div>
-        <div class="stat-card"><div class="stat-label">Used</div><div class="stat-value">${used}</div></div>
-        <div class="stat-card"><div class="stat-label">Remaining</div><div class="stat-value" style="color:${cls==='low'?'var(--danger)':cls==='warn'?'var(--amber)':'var(--green)'}">${me.pto_left}</div></div>
-      </div>
-      <div class="pto-bar-wrap"><div class="pto-bar-label"><span>${pct}% remaining</span><span>${me.pto_left} of ${me.pto_total} days</span></div><div class="pto-bar"><div class="pto-fill ${cls}" style="width:${pct}%"></div></div></div>${me.hire_date ? '<div style="margin-top:10px;font-size:12px;color:var(--text-muted);padding:7px 10px;background:var(--bg-surface);border-radius:var(--radius-sm);border-left:3px solid var(--amber)">&#128257; Your PTO renews annually on your hire date: <strong style="color:var(--amber)">' + fmtDate(me.hire_date) + '</strong></div>' : ''}`;
-    $('myPtoList').innerHTML=reqs.length?`<div class="table-wrap"><table class="data-table"><thead><tr><th>Dates</th><th>Type</th><th>Days</th><th>Status</th><th>Notes</th></tr></thead><tbody>`+
-      reqs.map(r=>`<tr><td>${fmtDate(r.start_date)} – ${fmtDate(r.end_date)}</td><td>${r.type}</td><td>${r.days}</td><td><span class="badge ${r.status==='approved'?'badge-green':r.status==='denied'?'badge-red':'badge-amber'}">${r.status}</span></td><td style="font-size:12px;color:var(--text-muted)">${r.notes||'—'}</td></tr>`).join('')+'</tbody></table></div>'
-      :'<div class="empty-state">No requests yet.</div>';
-  } catch(e){ console.error(e); }
-}
-async function submitPto() {
-  const start=$('ptoStart').value,end=$('ptoEnd').value,type=$('ptoType').value,notes=$('ptoNotes').value;
-  if(!start||!end||start>end) return showToast('Select valid dates.','error');
-  try { await api('POST','/api/pto',{start_date:start,end_date:end,type,notes,days:businessDays(start,end)}); closeModal('ptoReqModal'); ['ptoStart','ptoEnd','ptoNotes'].forEach(id=>$(id).value=''); $('ptoDaysCalc').style.display='none'; showToast('Request submitted!','success'); renderPto(); } catch(e){showToast(e.message,'error');}
-}
-
-// ─── ADMIN: USERS ─────────────────────────────────────────────────────────────
-async function renderAdminUsers() {
-  try {
-    // Always refresh from server when page loads
-    allUsers = await api('GET', '/api/users');
-    renderEmployeeRows(allUsers);
-  } catch(e){ console.error(e); }
-}
-
-function filterEmployeeTable() {
-  if (!allUsers.length) { renderAdminUsers(); return; }
-  const searchQ = ($('empSearchInput') && $('empSearchInput').value || '').toLowerCase();
-  const deptF   = ($('empDeptFilter')  && $('empDeptFilter').value)  || '';
-  let filtered  = allUsers;
-  if (searchQ) filtered = filtered.filter(u =>
-    (u.first_name||'').toLowerCase().includes(searchQ) ||
-    (u.last_name||'').toLowerCase().includes(searchQ) ||
-    (u.username||'').toLowerCase().includes(searchQ)
-  );
-  if (deptF) filtered = filtered.filter(u => (u.department||'') === deptF || (u.department||'').toLowerCase().includes(deptF.toLowerCase()));
-  renderEmployeeRows(filtered);
-}
-
-function renderEmployeeRows(filtered) {
-  const countEl = $('empFilterCount');
-  if (countEl) countEl.textContent = filtered.length + ' of ' + allUsers.length + ' employees';
-  if (!$('usersTbody')) return;
-  $('usersTbody').innerHTML=filtered.map(u=>{
-      const pct=Math.round(u.pto_left/Math.max(u.pto_total,1)*100);
-      const cls=pct<20?'low':pct<50?'warn':'';
-      const name=displayName(u);
-      return `<tr>
-        <td><strong style="font-family:Oswald,sans-serif">${name}</strong>${u.is_admin?' <span class="badge badge-red">Admin</span>':''}</td>
-        <td style="color:var(--text-muted)">${u.username}</td>
-        <td>${u.role||'—'}<br><span style="font-size:11px;color:var(--text-faint)">${u.department||''}</span></td>
-        <td>${u.oncall_dept?`<span class="badge badge-amber" style="font-size:9px">${u.oncall_dept.replace(' Division','')}</span>`:'<span style="color:var(--text-faint);font-size:12px">—</span>'}</td>
-        <td><div style="display:flex;align-items:center;gap:8px"><span style="font-weight:600;min-width:36px;font-family:Oswald,sans-serif">${u.pto_left}/${u.pto_total}</span><div class="pto-bar" style="width:60px;flex-shrink:0"><div class="pto-fill ${cls}" style="width:${pct}%"></div></div></div><div style="font-size:10px;color:var(--text-faint);margin-top:3px">${u.hire_date?'Hired: '+fmtDate(u.hire_date):''}</div></td>
-        <td style="white-space:nowrap">${u.id!==1 ? `<button class="btn btn-ghost btn-sm" onclick="openEditUser(${u.id})">Edit</button> <button class="btn btn-ghost btn-sm" onclick="openResetPw(${u.id},'${(u.first_name+' '+u.last_name).trim()}')">Reset PW</button> <button class="btn btn-danger btn-sm" onclick="deleteUser(${u.id})">Remove</button>` : '<span style="font-size:11px;color:var(--text-faint)">Protected</span>'}</td>
-      </tr>`;
-    }).join('');
-}
-async function saveUser() {
-  const first_name=$('addFirst').value.trim(),last_name=$('addLast').value.trim();
-  const username=$('addUsername').value.trim(),password=$('addPass').value;
-  if(!first_name||!username||!password) return showToast('Fill in required fields.','error');
-  try {
-    await api('POST','/api/users',{username,password,first_name,last_name,role:$('addRole').value,department:$('addDept').value,oncall_dept:$('addOncallDept').value,oncall_role:$('addOncallRole').value,phone:$('addPhone').value,email:$('addEmail').value,is_admin:$('addIsAdmin').value==='true',role_type:$('addRoleType')?$('addRoleType').value:'technician',pto_total:parseInt($('addPtoTotal').value)||10,pto_left:parseInt($('addPtoLeft').value)||10,hire_date:$('addHireDate').value||'',avatar_color:avatarBg(first_name+last_name)});
-    closeModal('addUserModal'); ['addFirst','addLast','addUsername','addPass','addRole','addDept','addPhone','addEmail','addHireDate'].forEach(id=>$(id).value='');
-    allUsers=[]; showToast('Employee added!','success'); renderAdminUsers();
-  } catch(e){ showToast(e.message,'error'); }
-}
-async function deleteUser(id) { if(!confirm('Remove this employee?'))return; try { await api('DELETE','/api/users/'+id); allUsers=[]; showToast('Removed.'); renderAdminUsers(); } catch(e){showToast(e.message,'error');} }
-
-// ─── ADMIN: PTO APPROVAL ──────────────────────────────────────────────────────
-function setAdminPtoFilter(f,el) {
-  adminPtoFilter=f;
-  document.querySelectorAll('#page-adminPto .tab').forEach(t=>t.classList.remove('active'));
-  if(el) el.classList.add('active');
-  renderAdminPto();
-}
-async function renderAdminPto() {
-  try {
-    let reqs=await api('GET','/api/pto');
-    if(adminPtoFilter!=='all') reqs=reqs.filter(r=>r.status===adminPtoFilter);
-    reqs.sort((a,b)=>new Date(b.submitted_at)-new Date(a.submitted_at));
-    $('adminPtoList').innerHTML=reqs.length?reqs.map(r=>`<div class="card" style="margin-bottom:.75rem"><div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px"><div><div style="font-family:Oswald,sans-serif;font-size:16px;font-weight:600">${r.user_name}</div><div style="font-size:13px;color:var(--text-muted);margin-top:3px">${fmtDate(r.start_date)} – ${fmtDate(r.end_date)} &middot; <strong style="color:var(--text)">${r.days} day${r.days!==1?'s':''}</strong> &middot; ${r.type}</div>${r.notes?`<div style="font-size:12px;color:var(--text-faint);margin-top:3px">${r.notes}</div>`:''}<div style="font-size:11px;color:var(--text-faint);margin-top:4px">Submitted ${fmtDate(r.submitted_at)}</div></div><div style="display:flex;align-items:center;gap:8px"><span class="badge ${r.status==='approved'?'badge-green':r.status==='denied'?'badge-red':'badge-amber'}">${r.status}</span>${r.status==='pending'?`<button class="btn btn-success btn-sm" onclick="reviewPto(${r.id},'approved')">Approve</button><button class="btn btn-danger btn-sm" onclick="reviewPto(${r.id},'denied')">Deny</button>`:''}</div></div></div>`).join('')
-      :'<div class="empty-state" style="margin-top:1rem">No requests in this category.</div>';
-  } catch(e){ console.error(e); }
-}
-async function reviewPto(id,status) {
-  try { await api('PUT','/api/pto/'+id+'/review',{status}); showToast(status==='approved'?'Approved — PTO balance updated. Employee notified.':'Denied — Employee notified.',status==='approved'?'success':''); updatePtoBadge(); renderAdminPto(); } catch(e){showToast(e.message,'error');}
-}
-
-// ─── SETTINGS ────────────────────────────────────────────────────────────────
-async function loadSettings() {
-  try {
-    const s=await api('GET','/api/settings');
-    ['smtp_host','smtp_port','smtp_user','smtp_from_name'].forEach(k=>{ if(s[k]&&$(k)) $(k).value=s[k]; });
-    if(s.gcal_id&&$('gcalId')) $('gcalId').value=s.gcal_id;
-  } catch(e){}
-}
-async function saveSmtpSettings() {
-  try { await api('POST','/api/settings',{smtp_host:$('smtpHost').value,smtp_port:$('smtpPort').value,smtp_user:$('smtpUser').value,smtp_pass:$('smtpPass').value,smtp_from_name:$('smtpFromName').value}); showToast('Email settings saved!','success'); } catch(e){showToast(e.message,'error');}
-}
-
-// ─── INIT ─────────────────────────────────────────────────────────────────────
-(async function init() {
-  try {
-    currentUser=await api('GET','/api/me');
-    $('loginScreen').style.display='none'; $('mainApp').style.display='block';
-    setupUI(); await loadBlackouts(); ptoViewYear=new Date().getFullYear(); ptoViewMonth=new Date().getMonth();
-    // Handle PWA shortcuts
-    const startPage = window._pwaStartPage;
-    const startAction = window._pwaStartAction;
-    if (startPage) {
-      const navEl = document.querySelector('.nav-item[data-page="' + startPage + '"]');
-      showPage(startPage, navEl);
-    } else if (startAction === 'callin') {
-      showPage('dashboard', document.querySelector('.nav-item[data-page="dashboard"]'));
-      setTimeout(() => openSelfCallin(), 500);
-    } else {
-      showPage('dashboard', document.querySelector('.nav-item[data-page="dashboard"]'));
-    }
-    // Request notification permission after login (politely)
-    setTimeout(async () => {
-      if (typeof requestNotificationPermission === 'function') {
-        await requestNotificationPermission();
-      }
-    }, 3000);
-  } catch(e){ $('loginScreen').style.display='flex'; }
-})();
-
-// ─── CHANGE OWN PASSWORD ──────────────────────────────────────────────────────
-async function changeMyPassword() {
-  const current = $('cpCurrent').value;
-  const newPw   = $('cpNew').value;
-  const confirm = $('cpConfirm').value;
-  const errEl   = $('changePwError');
-  errEl.style.display = 'none';
-
-  if (!current || !newPw || !confirm) { errEl.textContent = 'Please fill in all fields.'; errEl.style.display = 'block'; return; }
-  if (newPw.length < 6) { errEl.textContent = 'New password must be at least 6 characters.'; errEl.style.display = 'block'; return; }
-  if (newPw !== confirm) { errEl.textContent = 'New passwords do not match.'; errEl.style.display = 'block'; return; }
-
-  try {
-    await api('PUT', '/api/users/me/password', { current_password: current, new_password: newPw });
-    closeModal('changePwModal');
-    $('cpCurrent').value = ''; $('cpNew').value = ''; $('cpConfirm').value = '';
-    showToast('Password updated successfully!', 'success');
-  } catch(e) {
-    errEl.textContent = e.message;
-    errEl.style.display = 'block';
-  }
-}
-
-// ─── ADMIN: OPEN EDIT EMPLOYEE ────────────────────────────────────────────────
-async function openEditUser(id) {
-  if (!allUsers.length) allUsers = await api('GET', '/api/users');
-  const u = allUsers.find(x => x.id === id || String(x.id) === String(id));
-  if (!u) return showToast('Employee not found.', 'error');
-
-  $('editUserId').value    = u.id;
-  $('editFirst').value     = u.first_name || '';
-  $('editLast').value      = u.last_name  || '';
-  $('editUsername').value  = u.username   || '';
-  $('editRole').value      = u.role       || '';
-  // Set department dropdown
-  const editDeptEl = $('editDept');
-  if (editDeptEl) {
-    editDeptEl.value = u.department || '';
-    // If value not in options, add it temporarily
-    if (editDeptEl.value !== (u.department||'') && u.department) {
-      const opt = document.createElement('option');
-      opt.value = u.department; opt.textContent = u.department;
-      editDeptEl.appendChild(opt);
-      editDeptEl.value = u.department;
-    }
-  }
-  $('editPhone').value     = u.phone      || '';
-  $('editEmail').value     = u.email      || '';
-  $('editPtoTotal').value  = u.pto_total  ?? 10;
-  $('editPtoLeft').value   = u.pto_left   ?? 10;
-  $('editHireDate').value  = u.hire_date  || '';
-
-  // Set selects
-  const oncallDeptEl = $('editOncallDept');
-  for (let i = 0; i < oncallDeptEl.options.length; i++) {
-    if (oncallDeptEl.options[i].value === (u.oncall_dept || '')) { oncallDeptEl.selectedIndex = i; break; }
-  }
-  const oncallRoleEl = $('editOncallRole');
-  for (let i = 0; i < oncallRoleEl.options.length; i++) {
-    if (oncallRoleEl.options[i].value === (u.oncall_role || '')) { oncallRoleEl.selectedIndex = i; break; }
-  }
-  $('editIsAdmin').value = u.is_admin ? 'true' : 'false';
-  if ($('editRoleType')) $('editRoleType').value = u.role_type || 'technician';
-
-  // Lock admin-only fields for managers
-  const limitedMode = !['global_admin','admin'].includes(currentUser.role_type||'') && currentUser.role_type === 'manager';
-  ['editUsername','editRoleType','editPtoTotal','editPtoLeft','editHireDate'].forEach(fid => {
-    const el = $(fid);
-    if (el) { el.disabled = limitedMode; el.style.opacity = limitedMode ? '0.4' : '1'; el.title = limitedMode ? 'Admin only' : ''; }
-  });
-  const adminNote = $('editAdminOnlyNote');
-  if (adminNote) adminNote.style.display = limitedMode ? 'block' : 'none';
-
-  openModal('editUserModal');
-}
-
-async function saveEditUser() {
-  const id = $('editUserId').value;
-  const isAdmin = ['global_admin','admin'].includes(currentUser.role_type||'');
-  const limitedMode = !isAdmin && currentUser.role_type === 'manager';
-  const first_name = $('editFirst').value.trim();
-  const username   = $('editUsername').value.trim();
-  if (!first_name || !username) return showToast('First name and username are required.', 'error');
-
-  try {
-    const newRoleType = $('editRoleType') ? $('editRoleType').value : 'technician';
-    await api('PUT', '/api/users/' + id, {
-      first_name,
-      last_name:    $('editLast').value.trim(),
-      role_type:    newRoleType,
-      username,
-      role:         $('editRole').value,
-      department:   $('editDept').value,
-      oncall_dept:  $('editOncallDept') ? $('editOncallDept').value : '',
-      oncall_role:  $('editOncallRole') ? $('editOncallRole').value : '',
-      phone:        $('editPhone').value,
-      email:        $('editEmail').value,
-      pto_total:    parseInt($('editPtoTotal').value) || 10,
-      pto_left:     parseInt($('editPtoLeft').value)  || 10,
-      hire_date:    $('editHireDate').value || '',
-    });
-    closeModal('editUserModal');
-    allUsers = []; // clear cache so next load is fresh
-    showToast('Employee updated!', 'success');
-    // Refresh whichever page is visible
-    const activePage = document.querySelector('.page.active');
-    if (activePage) {
-      const pageId = activePage.id.replace('page-', '');
-      if (pageId === 'adminUsers') renderAdminUsers();
-      if (pageId === 'directory')  renderDirectory();
-    }
-  } catch(e) { showToast(e.message, 'error'); }
-}
-
-// ─── ADMIN: RESET EMPLOYEE PASSWORD ──────────────────────────────────────────
-function openResetPw(id, name) {
-  $('resetPwUserId').value  = id;
-  $('resetPwName').textContent = name;
-  $('resetPwNew').value     = '';
-  $('resetPwConfirm').value = '';
-  $('resetPwError').style.display = 'none';
-  openModal('resetPwModal');
-}
-
-async function adminResetPassword() {
-  const id      = $('resetPwUserId').value;
-  const newPw   = $('resetPwNew').value;
-  const confirm = $('resetPwConfirm').value;
-  const errEl   = $('resetPwError');
-  errEl.style.display = 'none';
-
-  if (!newPw || !confirm) { errEl.textContent = 'Please fill in both fields.'; errEl.style.display = 'block'; return; }
-  if (newPw.length < 6)   { errEl.textContent = 'Password must be at least 6 characters.'; errEl.style.display = 'block'; return; }
-  if (newPw !== confirm)  { errEl.textContent = 'Passwords do not match.'; errEl.style.display = 'block'; return; }
-
-  try {
-    await api('PUT', '/api/users/' + id + '/password', { new_password: newPw });
-    closeModal('resetPwModal');
-    showToast('Password reset successfully!', 'success');
-  } catch(e) {
-    errEl.textContent = e.message;
-    errEl.style.display = 'block';
-  }
-}
-
-// ─── PTO CALENDAR PICKER ──────────────────────────────────────────────────────
-let calViewYear  = new Date().getFullYear();
-let calViewMonth = new Date().getMonth(); // 0-indexed
-let calSelectStart = null; // 'YYYY-MM-DD'
-let calSelectEnd   = null;
-let calClickState  = 0; // 0=picking start, 1=picking end
-
-
-function ptoCalShift(dir) {
-  calViewMonth += dir;
-  if (calViewMonth > 11) { calViewMonth = 0; calViewYear++; }
-  if (calViewMonth < 0)  { calViewMonth = 11; calViewYear--; }
-  syncJumpSelects();
-  renderPtoCal();
-}
-
-function ptoJump() {
-  const m = parseInt($('ptoJumpMonth').value);
-  const y = parseInt($('ptoJumpYear').value);
-  if (!isNaN(m) && !isNaN(y)) {
-    calViewMonth = m;
-    calViewYear  = y;
-    renderPtoCal();
-  }
-}
-
-function syncJumpSelects() {
-  const mEl = $('ptoJumpMonth');
-  const yEl = $('ptoJumpYear');
-  if (!mEl || !yEl) return;
-  if (!mEl.options.length) {
-    MONTHS.forEach((name, i) => {
-      const o = document.createElement('option');
-      o.value = i; o.textContent = name;
-      mEl.appendChild(o);
-    });
-    const curY = new Date().getFullYear();
-    for (let y = curY - 1; y <= curY + 3; y++) {
-      const o = document.createElement('option');
-      o.value = y; o.textContent = y;
-      yEl.appendChild(o);
-    }
-  }
-  mEl.value = calViewMonth;
-  yEl.value = calViewYear;
-}
-
-function renderPtoCal() {
-  const g1 = $('ptoCalGrid1');
-  const g2 = $('ptoCalGrid2');
-  const l1 = $('ptoCalLabel1');
-  const l2 = $('ptoCalLabel2');
-  if (!g1 || !g2) return; // modal not open yet
-
-  const m1 = calViewMonth;
-  const y1 = calViewYear;
-  let m2 = m1 + 1, y2 = y1;
-  if (m2 > 11) { m2 = 0; y2++; }
-
-  if (l1) l1.textContent = MONTHS[m1] + ' ' + y1;
-  if (l2) l2.textContent = MONTHS[m2] + ' ' + y2;
-
-  try { g1.innerHTML = buildCalMonth(y1, m1); } catch(e) { g1.innerHTML = '<div style="color:red;font-size:11px">Error: '+e.message+'</div>'; }
-  try { g2.innerHTML = buildCalMonth(y2, m2); } catch(e) { g2.innerHTML = ''; }
-
-  // Attach click handlers
-  document.querySelectorAll('.pto-cal-day[data-date]').forEach(el => {
-    el.addEventListener('click', () => ptoCalDayClick(el.dataset.date));
-  });
-}
-
-function buildCalMonth(year, month) {
-  const today    = new Date().toISOString().split('T')[0];
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-  // Build blackout set
-  const blackoutDates = new Set();
-  allBlackouts.forEach(b => {
-    let cur = new Date(b.start_date + 'T00:00:00');
-    const end = new Date(b.end_date + 'T00:00:00');
-    while (cur <= end) {
-      blackoutDates.add(cur.toISOString().split('T')[0]);
-      cur.setDate(cur.getDate() + 1);
-    }
-  });
-
-  let html = '<div class="pto-cal-dow">' + DOW.map(d => `<span>${d}</span>`).join('') + '</div>';
-  html += '<div class="pto-cal-days">';
-
-  // Empty cells before first day
-  for (let i = 0; i < firstDay; i++) {
-    html += '<div class="pto-cal-day pto-day-empty"></div>';
-  }
-
-  for (let d = 1; d <= daysInMonth; d++) {
-    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const dow = new Date(dateStr + 'T00:00:00').getDay();
-    const isWeekend   = dow === 0 || dow === 6;
-    const isPast      = dateStr < today;
-    const isBlackout  = blackoutDates.has(dateStr);
-    const isToday     = dateStr === today;
-    const isStart     = dateStr === calSelectStart;
-    const isEnd       = dateStr === calSelectEnd;
-    const inRange     = calSelectStart && calSelectEnd && dateStr > calSelectStart && dateStr < calSelectEnd;
-
-    let cls = 'pto-cal-day';
-    if (isBlackout) cls += ' pto-day-blackout';
-    else if (isPast) cls += ' pto-day-past';
-    else if (isWeekend) cls += ' pto-day-weekend';
-    if (isStart) cls += ' pto-day-start';
-    if (isEnd)   cls += ' pto-day-end';
-    if (inRange) cls += ' pto-day-range';
-    if (isToday) cls += ' pto-day-today';
-
-    const clickable = !isPast && !isBlackout ? `data-date="${dateStr}"` : '';
-    html += `<div class="${cls}" ${clickable}>${d}</div>`;
-  }
-
-  html += '</div>';
-  return html;
-}
-
-function ptoCalDayClick(dateStr) {
-  if (calClickState === 0) {
-    // Picking start
-    calSelectStart = dateStr;
-    calSelectEnd   = null;
-    calClickState  = 1;
-  } else {
-    // Picking end
-    if (dateStr < calSelectStart) {
-      // Clicked before start — swap
-      calSelectEnd   = calSelectStart;
-      calSelectStart = dateStr;
-    } else {
-      calSelectEnd = dateStr;
-    }
-    calClickState = 0;
-  }
-
-  // Sync to text inputs
-  $('ptoStart').value = calSelectStart || '';
-  $('ptoEnd').value   = calSelectEnd   || '';
-  calcPtoDays();
-  renderPtoCal();
-}
-
-function ptoManualInput() {
-  // Sync text inputs back to calendar
-  const s = $('ptoStart').value;
-  const e = $('ptoEnd').value;
-  if (s) {
-    calSelectStart = s;
-    // Navigate calendar to show start month
-    const d = new Date(s + 'T00:00:00');
-    calViewYear  = d.getFullYear();
-    calViewMonth = d.getMonth();
-    syncJumpSelects();
-  }
-  if (e) calSelectEnd = e;
-  calcPtoDays();
-  renderPtoCal();
-}
-
-// Override openPtoReqModal to init calendar
-const _origOpenPtoReqModal = openPtoReqModal;
-openPtoReqModal = async function() {
-  await loadBlackouts();
-  $('blackoutWarning').style.display = 'none';
-  $('ptoSubmitBtn').disabled = false;
-  // Reset calendar state
-  calSelectStart = null;
-  calSelectEnd   = null;
-  calClickState  = 0;
-  $('ptoStart').value = '';
-  $('ptoEnd').value   = '';
-  $('ptoDaysCalc').style.display = 'none';
-  // Set view to current month
-  const now = new Date();
-  calViewYear  = now.getFullYear();
-  calViewMonth = now.getMonth();
-  openModal('ptoReqModal');
-  // Slight delay to ensure modal is visible before rendering
-  setTimeout(() => {
-    syncJumpSelects();
-    renderPtoCal();
-  }, 80);
-};
-
-// ─── LOAD KVM PAPER SCHEDULE ──────────────────────────────────────────────────
-async function loadKVMSchedule() {
-  if (!confirm('This will load your paper on-call schedule (3/21 through 6/19) into the system, replacing any existing future entries. Continue?')) return;
-  try {
-    const result = await api('POST', '/api/oncall/seed-schedule', {});
-    showToast(`Schedule loaded! ${result.created} entries created.`, 'success');
-    renderOncall();
-  } catch(e) { showToast('Error: ' + e.message, 'error'); }
-}
-
-// ─── PTO CALENDAR VIEW ────────────────────────────────────────────────────────
-let ptoViewYear  = new Date().getFullYear();
-let ptoViewMonth = new Date().getMonth();
-
-function ptoViewShift(dir) {
-  const mode = ($('ptoViewMode') && $('ptoViewMode').value) || 'month';
-  if (mode === 'week') {
-    ptoViewMonth += dir * 0; // shift by week handled differently
-    const ref = new Date(ptoViewYear, ptoViewMonth, 1);
-    ref.setDate(ref.getDate() + dir * 7);
-    ptoViewYear  = ref.getFullYear();
-    ptoViewMonth = ref.getMonth();
-  } else {
-    ptoViewMonth += dir;
-    if (ptoViewMonth > 11) { ptoViewMonth = 0; ptoViewYear++; }
-    if (ptoViewMonth < 0)  { ptoViewMonth = 11; ptoViewYear--; }
-  }
-  renderPtoCalendar();
-}
-
-async function renderPtoCalendar() {
-  const mode = ($('ptoViewMode') && $('ptoViewMode').value) || 'month';
-  const labelEl = $('ptoViewLabel');
-  const gridEl  = $('ptoCalendarGrid');
-  const listEl  = $('ptoCalendarList');
-  if (!gridEl) return;
-
-  // Show loading state
-  gridEl.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);font-size:13px">Loading calendar...</div>';
-
-  // Load ALL approved PTO
-  let allPto = [];
-  try { allPto = await api('GET', '/api/pto/all-approved'); } catch(e) {}
-  const approved = allPto.filter(r => r.status === 'approved');
-  
-  // Also load call-ins and add to calendar
-  let callinEvents = [];
-  try {
-    const myCallin = await api('GET', '/api/attendance/my-callins');
-    myCallin.callins.forEach(c => {
-      callinEvents.push({
-        start_date: c.call_in_date, end_date: c.call_in_date,
-        days: 1, type: c.call_in_type, status: 'approved',
-        user_id: currentUser.id, user_name: currentUser.first_name + ' ' + (currentUser.last_name||'')
-      });
-    });
-  } catch(e) {}
-  const allEvents = [...approved, ...callinEvents];
-
-  // Load all users for color mapping
-  if (!allUsers.length) { try { allUsers = await api('GET', '/api/users'); } catch(e) {} }
-
-  const userColors = {};
-  allUsers.forEach(u => { userColors[u.id] = u.avatar_color || avatarBg(u.first_name + (u.last_name||'')); });
-
-  if (mode === 'month') {
-    labelEl.textContent = MONTHS[ptoViewMonth] + ' ' + ptoViewYear;
-    const firstDay = new Date(ptoViewYear, ptoViewMonth, 1).getDay();
-    const daysInMonth = new Date(ptoViewYear, ptoViewMonth + 1, 0).getDate();
-    const today = new Date().toISOString().split('T')[0];
-
-    // Build a map of date -> approved requests
-    const dayMap = {};
-    allEvents.forEach(r => {
-      let cur = new Date(r.start_date + 'T00:00:00');
-      const end = new Date(r.end_date + 'T00:00:00');
-      while (cur <= end) {
-        const ds = cur.toISOString().split('T')[0];
-        if (!dayMap[ds]) dayMap[ds] = [];
-        dayMap[ds].push(r);
-        cur.setDate(cur.getDate() + 1);
-      }
-    });
-
-    let html = '<div class="ptov-dow-row">' + ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => `<div class="ptov-dow">${d}</div>`).join('') + '</div>';
-    html += '<div class="ptov-grid">';
-    for (let i = 0; i < firstDay; i++) html += '<div class="ptov-cell ptov-empty"></div>';
-    for (let d = 1; d <= daysInMonth; d++) {
-      const ds = `${ptoViewYear}-${String(ptoViewMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-      const dow = new Date(ds + 'T00:00:00').getDay();
-      const isWeekend = dow === 0 || dow === 6;
-      const isToday = ds === today;
-      const entries = dayMap[ds] || [];
-      html += `<div class="ptov-cell ${isWeekend?'ptov-weekend':''} ${isToday?'ptov-today':''}">
-        <div class="ptov-day-num ${isToday?'ptov-today-num':''}">${d}</div>
-        ${entries.slice(0,3).map(r => {
-          const u = allUsers.find(x => x.id == r.user_id);
-          const col = u ? (u.avatar_color || avatarBg(u.first_name+(u.last_name||''))) : '#F5A623';
-          const name = r.user_name.split(' ')[0];
-          return `<div class="ptov-entry" style="background:${col}22;border-left:3px solid ${col};color:${col}">${name}</div>`;
-        }).join('')}
-        ${entries.length > 3 ? `<div class="ptov-more">+${entries.length-3} more</div>` : ''}
-      </div>`;
-    }
-    html += '</div>';
-    gridEl.innerHTML = html;
-
-    // List view below calendar
-    const monthStart = `${ptoViewYear}-${String(ptoViewMonth+1).padStart(2,'0')}-01`;
-    const monthEnd   = `${ptoViewYear}-${String(ptoViewMonth+1).padStart(2,'0')}-${String(daysInMonth).padStart(2,'0')}`;
-    const inMonth = allEvents.filter(r => r.start_date <= monthEnd && r.end_date >= monthStart);
-    inMonth.sort((a,b) => a.start_date.localeCompare(b.start_date));
-    listEl.innerHTML = inMonth.length
-      ? `<table class="data-table"><thead><tr><th>Employee</th><th>Dates</th><th>Days</th><th>Type</th></tr></thead><tbody>`
-        + inMonth.map(r => {
-          const u = allUsers.find(x => x.id == r.user_id);
-          const col = u ? (u.avatar_color || avatarBg(u.first_name+(u.last_name||''))) : '#F5A623';
-          return `<tr><td><span style="display:inline-flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:50%;background:${col};display:inline-block"></span>${r.user_name}</span></td><td>${fmtDate(r.start_date)} – ${fmtDate(r.end_date)}</td><td>${r.days}</td><td>${r.type}</td></tr>`;
-        }).join('') + '</tbody></table>'
-      : '<div class="empty-state">No approved time off this month.</div>';
-
-  } else {
-    // Week view
-    const refDate = new Date(ptoViewYear, ptoViewMonth, 1);
-    const dayOfWeek = refDate.getDay();
-    const weekStart = new Date(refDate); weekStart.setDate(refDate.getDate() - dayOfWeek);
-    const weekEnd   = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
-    labelEl.textContent = `Week of ${fmtDate(weekStart.toISOString().split('T')[0])}`;
-
-    const days = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(weekStart); d.setDate(weekStart.getDate() + i);
-      days.push(d.toISOString().split('T')[0]);
-    }
-    const today = new Date().toISOString().split('T')[0];
-
-    // Build user -> days off map
-    const userDays = {};
-    approved.forEach(r => {
-      days.forEach(ds => {
-        if (ds >= r.start_date && ds <= r.end_date) {
-          if (!userDays[r.user_id]) userDays[r.user_id] = { name: r.user_name, days: new Set(), type: r.type };
-          userDays[r.user_id].days.add(ds);
-        }
-      });
-    });
-
-    let html = `<div class="ptov-week-grid">`;
-    html += `<div class="ptov-week-header"><div class="ptov-week-label"></div>` + days.map(ds => {
-      const d = new Date(ds+'T00:00:00');
-      const isToday = ds === today;
-      return `<div class="ptov-week-day ${isToday?'ptov-today':''}">${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]}<br><span style="font-size:16px;font-weight:700">${d.getDate()}</span></div>`;
-    }).join('') + '</div>';
-
-    Object.entries(userDays).forEach(([uid, data]) => {
-      const u = allUsers.find(x => String(x.id) === uid);
-      const col = u ? (u.avatar_color || avatarBg(data.name)) : '#F5A623';
-      html += `<div class="ptov-week-row">
-        <div class="ptov-week-label" style="color:${col}">${data.name.split(' ')[0]}</div>`;
-      days.forEach(ds => {
-        const off = data.days.has(ds);
-        const dow = new Date(ds+'T00:00:00').getDay();
-        const isWknd = dow === 0 || dow === 6;
-        html += `<div class="ptov-week-cell ${isWknd?'ptov-weekend':''}">${off ? `<div class="ptov-week-off" style="background:${col}33;border:1px solid ${col};color:${col}">Off</div>` : ''}</div>`;
-      });
-      html += '</div>';
-    });
-
-    if (!Object.keys(userDays).length) html += '<div style="grid-column:1/-1;padding:1rem;text-align:center;color:var(--text-faint)">No one off this week.</div>';
-    html += '</div>';
-    gridEl.innerHTML = html;
-    listEl.innerHTML = '';
-  }
-
-  // Show Google Calendar link if configured
-  try {
-    const s = await api('GET', '/api/settings');
-    if (s.gcal_id) {
-      const link = $('gcalLink');
-      if (link) { link.href = `https://calendar.google.com/calendar/r?cid=${s.gcal_id}`; link.style.display = 'inline'; }
-    }
-  } catch(e) {}
-}
-
-// ─── EMAIL TEST ────────────────────────────────────────────────────────────────
-async function testEmail() {
-  const resultEl = $('emailTestResult');
-  resultEl.className = 'alert alert-warning';
-  resultEl.textContent = 'Sending test email...';
-  resultEl.style.display = 'block';
-  try {
-    const r = await api('POST', '/api/settings/test-email', {});
-    resultEl.className = 'alert alert-success';
-    resultEl.textContent = `✓ Test email sent to ${r.sent_to}. Check your inbox!`;
-  } catch(e) {
-    resultEl.className = 'alert alert-danger';
-    resultEl.textContent = `✗ Failed: ${e.message}`;
-  }
-}
-
-// ─── GOOGLE CALENDAR SETTINGS ─────────────────────────────────────────────────
-async function saveGcalSettings() {
-  const gcal_id  = $('gcalId') && $('gcalId').value.trim();
-  const gcal_key = $('gcalKey') && $('gcalKey').value.trim();
-  try {
-    await api('POST', '/api/settings', { gcal_id, gcal_key });
-    showToast('Google Calendar settings saved!', 'success');
-  } catch(e) { showToast(e.message, 'error'); }
-}
-
-async function loadGcalSettings() {
-  try {
-    const s = await api('GET', '/api/settings');
-    if (s.gcal_id && $('gcalId')) $('gcalId').value = s.gcal_id;
-  } catch(e) {}
-}
-
-// ─── DOCUMENTS ────────────────────────────────────────────────────────────────
-let docFilter = 'all';
-let policyFilter = 'all';
-
-const DOC_TYPE_ICONS = { certification:'🏅', must_card:'🪪', license:'📋', other:'📄' };
-const DOC_TYPE_LABELS = { certification:'Certification', must_card:'MUST Card', license:'License', other:'Other' };
-const POLICY_CAT_ICONS = { safety:'⛑️', hr:'👔', operations:'🔧', training:'📚', other:'📄' };
-
-function setDocFilter(f, el) {
-  docFilter = f;
-  document.querySelectorAll('#page-myDocs .doc-type-tabs .tab').forEach(t => t.classList.remove('active'));
-  if (el) el.classList.add('active');
-  renderMyDocs();
-}
-
-function setPolicyFilter(f, el) {
-  policyFilter = f;
-  document.querySelectorAll('#page-policies .doc-type-tabs .tab').forEach(t => t.classList.remove('active'));
-  if (el) el.classList.add('active');
-  renderPolicies();
-}
-
-function fmtFileSize(bytes) {
-  if (!bytes) return '—';
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024*1024) return Math.round(bytes/1024) + ' KB';
-  return (bytes/1024/1024).toFixed(1) + ' MB';
-}
-
-function expiryBadge(expiry) {
-  if (!expiry) return '';
-  const d = new Date(expiry + 'T00:00:00');
-  const today = new Date();
-  const days = Math.round((d - today) / 86400000);
-  if (days < 0) return '<span class="badge badge-red">EXPIRED</span>';
-  if (days <= 30) return `<span class="badge badge-amber">EXPIRES SOON</span>`;
-  return `<span class="badge badge-green">Valid</span>`;
-}
-
-async function renderMyDocs() {
-  try {
-    const docs = await api('GET', '/api/docs/my');
-    const filtered = docFilter === 'all' ? docs : docs.filter(d => d.doc_type === docFilter);
-
-    const el = $('myDocsList');
-    if (!filtered.length) {
-      el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📄</div>No documents uploaded yet. Click "+ Upload Document" to add your certifications and MUST cards.</div>';
-    } else {
-      el.innerHTML = `<div class="doc-grid">${filtered.map(d => `
-        <div class="doc-card">
-          <div class="doc-card-icon">${DOC_TYPE_ICONS[d.doc_type]||'📄'}</div>
-          <div class="doc-card-info">
-            <div class="doc-card-name">${d.doc_name}</div>
-            <div class="doc-card-meta">
-              <span class="badge badge-amber" style="font-size:9px">${DOC_TYPE_LABELS[d.doc_type]||d.doc_type}</span>
-              ${d.expiry_date ? `<span style="font-size:11px;color:var(--text-muted)">Expires: ${fmtDate(d.expiry_date)}</span>` : ''}
-              ${expiryBadge(d.expiry_date)}
-            </div>
-            ${d.notes ? `<div style="font-size:11px;color:var(--text-muted);margin-top:3px">${d.notes}</div>` : ''}
-            <div style="font-size:11px;color:var(--text-faint);margin-top:4px">${d.file_name} &middot; ${fmtFileSize(d.file_size)} &middot; ${fmtDate(d.uploaded_at)}</div>
-          </div>
-          <div class="doc-card-actions">
-            <a href="/api/docs/${d.id}/download" class="btn btn-ghost btn-sm" target="_blank">&#8595; Download</a>
-            <button class="btn btn-danger btn-sm" onclick="deleteDoc(${d.id})">Delete</button>
-          </div>
-        </div>`).join('')}</div>`;
-    }
-
-    // Admin: show all employees docs
-    if (['global_admin','admin'].includes(currentUser.role_type||'')) renderAllDocs();
-  } catch(e) { console.error(e); }
-}
-
-async function renderAllDocs() {
-  try {
-    const docs = await api('GET', '/api/docs/all');
-    const q = ($('docEmpSearch') && $('docEmpSearch').value || '').toLowerCase();
-    const filtered = q ? docs.filter(d => d.user_name.toLowerCase().includes(q)) : docs;
-
-    // Group by employee
-    const byEmp = {};
-    filtered.forEach(d => { if (!byEmp[d.user_name]) byEmp[d.user_name] = []; byEmp[d.user_name].push(d); });
-
-    const el = $('allDocsList');
-    if (!Object.keys(byEmp).length) { el.innerHTML = '<div class="empty-state">No employee documents found.</div>'; return; }
-
-    el.innerHTML = Object.entries(byEmp).map(([name, empDocs]) => `
-      <div style="margin-bottom:1rem">
-        <div style="font-family:Oswald,sans-serif;font-size:13px;font-weight:600;color:var(--amber);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">${name}</div>
-        <div class="doc-grid">${empDocs.map(d => `
-          <div class="doc-card">
-            <div class="doc-card-icon">${DOC_TYPE_ICONS[d.doc_type]||'📄'}</div>
-            <div class="doc-card-info">
-              <div class="doc-card-name">${d.doc_name}</div>
-              <div class="doc-card-meta">${expiryBadge(d.expiry_date)}${d.expiry_date?'<span style="font-size:11px;color:var(--text-muted)"> '+fmtDate(d.expiry_date)+'</span>':''}</div>
-              <div style="font-size:11px;color:var(--text-faint)">${d.file_name} &middot; ${fmtFileSize(d.file_size)}</div>
-            </div>
-            <div class="doc-card-actions">
-              <a href="/api/docs/${d.id}/download" class="btn btn-ghost btn-sm" target="_blank">&#8595;</a>
-              <button class="btn btn-danger btn-sm" onclick="deleteDoc(${d.id})">✕</button>
-            </div>
-          </div>`).join('')}
-        </div>
-      </div>`).join('');
-  } catch(e) { console.error(e); }
-}
-
-async function uploadDocument() {
-  const name = $('docName').value.trim();
-  const type = $('docType').value;
-  const expiry = $('docExpiry').value;
-  const notes = $('docNotes').value;
-  const file = $('docFile').files[0];
-
-  if (!name) return showToast('Enter a document name.', 'error');
-  if (!file) return showToast('Select a file to upload.', 'error');
-  if (file.size > 5 * 1024 * 1024) return showToast('File too large. Max 5MB.', 'error');
-
-  const prog = $('docUploadProgress');
-  prog.style.display = 'block';
-  prog.textContent = 'Reading file...';
-
-  try {
-    const base64 = await fileToBase64(file);
-    prog.textContent = 'Uploading...';
-    await api('POST', '/api/docs', {
-      doc_name: name, doc_type: type, expiry_date: expiry, notes,
-      file_name: file.name, file_data: base64, file_type: file.type, file_size: file.size
-    });
-    closeModal('uploadDocModal');
-    prog.style.display = 'none';
-    ['docName','docExpiry','docNotes'].forEach(id => $(id).value = '');
-    $('docFile').value = '';
-    showToast('Document uploaded!', 'success');
-    renderMyDocs();
-  } catch(e) {
-    prog.style.display = 'none';
-    showToast('Upload failed: ' + e.message, 'error');
-  }
-}
-
-async function deleteDoc(id) {
-  if (!confirm('Delete this document?')) return;
-  await api('DELETE', '/api/docs/' + id);
-  showToast('Document deleted.');
-  renderMyDocs();
-}
-
-// ─── POLICIES ─────────────────────────────────────────────────────────────────
-async function renderPolicies() {
-  try {
-    const policies = await api('GET', '/api/policies');
-    const filtered = policyFilter === 'all' ? policies : policies.filter(p => p.category === policyFilter);
-
-    const el = $('policiesList');
-    if (!filtered.length) {
-      el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📚</div>' + (['global_admin','admin'].includes(currentUser.role_type||'') ? 'No policy documents yet. Click "+ Add Document" to upload.' : 'No policy documents have been published yet.') + '</div>';
-      return;
-    }
-
-    // Group by category
-    const byCat = {};
-    filtered.forEach(p => { if (!byCat[p.category]) byCat[p.category] = []; byCat[p.category].push(p); });
-
-    el.innerHTML = Object.entries(byCat).map(([cat, items]) => `
-      <div style="margin-bottom:1.5rem">
-        <div class="dept-header" style="margin-top:0;margin-bottom:.75rem">
-          <h3>${POLICY_CAT_ICONS[cat]||'📄'} ${cat.charAt(0).toUpperCase()+cat.slice(1)}</h3>
-          <span style="font-size:11px;color:var(--text-muted)">${items.length} document${items.length!==1?'s':''}</span>
-        </div>
-        <div class="doc-grid">${items.map(p => `
-          <div class="doc-card">
-            <div class="doc-card-icon">${POLICY_CAT_ICONS[p.category]||'📄'}</div>
-            <div class="doc-card-info">
-              <div class="doc-card-name">${p.title}</div>
-              ${p.description ? `<div style="font-size:12px;color:var(--text-muted);margin-top:3px">${p.description}</div>` : ''}
-              <div style="font-size:11px;color:var(--text-faint);margin-top:4px">${p.file_name} &middot; ${fmtFileSize(p.file_size)} &middot; Added by ${p.uploaded_by}</div>
-            </div>
-            <div class="doc-card-actions">
-              <a href="/api/policies/${p.id}/download" class="btn btn-ghost btn-sm" target="_blank">&#8595; Download</a>
-              ${['global_admin','admin'].includes(currentUser.role_type||'') ? `<button class="btn btn-danger btn-sm" onclick="deletePolicy(${p.id})">Delete</button>` : ''}
-            </div>
-          </div>`).join('')}
-        </div>
-      </div>`).join('');
-  } catch(e) { console.error(e); }
-}
-
-async function uploadPolicy() {
-  const title = $('policyName').value.trim();
-  const category = $('policyCategory').value;
-  const description = $('policyDesc').value;
-  const file = $('policyFile').files[0];
-
-  if (!title) return showToast('Enter a document title.', 'error');
-  if (!file) return showToast('Select a file to upload.', 'error');
-  if (file.size > 10 * 1024 * 1024) return showToast('File too large. Max 10MB.', 'error');
-
-  const prog = $('policyUploadProgress');
-  prog.style.display = 'block'; prog.textContent = 'Uploading...';
-
-  try {
-    const base64 = await fileToBase64(file);
-    await api('POST', '/api/policies', {
-      title, category, description,
-      file_name: file.name, file_data: base64, file_type: file.type, file_size: file.size
-    });
-    closeModal('uploadPolicyModal');
-    prog.style.display = 'none';
-    ['policyName','policyDesc'].forEach(id => $(id).value = '');
-    $('policyFile').value = '';
-    showToast('Policy document uploaded!', 'success');
-    renderPolicies();
-  } catch(e) {
-    prog.style.display = 'none';
-    showToast('Upload failed: ' + e.message, 'error');
-  }
-}
-
-async function deletePolicy(id) {
-  if (!confirm('Delete this policy document?')) return;
-  await api('DELETE', '/api/policies/' + id);
-  showToast('Document deleted.');
-  renderPolicies();
-}
-
-// ─── FILE UTILITY ─────────────────────────────────────────────────────────────
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result.split(',')[1]);
-    reader.onerror = () => reject(new Error('Failed to read file'));
-    reader.readAsDataURL(file);
-  });
-}
-
-// ─── TIMECLOCK ────────────────────────────────────────────────────────────────
-const SHOP_LAT = 42.55514;
-const SHOP_LNG = -82.866313;
-const GEOFENCE_RADIUS_M = 152.4; // 500 feet in meters
-const GEOFENCE_CHECK_INTERVAL = 300000; // 5 minutes
-const ALERT_COOLDOWN = 600000; // 10 min between alerts
-
-let clockedInEntry  = null;
-let elapsedTimer    = null;
-let geofenceWatcher = null;
-let lastAlertTime   = {};
-let geofenceInterval = null;
-
-function haversineDistance(lat1, lng1, lat2, lng2) {
-  const R = 6371000; // meters
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLng/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-}
-
-function isAtShop(lat, lng) {
-  return haversineDistance(lat, lng, SHOP_LAT, SHOP_LNG) <= GEOFENCE_RADIUS_M;
-}
-
-function fmtMinutes(mins) {
-  if (!mins) return '0:00';
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return `${h}:${String(m).padStart(2,'0')}`;
-}
-
-function fmtTime(iso) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' });
-}
-
-function fmtDateTime(iso) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
-}
-
-function getWeekStart(dateStr) {
-  const d = new Date(dateStr + 'T00:00:00');
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  return d.toISOString().split('T')[0];
-}
-
-function getCurrentWeekValue() {
-  const ws = getWeekStart(new Date().toISOString().split('T')[0]);
-  const [y, m, d] = ws.split('-');
-  // ISO week for input[type=week]
-  const jan4 = new Date(parseInt(y), 0, 4);
-  const weekNum = Math.ceil(((new Date(ws) - jan4) / 86400000 + jan4.getDay() + 1) / 7);
-  return `${y}-W${String(weekNum).padStart(2,'0')}`;
-}
-
-async function initTimeclock() {
-  // Load current status
-  try {
-    const s = await api('GET', '/api/timeclock/status');
-    clockedInEntry = s.clocked_in ? s.entry : null;
-    updateClockUI();
-    if (s.clocked_in) startElapsedTimer();
-  } catch(e) { console.error(e); }
-
-  // Set default week
-  const wkEl = $('myTimecardWeek');
-  if (wkEl && !wkEl.value) wkEl.value = getCurrentWeekValue();
-  loadMyTimecard();
-
-  // Start geofence monitoring
-  startGeofenceMonitor();
-}
-
-function updateClockUI() {
-  const icon    = $('clockStatusIcon');
-  const text    = $('clockStatusText');
-  const inTime  = $('clockInTime');
-  const inForm  = $('clockInForm');
-  const outForm = $('clockOutForm');
-
-  if (clockedInEntry) {
-    icon.textContent  = '🟢';
-    text.textContent  = 'CLOCKED IN';
-    text.style.color  = 'var(--green)';
-    inTime.textContent = 'Since: ' + fmtDateTime(clockedInEntry.clock_in) + (clockedInEntry.job_name ? ' — ' + clockedInEntry.job_name : '');
-    inForm.style.display  = 'none';
-    outForm.style.display = 'block';
-  } else {
-    icon.textContent  = '⏸️';
-    text.textContent  = 'NOT CLOCKED IN';
-    text.style.color  = 'var(--text-muted)';
-    inTime.textContent = '';
-    $('clockElapsed').textContent = '';
-    inForm.style.display  = 'block';
-    outForm.style.display = 'none';
-    if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
-  }
-}
-
-function startElapsedTimer() {
-  if (elapsedTimer) clearInterval(elapsedTimer);
-  const update = () => {
-    if (!clockedInEntry) return;
-    const mins = Math.floor((Date.now() - new Date(clockedInEntry.clock_in)) / 60000);
-    const el = $('clockElapsed');
-    if (el) el.textContent = fmtMinutes(mins) + ' elapsed';
-  };
-  update();
-  elapsedTimer = setInterval(update, 30000);
-}
-
-function toggleClockType() {
-  const type = $('clockTypeSelect').value;
-  $('jobFields').style.display    = type === 'field' ? 'block' : 'none';
-  $('unionFields').style.display  = type === 'union' ? 'block' : 'none';
-}
-
-async function getCurrentPosition() {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) return reject(new Error('GPS not available on this device'));
-    navigator.geolocation.getCurrentPosition(
-      pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
-      err => reject(new Error('Location access denied. Please allow location access in your browser settings.')),
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
-    );
-  });
-}
-
-async function doClockin() {
-  const type = $('clockTypeSelect').value;
-  const locEl = $('locationStatus');
-  locEl.style.display = 'block';
-  locEl.textContent = '📍 Getting your location...';
-
-  try {
-    const pos = await getCurrentPosition();
-    const atShop = isAtShop(pos.lat, pos.lng);
-
-    // Enforce geofence for shop clock-ins
-    if (type === 'shop' && !atShop) {
-      locEl.textContent = '⚠️ You must be at the KVM shop to use Shop clock-in. You appear to be ' + Math.round(haversineDistance(pos.lat, pos.lng, SHOP_LAT, SHOP_LNG) * 3.281) + ' feet away. Use Field or Union clock-in instead.';
-      return;
-    }
-
-    locEl.textContent = '✓ Location confirmed. Clocking in...';
-
-    const payload = {
-      latitude: pos.lat, longitude: pos.lng,
-      clock_type: type,
-      job_name:   type === 'field' ? ($('clockJobName').value || '') : '',
-      customer_name: type === 'field' ? ($('clockCustomer').value || '') : '',
-      notes:      $('clockNotes').value || '',
-      is_union:   type === 'union',
-      is_offsite: type !== 'shop'
-    };
-
-    const result = await api('POST', '/api/timeclock/in', payload);
-    clockedInEntry = { ...payload, id: result.id, clock_in: result.clock_in };
-    locEl.style.display = 'none';
-    ['clockJobName','clockCustomer','clockNotes'].forEach(id => { const el=$(id); if(el) el.value=''; });
-    updateClockUI();
-    startElapsedTimer();
-    showToast('Clocked in at ' + fmtTime(result.clock_in), 'success');
-  } catch(e) {
-    locEl.textContent = '❌ ' + e.message;
-  }
-}
-
-async function doClockout() {
-  try {
-    let pos = null;
-    try { pos = await getCurrentPosition(); } catch(e) {}
-    const payload = { notes: $('clockOutNotes').value || '' };
-    if (pos) { payload.latitude = pos.lat; payload.longitude = pos.lng; }
-    const result = await api('POST', '/api/timeclock/out', payload);
-    clockedInEntry = null;
-    if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
-    $('clockElapsed').textContent = '';
-    updateClockUI();
-    const hrs = (result.total_minutes / 60).toFixed(2);
-    showToast(`Clocked out. Total: ${hrs} hours`, 'success');
-    loadMyTimecard();
-  } catch(e) { showToast(e.message, 'error'); }
-}
-
-// ─── GEOFENCE MONITOR ─────────────────────────────────────────────────────────
-function startGeofenceMonitor() {
-  if (!navigator.geolocation) return;
-  let wasAtShop = null;
-  let enteredAt = null;
-
-  const check = () => {
-    navigator.geolocation.getCurrentPosition(async pos => {
-      const atShop = isAtShop(pos.coords.latitude, pos.coords.longitude);
-      const geo = $('geofenceCard');
-      const geoStatus = $('geofenceStatus');
-      if (geo) geo.style.display = 'block';
-
-      const distFt = Math.round(haversineDistance(pos.coords.latitude, pos.coords.longitude, SHOP_LAT, SHOP_LNG) * 3.281);
-      if (geoStatus) {
-        geoStatus.innerHTML = `<div style="display:flex;align-items:center;gap:10px;padding:6px 0">
-          <span style="font-size:20px">${atShop ? '🟢' : '🔵'}</span>
-          <div>
-            <div style="font-size:13px;font-weight:500;color:var(--white)">${atShop ? 'You are at the KVM shop' : 'You are away from the shop'}</div>
-            <div style="font-size:11px;color:var(--text-muted)">${distFt} feet from shop &middot; GPS accuracy: ±${Math.round(pos.coords.accuracy)} ft</div>
-          </div>
-        </div>`;
-      }
-
-      const now = Date.now();
-
-      if (wasAtShop === false && atShop) {
-        // Just arrived at shop
-        enteredAt = now;
-        wasAtShop = true;
-        // After 5 min check if not clocked in
-        setTimeout(async () => {
-          const s = await api('GET', '/api/timeclock/status').catch(()=>null);
-          if (s && !s.clocked_in) {
-            const key = 'entered';
-            if (!lastAlertTime[key] || now - lastAlertTime[key] > ALERT_COOLDOWN) {
-              lastAlertTime[key] = now;
-              showGeofenceAlert('entered');
-              api('POST', '/api/timeclock/alert', { alert_type: 'entered_without_clockin', latitude: pos.coords.latitude, longitude: pos.coords.longitude }).catch(()=>{});
-            }
-          }
-        }, GEOFENCE_CHECK_INTERVAL);
-      }
-
-      if (wasAtShop === true && !atShop) {
-        // Just left shop
-        wasAtShop = false;
-        setTimeout(async () => {
-          const s = await api('GET', '/api/timeclock/status').catch(()=>null);
-          if (s && s.clocked_in) {
-            const key = 'left';
-            if (!lastAlertTime[key] || now - lastAlertTime[key] > ALERT_COOLDOWN) {
-              lastAlertTime[key] = now;
-              showGeofenceAlert('left');
-              api('POST', '/api/timeclock/alert', { alert_type: 'left_without_clockout', latitude: pos.coords.latitude, longitude: pos.coords.longitude }).catch(()=>{});
-            }
-          }
-        }, GEOFENCE_CHECK_INTERVAL);
-      }
-
-      if (wasAtShop === null) wasAtShop = atShop;
-    }, () => {}, { enableHighAccuracy: true, maximumAge: 120000 });
-  };
-
-  check();
-  geofenceInterval = setInterval(check, 60000); // check every minute
-}
-
-function showGeofenceAlert(type) {
-  if (type === 'entered') {
-    // Try push notification first (works in background on Android)
-    if (window.showLocalNotification) {
-      window.showLocalNotification(
-        '⏱️ KVM — Don\'t forget to clock in!',
-        'You have been at the KVM shop. Tap to clock in now.',
-        '/?page=timeclock'
-      );
-    }
-    // Also show in-app prompt if app is visible
-    if (document.visibilityState === 'visible') {
-      if (confirm('⚠️ You have been at the KVM shop for 5 minutes but are not clocked in. Clock in now?')) {
-        showPage('timeclock', document.querySelector('.nav-item[data-page="timeclock"]'));
-      }
-    }
-  } else if (type === 'left') {
-    if (window.showLocalNotification) {
-      window.showLocalNotification(
-        '⏱️ KVM — Don\'t forget to clock out!',
-        'You have left the KVM shop and are still clocked in. Tap to clock out.',
-        '/?page=timeclock'
-      );
-    }
-    if (document.visibilityState === 'visible') {
-      if (confirm('⚠️ You have left the KVM shop but are still clocked in. Clock out now?')) {
-        doClockout();
-      }
-    }
-  }
-}
-
-// Expose geofence check globally so service worker can trigger it
-window.runGeofenceCheck = () => {
-  navigator.geolocation && navigator.geolocation.getCurrentPosition(async pos => {
-    const atShop = isAtShop(pos.coords.latitude, pos.coords.longitude);
-    const s = await api('GET', '/api/timeclock/status').catch(()=>null);
-    if (!s) return;
-    const now = Date.now();
-    if (atShop && !s.clocked_in) {
-      const key = 'bg-entered';
-      if (!lastAlertTime[key] || now - lastAlertTime[key] > ALERT_COOLDOWN) {
-        lastAlertTime[key] = now;
-        if (window.showLocalNotification) {
-          window.showLocalNotification('⏱️ Clock In Reminder', 'You are at KVM. Don\'t forget to clock in!', '/?page=timeclock');
-        }
-        api('POST', '/api/timeclock/alert', { alert_type: 'entered_without_clockin', latitude: pos.coords.latitude, longitude: pos.coords.longitude }).catch(()=>{});
-      }
-    }
-    if (!atShop && s.clocked_in) {
-      const key = 'bg-left';
-      if (!lastAlertTime[key] || now - lastAlertTime[key] > ALERT_COOLDOWN) {
-        lastAlertTime[key] = now;
-        if (window.showLocalNotification) {
-          window.showLocalNotification('⏱️ Clock Out Reminder', 'You have left KVM. Don\'t forget to clock out!', '/?page=timeclock');
-        }
-        api('POST', '/api/timeclock/alert', { alert_type: 'left_without_clockout', latitude: pos.coords.latitude, longitude: pos.coords.longitude }).catch(()=>{});
-      }
-    }
-  }, ()=>{}, { enableHighAccuracy: true, maximumAge: 60000 });
-};
-
-// ─── MY TIMECARD ──────────────────────────────────────────────────────────────
-async function loadMyTimecard() {
-  const wkEl = $('myTimecardWeek');
-  if (!wkEl || !wkEl.value) return;
-  // Convert week input (2026-W14) to Monday date
-  const [yr, wk] = wkEl.value.split('-W');
-  const jan4 = new Date(parseInt(yr), 0, 4);
-  const weekStart = new Date(jan4.getTime() + (parseInt(wk) - 1) * 7 * 86400000);
-  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
-  const ws = weekStart.toISOString().split('T')[0];
-
-  try {
-    const entries = await api('GET', `/api/timeclock/my?week=${ws}`);
-    const body = $('myTimecardBody');
-    const summary = $('myTimecardSummary');
-
-    if (!entries.length) {
-      body.innerHTML = '<div class="empty-state">No time entries for this week.</div>';
-      summary.innerHTML = '';
-      return;
-    }
-
-    let totalMins = 0;
-    body.innerHTML = `<div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Date</th><th>Type</th><th>In</th><th>Out</th><th>Hours</th><th>Job</th></tr></thead>
-      <tbody>${entries.map(e => {
-        totalMins += e.total_minutes || 0;
-        const typeLabel = e.clock_type === 'shop' ? '🏭 Shop' : e.clock_type === 'union' ? '🤝 Union' : '📍 Field';
-        return `<tr>
-          <td>${new Date(e.clock_in).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</td>
-          <td>${typeLabel}</td>
-          <td>${fmtTime(e.clock_in)}</td>
-          <td>${e.clock_out ? fmtTime(e.clock_out) : '<span class="badge badge-green">Active</span>'}</td>
-          <td><strong>${((e.total_minutes||0)/60).toFixed(2)}</strong></td>
-          <td style="font-size:12px;color:var(--text-muted)">${e.job_name||'—'}</td>
-        </tr>`;
-      }).join('')}</tbody>
-    </table></div>`;
-
-    const ot = Math.max(0, totalMins - 2400);
-    summary.innerHTML = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem">
-      <div class="stat-card"><div class="stat-label">Regular Hours</div><div class="stat-value">${(Math.min(totalMins,2400)/60).toFixed(2)}</div></div>
-      <div class="stat-card"><div class="stat-label">Overtime</div><div class="stat-value" style="color:${ot>0?'var(--danger)':'var(--green)'}">${(ot/60).toFixed(2)}</div></div>
-      <div class="stat-card"><div class="stat-label">Total Hours</div><div class="stat-value" style="color:var(--amber)">${(totalMins/60).toFixed(2)}</div></div>
-    </div>`;
-  } catch(e) { console.error(e); }
-}
-
-// ─── ADMIN TIMECARDS ──────────────────────────────────────────────────────────
-async function loadAdminTimecards() {
-  const wkEl = $('adminTimecardWeek');
-  if (!wkEl) return;
-  if (!wkEl.value) wkEl.value = getCurrentWeekValue();
-
-  const [yr, wk] = wkEl.value.split('-W');
-  const jan4 = new Date(parseInt(yr), 0, 4);
-  const weekStart = new Date(jan4.getTime() + (parseInt(wk)-1) * 7 * 86400000);
-  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
-  const ws = weekStart.toISOString().split('T')[0];
-
-  try {
-    const [entries, summary] = await Promise.all([
-      api('GET', `/api/timeclock/all?week=${ws}`),
-      api('GET', `/api/timeclock/summary?week=${ws}`)
-    ]);
-
-    // Summary cards
-    const sumEl = $('adminTimecardSummary');
-    const totalEmp = summary.summary.length;
-    const totalHrs = summary.summary.reduce((a,u) => a + parseFloat(u.total_hours), 0);
-    const otCount  = summary.summary.filter(u => parseFloat(u.overtime_hours) > 0).length;
-    sumEl.innerHTML = `<div class="card-header" style="margin-bottom:.75rem"><span class="card-title">Week of ${ws}</span></div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem">
-        <div class="stat-card"><div class="stat-label">Employees</div><div class="stat-value">${totalEmp}</div><div class="stat-sub">with entries</div></div>
-        <div class="stat-card"><div class="stat-label">Total Hours</div><div class="stat-value" style="color:var(--amber)">${totalHrs.toFixed(1)}</div></div>
-        <div class="stat-card"><div class="stat-label">OT Employees</div><div class="stat-value" style="color:${otCount>0?'var(--danger)':'var(--green)'}">${otCount}</div><div class="stat-sub">over 40 hrs</div></div>
-      </div>`;
-
-    // Group entries by user
-    const byUser = {};
-    entries.forEach(e => {
-      if (!byUser[e.user_name]) byUser[e.user_name] = { entries: [], total: 0, uid: e.user_id };
-      byUser[e.user_name].entries.push(e);
-      byUser[e.user_name].total += e.total_minutes || 0;
-    });
-
-    const bodyEl = $('adminTimecardBody');
-    bodyEl.innerHTML = Object.entries(byUser).map(([name, data]) => {
-      const hrs = (data.total/60).toFixed(2);
-      const ot  = Math.max(0, data.total - 2400);
-      return `<div class="card" style="margin-bottom:.75rem">
-        <div class="card-header">
-          <span style="font-family:Oswald,sans-serif;font-size:15px;font-weight:600;color:var(--amber)">${name}</span>
-          <div style="display:flex;gap:8px;align-items:center">
-            ${ot>0?`<span class="badge badge-red">OT: ${(ot/60).toFixed(2)} hrs</span>`:''}
-            <span class="badge badge-amber">${hrs} hrs total</span>
-          </div>
-        </div>
-        <div class="table-wrap"><table class="data-table">
-          <thead><tr><th>Date</th><th>Type</th><th>In</th><th>Out</th><th>Hours</th><th>Job</th><th>Actions</th></tr></thead>
-          <tbody>${data.entries.map(e => `<tr>
-            <td>${new Date(e.clock_in).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</td>
-            <td>${e.clock_type}${e.is_union?' (Union)':''}</td>
-            <td>${fmtTime(e.clock_in)}</td>
-            <td>${e.clock_out?fmtTime(e.clock_out):'<span class="badge badge-green">Active</span>'}</td>
-            <td><strong>${((e.total_minutes||0)/60).toFixed(2)}</strong></td>
-            <td style="font-size:12px;color:var(--text-muted)">${e.job_name||'—'}</td>
-            <td><button class="btn btn-ghost btn-sm" onclick="openEditTimeEntry(${e.id},'${e.clock_in}','${e.clock_out||''}','${e.job_name||''}')">Edit</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteTimeEntry(${e.id})">✕</button></td>
-          </tr>`).join('')}</tbody>
-        </table></div>
-      </div>`;
-    }).join('') || '<div class="empty-state">No time entries for this week.</div>';
-  } catch(e) { console.error(e); }
-}
-
-async function sendTimecardEmails() {
-  const wkEl = $('adminTimecardWeek');
-  const [yr, wk] = (wkEl && wkEl.value ? wkEl.value : getCurrentWeekValue()).split('-W');
-  const jan4 = new Date(parseInt(yr), 0, 4);
-  const weekStart = new Date(jan4.getTime() + (parseInt(wk)-1) * 7 * 86400000);
-  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
-  const ws = weekStart.toISOString().split('T')[0];
-  if (!confirm(`Send timecard emails for week of ${ws} to all employees with time entries?`)) return;
-  try {
-    const r = await api('POST', '/api/timeclock/send-timecards', { week: ws });
-    showToast(`Sent ${r.sent} of ${r.total} timecard emails!`, 'success');
-  } catch(e) { showToast(e.message, 'error'); }
-}
-
-function openEditTimeEntry(id, clockIn, clockOut, jobName) {
-  const newIn  = prompt('Clock In time (YYYY-MM-DDTHH:MM):', clockIn ? clockIn.slice(0,16) : '');
-  if (newIn === null) return;
-  const newOut = prompt('Clock Out time (YYYY-MM-DDTHH:MM):', clockOut ? clockOut.slice(0,16) : '');
-  if (newOut === null) return;
-  const newJob = prompt('Job Name:', jobName || '');
-  api('PUT', '/api/timeclock/' + id, { clock_in: newIn + ':00', clock_out: newOut ? newOut + ':00' : null, job_name: newJob })
-    .then(() => { showToast('Entry updated.', 'success'); loadAdminTimecards(); })
-    .catch(e => showToast(e.message, 'error'));
-}
-
-async function deleteTimeEntry(id) {
-  if (!confirm('Delete this time entry?')) return;
-  await api('DELETE', '/api/timeclock/' + id);
-  showToast('Entry deleted.');
-  loadAdminTimecards();
-}
-
-// ─── GEO ALERTS ───────────────────────────────────────────────────────────────
-async function renderAlerts() {
-  try {
-    const alerts = await api('GET', '/api/timeclock/alerts');
-    const badge = $('alertsBadge');
-    if (badge) { badge.textContent = alerts.length; badge.style.display = alerts.length ? 'inline-block' : 'none'; }
-    const el = $('alertsList');
-    if (!el) return;
-    if (!alerts.length) { el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">✅</div>No unresolved geofence alerts.</div>'; return; }
-    el.innerHTML = alerts.map(a => `
-      <div class="card" style="margin-bottom:.75rem;border-left:3px solid ${a.alert_type.includes('without_clockin')?'var(--amber)':'var(--danger)'}">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
-          <div>
-            <div style="font-family:Oswald,sans-serif;font-size:15px;font-weight:600;color:var(--white)">${a.user_name}</div>
-            <div style="font-size:13px;color:var(--text-muted);margin-top:2px">
-              ${a.alert_type === 'entered_without_clockin' ? '🏭 Arrived at shop without clocking in' : '🚗 Left shop without clocking out'}
-            </div>
-            <div style="font-size:11px;color:var(--text-faint);margin-top:4px">${fmtDateTime(a.created_at)}</div>
-          </div>
-          <button class="btn btn-ghost btn-sm" onclick="resolveAlert(${a.id})">Resolve ✓</button>
-        </div>
-      </div>`).join('');
-  } catch(e) { console.error(e); }
-}
-
-async function resolveAlert(id) {
-  await api('PUT', '/api/timeclock/alerts/' + id + '/resolve', {});
-  showToast('Alert resolved.');
-  renderAlerts();
-}
-
-// ─── ADMIN ATTENDANCE ─────────────────────────────────────────────────────────
-let attendanceTab = 'callins';
-
-async function initAdminAttendance() {
-  if (!allUsers.length) allUsers = await api('GET', '/api/users');
-  // Populate employee selects
-  const empOpts = allUsers.filter(u=>!['global_admin','admin'].includes(u.role_type||'')).map(u=>`<option value="${u.id}">${displayName(u)}</option>`).join('');
-  ['callinEmpSelect','attEventEmp'].forEach(id=>{ const el=$(id); if(el) el.innerHTML=empOpts; });
-  // Default date to today
-  ['callinDate','attEventDate'].forEach(id=>{ const el=$(id); if(el && !el.value) el.value=new Date().toISOString().split('T')[0]; });
-  // Set quarter/year
-  const now = new Date();
-  const qMap = {0:'Q1',1:'Q1',2:'Q1',3:'Q2',4:'Q2',5:'Q2',6:'Q3',7:'Q3',8:'Q3',9:'Q4',10:'Q4',11:'Q4'};
-  setAttendanceTab(attendanceTab, document.querySelector('#page-adminAttendance .tab'));
-}
-
-function setAttendanceTab(tab, el) {
-  attendanceTab = tab;
-  document.querySelectorAll('#page-adminAttendance .tab-bar .tab').forEach(t=>t.classList.remove('active'));
-  if (el) el.classList.add('active');
-  loadAttendanceContent();
-}
-
-async function loadAttendanceContent() {
-  const el = $('attendanceContent');
-  if (!el) return;
-  el.innerHTML = '<div class="empty-state">Loading...</div>';
-
-  try {
-    const { events, callins } = await api('GET', '/api/attendance/all');
-
-    if (attendanceTab === 'callins') {
-      if (!callins.length) { el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📞</div>No call-ins recorded yet.</div>'; return; }
-      el.innerHTML = `<div class="table-wrap"><table class="data-table">
-        <thead><tr><th>Employee</th><th>Date</th><th>Type</th><th>Notes</th><th>Logged By</th><th>Notified</th><th>Actions</th></tr></thead>
-        <tbody>${callins.map(c=>`<tr>
-          <td><strong>${c.user_name}</strong></td>
-          <td>${fmtDate(c.call_in_date)}</td>
-          <td><span class="badge ${c.call_in_type==='No Call No Show'?'badge-red':c.call_in_type==='Sick'?'badge-blue':'badge-amber'}">${c.call_in_type}</span></td>
-          <td style="font-size:12px;color:var(--text-muted)">${c.notes||'—'}</td>
-          <td style="font-size:12px;color:var(--text-muted)">${c.logged_by}</td>
-          <td>${c.notified?'<span class="badge badge-green">Sent</span>':'<span class="badge badge-gray">No</span>'}</td>
-          <td><button class="btn btn-danger btn-sm" onclick="deleteCallin(${c.id})">✕</button></td>
-        </tr>`).join('')}</tbody>
-      </table></div>`;
-
-    } else if (attendanceTab === 'tardies') {
-      const tardies = events.filter(e=>e.event_type==='tardy');
-      if (!tardies.length) { el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">⏰</div>No tardies recorded yet.</div>'; return; }
-      // Group by employee
-      const byEmp = {};
-      tardies.forEach(t=>{ if(!byEmp[t.user_name]) byEmp[t.user_name]=[]; byEmp[t.user_name].push(t); });
-      el.innerHTML = Object.entries(byEmp).sort((a,b)=>b[1].length-a[1].length).map(([name,list])=>`
-        <div class="card" style="margin-bottom:.75rem">
-          <div class="card-header">
-            <span style="font-family:Oswald,sans-serif;font-size:15px;font-weight:600;color:var(--white)">${name}</span>
-            <span class="badge ${list.length>=5?'badge-red':list.length>=3?'badge-amber':'badge-gray'}">${list.length} tardy${list.length!==1?'ies':''}</span>
-          </div>
-          <div class="table-wrap"><table class="data-table">
-            <thead><tr><th>Date</th><th>Minutes Late</th><th>Notes</th><th>Actions</th></tr></thead>
-            <tbody>${list.map(t=>`<tr>
-              <td>${fmtDate(t.event_date)}</td>
-              <td style="color:var(--amber);font-weight:600">${t.minutes_late} min late</td>
-              <td style="font-size:12px;color:var(--text-muted)">${t.notes||'—'}</td>
-              <td><button class="btn btn-danger btn-sm" onclick="deleteAttEvent(${t.id})">✕</button></td>
-            </tr>`).join('')}</tbody>
-          </table></div>
-        </div>`).join('');
-
-    } else if (attendanceTab === 'report') {
-      openQuarterlyReport();
-    }
-  } catch(e) { el.innerHTML = '<div class="empty-state">Error loading attendance.</div>'; }
-}
-
-// Wrapper to open callin modal with employees populated
-async function openCallinModal() {
-  if (!allUsers.length) try { allUsers = await api('GET', '/api/users'); } catch(e){}
-  const empOpts = allUsers.filter(u => !['global_admin','admin'].includes(u.role_type||'')).map(u =>
-    `<option value="${u.id}">${displayName(u)}</option>`).join('');
-  const sel = $('callinEmpSelect');
-  if (sel) sel.innerHTML = empOpts;
-  const dateEl = $('callinDate');
-  if (dateEl) dateEl.value = new Date().toISOString().split('T')[0];
-  const notesEl = $('callinNotes');
-  if (notesEl) notesEl.value = '';
-  openModal('callinModal');
-}
-
-// Wrapper to open attendance event modal with employees populated
-async function openAttEventModal() {
-  if (!allUsers.length) try { allUsers = await api('GET', '/api/users'); } catch(e){}
-  const empOpts = allUsers.filter(u => !['global_admin','admin'].includes(u.role_type||'')).map(u =>
-    `<option value="${u.id}">${displayName(u)}</option>`).join('');
-  const sel = $('attEventEmp');
-  if (sel) sel.innerHTML = empOpts;
-  const dateEl = $('attEventDate');
-  if (dateEl) dateEl.value = new Date().toISOString().split('T')[0];
-  const notesEl = $('attEventNotes');
-  if (notesEl) notesEl.value = '';
-  const minsEl = $('attEventMins');
-  if (minsEl) minsEl.value = '0';
-  openModal('attendanceEventModal');
-}
-
-async function saveCallin() {
-  const user_id = $('callinEmpSelect').value;
-  const call_in_date = $('callinDate').value;
-  const call_in_type = $('callinType').value;
-  const notes = $('callinNotes').value;
-  if (!user_id || !call_in_date) return showToast('Select employee and date.','error');
-  try {
-    await api('POST', '/api/attendance/callin', { user_id, call_in_date, call_in_type, notes });
-    closeModal('callinModal');
-    $('callinNotes').value = '';
-    showToast(`Call-in logged for ${call_in_type}. Employee notified.`, 'success');
-    loadAttendanceContent();
-  } catch(e) { showToast(e.message,'error'); }
-}
-
-async function saveAttendanceEvent() {
-  const user_id = $('attEventEmp').value;
-  const event_date = $('attEventDate').value;
-  const event_type = $('attEventType').value;
-  const minutes_late = parseInt($('attEventMins').value)||0;
-  const notes = $('attEventNotes').value;
-  if (!user_id || !event_date) return showToast('Select employee and date.','error');
-  try {
-    await api('POST', '/api/attendance/event', { user_id, event_date, event_type, minutes_late, notes });
-    closeModal('attendanceEventModal');
-    showToast('Attendance event logged.', 'success');
-    loadAttendanceContent();
-  } catch(e) { showToast(e.message,'error'); }
-}
-
-async function deleteCallin(id) {
-  if (!confirm('Delete this call-in record?')) return;
-  await api('DELETE', '/api/attendance/callin/' + id);
-  loadAttendanceContent();
-}
-
-async function deleteAttEvent(id) {
-  if (!confirm('Delete this attendance event?')) return;
-  await api('DELETE', '/api/attendance/' + id);
-  loadAttendanceContent();
-}
-
-function openQuarterlyReport() {
-  const now = new Date();
-  const qMap = ['Q1','Q1','Q1','Q2','Q2','Q2','Q3','Q3','Q3','Q4','Q4','Q4'];
-  const rq = $('reportQuarter');
-  const ry = $('reportYear');
-  if (rq) rq.value = qMap[now.getMonth()];
-  if (ry) ry.value = now.getFullYear();
-  openModal('quarterlyReportModal');
-}
-
-async function loadQuarterlyReport() {
-  const quarter = $('reportQuarter').value;
-  const year    = $('reportYear').value;
-  const el = $('quarterlyReportContent');
-  el.innerHTML = '<div class="empty-state">Loading...</div>';
-  try {
-    const data = await api('GET', `/api/attendance/report?quarter=${quarter}&year=${year}`);
-    const perfect = data.report.filter(u=>u.is_perfect);
-    const withIssues = data.report.filter(u=>!u.is_perfect).sort((a,b)=>(b.tardies+b.callins)-(a.tardies+a.callins));
-
-    let html = '';
-
-    // Perfect attendance section
-    if (perfect.length) {
-      html += `<div style="background:var(--amber-bg2);border:1px solid var(--amber-dim);border-radius:var(--radius);padding:1rem;margin-bottom:1rem">
-        <div style="font-family:Oswald,sans-serif;font-size:14px;font-weight:700;color:var(--amber);margin-bottom:.5rem">&#127942; PERFECT ATTENDANCE — ${quarter} ${year}</div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px">${perfect.map(u=>`<span class="badge badge-amber" style="font-size:12px;padding:4px 10px">${u.name}</span>`).join('')}</div>
-      </div>`;
-    }
-
-    // Summary table
-    html += `<div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Employee</th><th>Role</th><th>Tardies</th><th>Call-Ins</th><th>NCNS</th><th>Absences</th><th>Early Dep.</th><th>Status</th></tr></thead>
-      <tbody>${data.report.map(u=>`<tr>
-        <td><strong>${u.name}</strong></td>
-        <td style="font-size:12px;color:var(--text-muted)">${u.role||'—'}</td>
-        <td><span class="${u.tardies>=5?'badge badge-red':u.tardies>=3?'badge badge-amber':'badge badge-gray'}">${u.tardies}</span></td>
-        <td><span class="${u.callins>=3?'badge badge-red':u.callins>=1?'badge badge-amber':'badge badge-gray'}">${u.callins}</span></td>
-        <td><span class="${u.ncns>0?'badge badge-red':'badge badge-gray'}">${u.ncns}</span></td>
-        <td><span class="badge badge-gray">${u.absences}</span></td>
-        <td><span class="badge badge-gray">${u.early_departures}</span></td>
-        <td>${u.is_perfect?'<span class="badge badge-amber">&#127942; Perfect</span>':u.tardies>=5||u.ncns>0?'<span class="badge badge-red">Needs Review</span>':u.tardies>=3||u.callins>=3?'<span class="badge badge-amber">Monitor</span>':'<span class="badge badge-green">Good</span>'}</td>
-      </tr>`).join('')}</tbody>
-    </table></div>`;
-
-    el.innerHTML = html;
-    const printBtn = $('btnPrintReport');
-    if (printBtn) printBtn.style.display = 'inline-flex';
-  } catch(e) { el.innerHTML = '<div class="empty-state">Error loading report.</div>'; }
-}
-
-function printQuarterlyReport() {
-  const quarter = $('reportQuarter') ? $('reportQuarter').value : '';
-  const year    = $('reportYear') ? $('reportYear').value : '';
-  const content = $('quarterlyReportContent');
-  if (!content || !content.innerHTML) return showToast('Generate the report first.','error');
-  const win = window.open('', '_blank');
-  win.document.write(`<!DOCTYPE html><html><head><title>KVM Attendance Report — ${quarter} ${year}</title>
   <style>
-    body { font-family: Arial, sans-serif; color: #000; margin: 20px; }
-    h1 { color: #000; font-size: 18px; margin-bottom: 4px; }
-    h2 { font-size: 14px; color: #333; margin-bottom: 16px; }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 12px; }
-    th { background: #f0f0f0; padding: 8px; text-align: left; border: 1px solid #ccc; font-weight: bold; }
-    td { padding: 7px 8px; border: 1px solid #ddd; }
-    tr:nth-child(even) td { background: #f9f9f9; }
-    .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }
-    .perfect { background: #fff3cd; color: #856404; border: 1px solid #ffc107; }
-    .review  { background: #f8d7da; color: #842029; border: 1px solid #f5c2c7; }
-    .monitor { background: #fff3cd; color: #664d03; border: 1px solid #ffda6a; }
-    .good    { background: #d1e7dd; color: #0f5132; border: 1px solid #a3cfbb; }
-    .perfect-block { background: #fff3cd; border: 2px solid #ffc107; border-radius: 6px; padding: 12px; margin-bottom: 16px; }
-    @media print { body { margin: 10px; } button { display: none !important; } }
-  </style></head><body>
-  <div style="display:flex;align-items:center;gap:16px;border-bottom:2px solid #000;padding-bottom:12px;margin-bottom:16px">
-    <div><h1>KVM DOOR SYSTEMS</h1><h2>Quarterly Attendance Report — ${quarter} ${year}</h2></div>
-    <div style="margin-left:auto;font-size:11px;color:#666">Generated: ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</div>
+    /* ─── SALES / QUOTES MODULE STYLES ─── */
+    .quotes-ai-panel {
+      background: #111;
+      border: 1px solid #2a2a2a;
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .quotes-ai-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--amber);
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      margin-bottom: 8px;
+    }
+    .quotes-ai-panel textarea {
+      width: 100%;
+      background: #0a0a0a;
+      border: 1px solid #333;
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      padding: 10px;
+      font-size: 12.5px;
+      resize: vertical;
+      outline: none;
+      font-family: inherit;
+      box-sizing: border-box;
+      min-height: 70px;
+    }
+    .quotes-ai-panel textarea:focus { border-color: var(--amber); }
+    .quotes-ai-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 8px;
+      flex-wrap: wrap;
+    }
+    .quotes-ai-btn {
+      background: var(--amber);
+      color: #000;
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: 7px 18px;
+      font-weight: 700;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .quotes-ai-btn:disabled { background: #555; color: #888; cursor: not-allowed; }
+    .quotes-ai-upload-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--amber);
+      border: 1px solid var(--amber);
+      padding: 6px 12px;
+      border-radius: var(--radius-sm);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .quotes-ai-status { font-size: 11px; color: var(--text-muted); }
+    .quotes-ai-status.thinking { color: var(--amber); }
+    .quotes-ai-status.done { color: #27ae60; }
+    .quotes-ai-status.error { color: var(--danger); }
+
+    .ql { display: block; font-size: 10px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 3px; }
+    .qi { width: 100%; background: var(--bg-input,#111); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); padding: 7px 10px; font-size: 13px; outline: none; box-sizing: border-box; }
+    .qi:focus { border-color: var(--amber); }
+    .qi-select { background: var(--bg-input,#111); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); padding: 7px 10px; font-size: 13px; outline: none; width: 100%; }
+
+    .q-scope-block { border: 1px solid var(--border); border-radius: var(--radius-sm); margin-bottom: 10px; overflow: hidden; }
+    .q-scope-hdr { display: flex; align-items: center; gap: 10px; background: var(--bg-surface); padding: 8px 12px; border-bottom: 1px solid var(--border); }
+    .q-scope-body { padding: 10px 12px; background: var(--bg-card); }
+    .q-line-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+    .q-line-row input { flex: 1; background: transparent; border: none; border-bottom: 1px dashed var(--border); color: var(--text); padding: 3px 0; font-size: 12.5px; outline: none; font-family: inherit; }
+    .q-line-row input:focus { border-bottom-color: var(--amber); }
+    .q-rm-btn { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 12px; padding: 0 4px; flex-shrink: 0; }
+    .q-rm-btn:hover { color: var(--danger); }
+    .q-add-line-btn { font-size: 11px; color: var(--amber); background: none; border: none; cursor: pointer; text-decoration: underline; padding: 4px 0; }
+    .q-total-bar { background: var(--amber); color: #000; border-radius: var(--radius-sm); padding: 8px 12px; display: flex; align-items: center; margin-top: 4px; }
+    .q-total-bar input { background: transparent; border: none; border-bottom: 1px dashed rgba(0,0,0,0.4); color: #000; font-size: 16px; font-weight: 700; text-align: right; width: 130px; outline: none; }
+
+    .quotes-status-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══ LOGIN ═══ -->
+<div id="loginScreen" class="login-screen">
+  <div class="login-bg-text">KVM</div>
+  <div class="login-box">
+    <div class="login-logo-wrap">
+      <img src="https://images.squarespace-cdn.com/content/v1/6769c43a83fc805786904afb/1fc9d3a5-749a-42f8-8fba-d7c894568b9c/LOGO+WHITE.png?format=400w" alt="KVM Door Systems" class="login-logo" onerror="this.style.display='none';document.getElementById('loginFallbackTitle').style.display='block'" />
+      <div id="loginFallbackTitle" style="display:none;font-family:'Oswald',sans-serif;font-size:24px;font-weight:700;color:#fff;letter-spacing:0.05em">KVM DOOR SYSTEMS</div>
+    </div>
+    <div class="login-divider"><div class="login-divider-line"></div><div class="login-divider-text">Employee Portal</div><div class="login-divider-line"></div></div>
+    <div id="loginError" class="alert alert-danger" style="display:none"></div>
+    <div class="form-group">
+      <label>Username</label>
+      <input type="text" id="loginUser" placeholder="firstname.lastname" autocomplete="username" />
+    </div>
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" id="loginPass" placeholder="••••••••" autocomplete="current-password" />
+    </div>
+    <button class="btn btn-primary btn-full" onclick="doLogin()">Sign In</button>
+    <p class="login-hint">Contact your administrator if you need access.</p>
   </div>
-  ${content.innerHTML}
-  <script>window.onload=()=>window.print();</script>
-  </body></html>`);
-  win.document.close();
-}
+</div>
 
-async function runPerfectAttendanceCheck() {
-  const el = $('perfectAttContent');
-  if (el) el.innerHTML = '<div style="color:var(--text-muted);padding:1rem 0">Checking attendance records...</div>';
-  openModal('perfectAttendanceModal');
-  try {
-    // Get all employees and their attendance for current quarter
-    const now = new Date();
-    const q = Math.floor(now.getMonth() / 3) + 1;
-    const year = now.getFullYear();
-    const qStart = new Date(year, (q-1)*3, 1).toISOString().split('T')[0];
-    const qEnd = new Date(year, q*3, 0).toISOString().split('T')[0];
+<!-- ═══ MAIN APP ═══ -->
+<div id="mainApp" style="display:none">
 
-    const [users, callins, events] = await Promise.all([
-      api('GET', '/api/users'),
-      api('GET', '/api/attendance/callins-range?start=' + qStart + '&end=' + qEnd).catch(()=>[]),
-      api('GET', '/api/attendance/events-range?start=' + qStart + '&end=' + qEnd).catch(()=>[])
-    ]);
-
-    const employees = users.filter(u => !['global_admin','admin'].includes(u.role_type||''));
-    const callinsByEmp = {};
-    const eventsByEmp = {};
-    (Array.isArray(callins) ? callins : []).forEach(c => { if (!callinsByEmp[c.user_id]) callinsByEmp[c.user_id] = []; callinsByEmp[c.user_id].push(c); });
-    (Array.isArray(events) ? events : []).forEach(e => { if (!eventsByEmp[e.user_id]) eventsByEmp[e.user_id] = []; eventsByEmp[e.user_id].push(e); });
-
-    const perfect = employees.filter(u => !(callinsByEmp[u.id]||[]).length && !(eventsByEmp[u.id]||[]).length);
-    const hasConcerns = employees.filter(u => (callinsByEmp[u.id]||[]).length + (eventsByEmp[u.id]||[]).length > 0)
-      .sort((a,b) => ((callinsByEmp[b.id]||[]).length + (eventsByEmp[b.id]||[]).length) - ((callinsByEmp[a.id]||[]).length + (eventsByEmp[a.id]||[]).length));
-
-    if (el) el.innerHTML = `
-      <div style="margin-bottom:1rem">
-        <div style="font-family:Oswald,sans-serif;font-size:13px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.5rem">
-          Q${q} ${year} — ${qStart} to ${qEnd}
-        </div>
+  <header class="topbar">
+    <div class="topbar-left">
+      <button class="sidebar-toggle" onclick="toggleSidebar()">&#9776;</button>
+      <div class="topbar-brand">
+        <img src="https://images.squarespace-cdn.com/content/v1/6769c43a83fc805786904afb/1fc9d3a5-749a-42f8-8fba-d7c894568b9c/LOGO+WHITE.png?format=400w" alt="KVM" class="brand-logo" onerror="this.outerHTML='<span style=\'font-family:Oswald,sans-serif;font-size:18px;font-weight:700;color:#fff;letter-spacing:0.05em\'>KVM DOORS</span>'" />
+        <div class="brand-divider"></div>
+        <span class="brand-portal-text">Employee Portal</span>
       </div>
-      <div style="margin-bottom:1.25rem">
-        <div style="font-family:Oswald,sans-serif;font-size:15px;color:var(--amber);margin-bottom:.75rem">
-          &#127942; Perfect Attendance (${perfect.length} employees)
-        </div>
-        ${perfect.length ? `<div style="display:flex;flex-wrap:wrap;gap:8px">${perfect.map(u=>`
-          <div style="background:var(--amber-bg2);border:1px solid var(--amber-dim);border-radius:6px;padding:6px 12px;font-size:13px;font-weight:600">
-            ${displayName(u)}
-          </div>`).join('')}</div>` : '<div style="color:var(--text-faint);font-size:13px">No employees with perfect attendance this quarter.</div>'}
-      </div>
-      ${hasConcerns.length ? `<div>
-        <div style="font-family:Oswald,sans-serif;font-size:15px;color:var(--danger);margin-bottom:.75rem">
-          Attendance Concerns (${hasConcerns.length} employees)
-        </div>
-        <table class="data-table">
-          <thead><tr><th>Employee</th><th>Call-Ins</th><th>Events (Tardy/NCNS)</th><th>Total</th></tr></thead>
-          <tbody>${hasConcerns.map(u => {
-            const ci = (callinsByEmp[u.id]||[]).length;
-            const ev = (eventsByEmp[u.id]||[]).length;
-            return `<tr>
-              <td><strong>${displayName(u)}</strong></td>
-              <td>${ci ? `<span style="color:var(--amber)">${ci}</span>` : '—'}</td>
-              <td>${ev ? `<span style="color:var(--danger)">${ev}</span>` : '—'}</td>
-              <td><strong>${ci+ev}</strong></td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table>
-      </div>` : ''}`;
-
-    const btnPost = $('btnPostPerfect');
-    const btnPrint = $('btnPrintPerfect');
-    if (btnPost) { btnPost.style.display = perfect.length ? 'inline-flex' : 'none'; btnPost._perfectList = perfect; }
-    if (btnPrint) btnPrint.style.display = 'inline-flex';
-
-    // Also run the server-side check
-    try { await api('POST', '/api/attendance/perfect-check', {}); } catch(e) {}
-  } catch(e) {
-    if (el) el.innerHTML = '<div style="color:var(--danger)">Error loading attendance data: ' + e.message + '</div>';
-  }
-}
-
-async function postPerfectAttendance() {
-  const btn = $('btnPostPerfect');
-  const perfect = btn && btn._perfectList;
-  if (!perfect || !perfect.length) return;
-  const names = perfect.map(u => displayName(u)).join(', ');
-  const now = new Date();
-  const q = Math.floor(now.getMonth() / 3) + 1;
-  try {
-    await api('POST', '/api/announcements', {
-      title: `&#127942; Q${q} Perfect Attendance Recognition`,
-      body: `Congratulations to the following employees for achieving perfect attendance this quarter: ${names}. Thank you for your dedication and reliability!`,
-      priority: 'info'
-    });
-    showToast('Perfect attendance posted to announcements!', 'success');
-    closeModal('perfectAttendanceModal');
-  } catch(e) { showToast(e.message, 'error'); }
-}
-
-function printPerfectAttendance() {
-  const el = $('perfectAttContent');
-  if (!el) return;
-  const win = window.open('', '_blank');
-  win.document.write(`<!DOCTYPE html><html><head><title>KVM Perfect Attendance Report</title>
-  <style>body{font-family:Arial,sans-serif;margin:24px;color:#000}h1{font-size:18px;margin-bottom:4px}
-  h2{font-size:14px;color:#555;margin-bottom:16px}table{width:100%;border-collapse:collapse;font-size:13px}
-  th{background:#f0f0f0;padding:8px;text-align:left;border:1px solid #ccc}
-  td{padding:7px 8px;border:1px solid #ddd}@media print{button{display:none}}</style></head>
-  <body><h1>KVM Door Systems — Attendance Report</h1><h2>Generated ${new Date().toLocaleDateString()}</h2>
-  ${el.innerHTML}<script>window.onload=()=>window.print();</script></body></html>`);
-  win.document.close();
-}
-
-// ─── EXCEL EXPORT BUTTON ──────────────────────────────────────────────────────
-async function exportTimecardExcel() {
-  const wkEl = $('adminTimecardWeek');
-  const wkVal = wkEl && wkEl.value ? wkEl.value : getCurrentWeekValue();
-  const [yr, wk] = wkVal.split('-W');
-  const jan4 = new Date(parseInt(yr), 0, 4);
-  const weekStart = new Date(jan4.getTime() + (parseInt(wk)-1) * 7 * 86400000);
-  weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
-  const ws = weekStart.toISOString().split('T')[0];
-  window.open('/api/timeclock/export?week=' + ws, '_blank');
-}
-
-// ─── DAILY ATTENDANCE EMAIL TEST ──────────────────────────────────────────────
-async function testDailyEmail(group) {
-  const resultEl = $('dailyEmailResult');
-  resultEl.className = 'alert alert-warning';
-  resultEl.textContent = 'Sending ' + (group === 'office' ? 'Office' : 'Technician') + ' attendance email...';
-  resultEl.style.display = 'block';
-  try {
-    await api('POST', '/api/attendance/daily-email', { group });
-    resultEl.className = 'alert alert-success';
-    resultEl.textContent = '✓ Daily attendance email sent! Check admin inboxes.';
-  } catch(e) {
-    resultEl.className = 'alert alert-danger';
-    resultEl.textContent = '✗ Failed: ' + e.message;
-  }
-}
-
-// ─── EMPLOYEE SELF CALL-IN ────────────────────────────────────────────────────
-function openSelfCallin() {
-  // Default to today
-  const today = new Date().toISOString().split('T')[0];
-  $('selfCallinDate').value = today;
-  $('selfCallinNotes').value = '';
-  $('selfCallinResult').style.display = 'none';
-  openModal('selfCallinModal');
-}
-
-async function submitSelfCallin() {
-  const call_in_date = $('selfCallinDate').value;
-  const call_in_type = $('selfCallinType').value;
-  const notes        = $('selfCallinNotes').value.trim();
-  const resultEl     = $('selfCallinResult');
-
-  if (!call_in_date) return showToast('Select a date.', 'error');
-
-  // Confirm — this notifies manager
-  if (!confirm(`Submit a ${call_in_type} call-in for ${fmtDate(call_in_date)}? Your manager will be notified immediately.`)) return;
-
-  try {
-    const r = await api('POST', '/api/attendance/my-callin', { call_in_date, call_in_type, notes });
-    resultEl.className = 'alert alert-success';
-    resultEl.textContent = '✓ ' + r.message;
-    resultEl.style.display = 'block';
-    // Auto-close after 2.5 seconds
-    setTimeout(() => {
-      closeModal('selfCallinModal');
-      // Refresh dashboard if visible
-      const dash = $('page-dashboard');
-      if (dash && dash.classList.contains('active')) renderDashboard();
-    }, 2500);
-  } catch(e) {
-    resultEl.className = 'alert alert-danger';
-    resultEl.textContent = '✗ ' + e.message;
-    resultEl.style.display = 'block';
-  }
-}
-
-// ═══ CUSTOMER DATABASE ════════════════════════════════════════════════════════
-let currentCustomerId = null;
-let currentCustomerData = null;
-let custTabActive = 'overview';
-let custSitesList = [];
-
-const CUST_TYPES = ['General Contractor','Property Manager','End User / Building Owner','Municipality / Government','Industrial','Retail','Partner Door Company'];
-const CUST_TYPE_ICONS = {
-  'General Contractor':'🏗️', 'Property Manager':'🏢', 'End User / Building Owner':'🏭',
-  'Municipality / Government':'🏛️', 'Industrial':'⚙️', 'Retail':'🛒', 'Partner Door Company':'🤝'
-};
-
-// ─── CUSTOMER LIST ────────────────────────────────────────────────────────────
-async function loadCustomers() {
-  const search  = $('custSearch') ? $('custSearch').value : '';
-  const type    = $('custTypeFilter') ? $('custTypeFilter').value : '';
-  const partner = $('custPartnerFilter') && $('custPartnerFilter').checked;
-  const el = $('customersList');
-  if (!el) return;
-  el.innerHTML = '<div class="empty-state">Loading...</div>';
-  try {
-    let url = '/api/customers?';
-    if (search) url += 'search=' + encodeURIComponent(search) + '&';
-    if (type) url += 'type=' + encodeURIComponent(type) + '&';
-    const customers = await api('GET', url.replace(/[?&]$/, ''));
-    const filtered = partner ? customers.filter(c => c.is_partner_company) : customers;
-
-    if (!filtered.length) {
-      el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🏢</div>No customers found. Add your first customer to get started.</div>';
-      return;
-    }
-
-    el.innerHTML = `<div class="table-wrap"><table class="data-table">
-      <thead><tr>
-        <th>Company</th><th>Type</th><th>City</th><th>Phone</th>
-        <th>Terms</th><th>Salesperson</th><th>Flags</th><th></th>
-      </tr></thead>
-      <tbody>${filtered.map(c => `<tr style="cursor:pointer" onclick="openCustomerDetail(${c.id})">
-        <td>
-          <div style="font-weight:600;color:var(--white)">${c.company_name}</div>
-          ${c.qb_customer_id ? `<div style="font-size:10px;color:var(--text-faint)">QB: ${c.qb_customer_id}</div>` : ''}
-        </td>
-        <td><span style="font-size:12px">${CUST_TYPE_ICONS[c.customer_type]||'🏢'} ${c.customer_type}</span></td>
-        <td style="font-size:13px;color:var(--text-muted)">${c.billing_city||'—'}, ${c.billing_state||''}</td>
-        <td style="font-size:13px">${c.billing_phone||'—'}</td>
-        <td><span class="badge badge-gray" style="font-size:10px">${c.credit_terms||'Net 30'}</span></td>
-        <td style="font-size:12px;color:var(--text-muted)">${c.salesperson_name||'—'}</td>
-        <td style="font-size:18px">${c.is_partner_company ? '🤝' : ''}${c.union_required ? '👷' : ''}${c.tax_exempt ? '📋' : ''}</td>
-        <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openCustomerDetail(${c.id})">View &#8250;</button></td>
-      </tr>`).join('')}</tbody>
-    </table></div>
-    <div style="font-size:12px;color:var(--text-faint);padding:.5rem 0">${filtered.length} customer${filtered.length!==1?'s':''}</div>`;
-  } catch(e) { el.innerHTML = '<div class="empty-state">Error loading customers.</div>'; console.error(e); }
-}
-
-// ─── CUSTOMER DETAIL ──────────────────────────────────────────────────────────
-async function openCustomerDetail(id) {
-  currentCustomerId = id;
-  custTabActive = 'overview';
-  showPage('customerDetail', null);
-}
-
-async function loadCustomerDetail() {
-  if (!currentCustomerId) return;
-  try {
-    currentCustomerData = await api('GET', '/api/customers/' + currentCustomerId);
-    const c = currentCustomerData;
-    custSitesList = c.sites || [];
-
-    $('custDetailName').textContent = c.company_name;
-    $('custDetailType').textContent = (CUST_TYPE_ICONS[c.customer_type]||'') + ' ' + c.customer_type;
-
-    // Partner banner
-    const banner = $('partnerBanner');
-    if (c.is_partner_company) {
-      banner.style.display = 'block';
-      banner.className = 'alert alert-warning';
-      banner.innerHTML = `<strong>⚠️ Partner Door Company</strong> — Do not discuss pricing with their end customers.
-        ${c.partner_billing_hours ? ` Bill within <strong>${c.partner_billing_hours} hours</strong> of job completion.` : ''}
-        ${c.partner_billing_email ? ` Submit to: <strong>${c.partner_billing_email}</strong>` : ''}`;
-    } else {
-      banner.style.display = 'none';
-    }
-
-    setCustTab(custTabActive, null);
-  } catch(e) { console.error(e); }
-}
-
-function setCustTab(tab, el) {
-  custTabActive = tab;
-  document.querySelectorAll('#page-customerDetail .tab-bar .tab').forEach(t => t.classList.remove('active'));
-  if (el) el.classList.add('active');
-  else {
-    const tabs = document.querySelectorAll('#page-customerDetail .tab-bar .tab');
-    const tabNames = ['overview','sites','contacts','equipment','docs'];
-    const idx = tabNames.indexOf(tab);
-    if (tabs[idx]) tabs[idx].classList.add('active');
-  }
-  renderCustTab();
-}
-
-function renderCustTab() {
-  const c = currentCustomerData;
-  if (!c) return;
-  const el = $('custDetailContent');
-
-  if (custTabActive === 'overview') {
-    el.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
-      <div class="card">
-        <div class="card-header"><span class="card-title">Billing Info</span></div>
-        <div class="info-grid">
-          <div class="info-row"><span class="info-label">Address</span><span class="info-val">${[c.billing_address,c.billing_city,c.billing_state,c.billing_zip].filter(Boolean).join(', ')||'—'}</span></div>
-          <div class="info-row"><span class="info-label">Phone</span><span class="info-val">${c.billing_phone||'—'}</span></div>
-          <div class="info-row"><span class="info-label">Fax</span><span class="info-val">${c.billing_fax||'—'}</span></div>
-          <div class="info-row"><span class="info-label">Billing Email</span><span class="info-val">${c.billing_email||'—'}</span></div>
-          <div class="info-row"><span class="info-label">Terms</span><span class="info-val">${c.credit_terms||'Net 30'}</span></div>
-          <div class="info-row"><span class="info-label">QB ID</span><span class="info-val">${c.qb_customer_id||'—'}</span></div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-header"><span class="card-title">Account Settings</span></div>
-        <div class="info-grid">
-          <div class="info-row"><span class="info-label">Type</span><span class="info-val">${c.customer_type}</span></div>
-          <div class="info-row"><span class="info-label">Tax Exempt</span><span class="info-val">${c.tax_exempt ? '✓ Yes — #'+c.tax_exempt_number : 'No'}</span></div>
-          <div class="info-row"><span class="info-label">Union Required</span><span class="info-val">${c.union_required ? '✓ Yes' : 'No'}</span></div>
-          <div class="info-row"><span class="info-label">Cert. Payroll</span><span class="info-val">${c.requires_certified_payroll ? '✓ Required' : 'No'}</span></div>
-          <div class="info-row"><span class="info-label">Sites</span><span class="info-val">${(c.sites||[]).length} location${(c.sites||[]).length!==1?'s':''}</span></div>
-          <div class="info-row"><span class="info-label">Contacts</span><span class="info-val">${(c.contacts||[]).length}</span></div>
-        </div>
-      </div>
-      ${c.is_partner_company ? `<div class="card" style="grid-column:1/-1">
-        <div class="card-header"><span class="card-title" style="color:var(--amber)">🤝 Partner Company Requirements</span></div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
-          ${c.partner_labor_rate_notes ? `<div><div class="info-label" style="margin-bottom:4px">Labor Rates</div><div style="font-size:13px;white-space:pre-line">${c.partner_labor_rate_notes}</div></div>` : ''}
-          ${c.partner_checkin_instructions ? `<div><div class="info-label" style="margin-bottom:4px">Check-In Instructions (shown to tech)</div><div style="font-size:13px;white-space:pre-line;color:var(--amber)">${c.partner_checkin_instructions}</div></div>` : ''}
-          ${c.partner_work_order_instructions ? `<div style="grid-column:1/-1"><div class="info-label" style="margin-bottom:4px">Work Order Instructions</div><div style="font-size:13px;white-space:pre-line">${c.partner_work_order_instructions}</div></div>` : ''}
-          ${c.partner_billing_notes ? `<div style="grid-column:1/-1"><div class="info-label" style="margin-bottom:4px">Billing Requirements</div><div style="font-size:13px;white-space:pre-line">${c.partner_billing_notes}</div></div>` : ''}
-        </div>
-      </div>` : ''}
-      ${c.internal_notes ? `<div class="card" style="grid-column:1/-1">
-        <div class="card-header"><span class="card-title">Internal Notes</span></div>
-        <div style="font-size:13px;white-space:pre-line;color:var(--text-muted)">${c.internal_notes}</div>
-      </div>` : ''}
-    </div>`;
-
-  } else if (custTabActive === 'sites') {
-    const sites = c.sites || [];
-    el.innerHTML = `<div style="display:flex;justify-content:flex-end;margin-bottom:.75rem">
-      <button class="btn btn-primary" onclick="openAddSite()">+ Add Site</button>
     </div>
-    ${sites.length ? sites.map(s => `<div class="card" style="margin-bottom:.75rem">
-      <div class="card-header">
-        <div>
-          <div style="font-family:Oswald,sans-serif;font-size:15px;font-weight:600;color:var(--white)">${s.site_name||'Unnamed Site'}${s.store_number?' <span style="color:var(--amber);font-size:13px">#'+s.store_number+'</span>':''}</div>
-          <div style="font-size:12px;color:var(--text-muted)">${[s.address,s.city,s.state,s.zip].filter(Boolean).join(', ')||'No address'}</div>
+    <div class="topbar-right">
+      <div class="user-chip">
+        <div class="avatar" id="topAvatar">?</div>
+        <span id="topName">User</span>
+      </div>
+      <button class="btn-logout" onclick="doLogout()">Sign out</button>
+    </div>
+  </header>
+
+  <div class="app-layout">
+    <nav class="sidebar" id="sidebar">
+      <div class="nav-group-label">Main</div>
+      <div class="nav-item active" data-page="dashboard" onclick="showPage('dashboard',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z"/></svg>
+        Dashboard
+      </div>
+      <div class="nav-item" data-page="timeclock" onclick="showPage('timeclock',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg>
+        Time Clock
+      </div>
+      <div class="nav-item" data-page="myTimecards" onclick="showPage('myTimecards',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm2 10a1 1 0 10-2 0 1 1 0 002 0zm2-3a1 1 0 011 1v3a1 1 0 11-2 0v-3a1 1 0 011-1zm2-1a1 1 0 10-2 0 1 1 0 002 0z" clip-rule="evenodd"/></svg>
+        My Timecards
+      </div>
+      <div class="nav-item" data-page="announcements" onclick="showPage('announcements',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M18 3a1 1 0 00-1.196-.98l-10 2A1 1 0 006 5v9.114A4.369 4.369 0 005 14c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V7.82l8-1.6v5.894A4.37 4.37 0 0015 12c-1.657 0-3 .895-3 2s1.343 2 3 2 3-.895 3-2V3z"/></svg>
+        Announcements
+      </div>
+      <div class="nav-item" data-page="news" onclick="showPage('news',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M2 5a2 2 0 012-2h8a2 2 0 012 2v10a2 2 0 002 2H4a2 2 0 01-2-2V5zm3 1h6v4H5V6zm6 6H5v2h6v-2z" clip-rule="evenodd"/><path d="M15 7h1a2 2 0 012 2v5.5a1.5 1.5 0 01-3 0V7z"/></svg>
+        Company News
+      </div>
+
+      <div class="nav-group-label">Field</div>
+      <div class="nav-item" data-page="customers" onclick="showPage('customers',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>
+        Customers
+      </div>
+
+      <!-- ─── SALES NAV ITEM ─── -->
+      <div class="nav-item" data-page="sales" onclick="showPage('sales',this)" id="nav-sales">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg>
+        Sales &amp; Quotes
+      </div>
+
+      <div class="nav-group-label">Team</div>
+      <div class="nav-item" data-page="oncall" onclick="showPage('oncall',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"/></svg>
+        On-Call Schedule
+      </div>
+      <div class="nav-item" data-page="directory" onclick="showPage('directory',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>
+        Employee Directory
+      </div>
+      <div class="nav-item" data-page="pto" onclick="showPage('pto',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"/></svg>
+        Time Off
+      </div>
+      <div class="nav-item" data-page="myDocs" onclick="showPage('myDocs',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg>
+        My Documents
+      </div>
+      <div class="nav-item" data-page="policies" onclick="showPage('policies',this)">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M9 4.804A7.968 7.968 0 005.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 015.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z"/></svg>
+        Policies &amp; Procedures
+      </div>
+
+      <div id="adminSection" style="display:none">
+        <div class="nav-group-label">Admin</div>
+        <div class="nav-item" data-page="ptoCalendar" onclick="showPage('ptoCalendar',this)">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M5 4a1 1 0 00-2 0v7.268a2 2 0 000 3.464V16a1 1 0 102 0v-1.268a2 2 0 000-3.464V4zM11 4a1 1 0 10-2 0v1.268a2 2 0 000 3.464V16a1 1 0 102 0V8.732a2 2 0 000-3.464V4zM16 3a1 1 0 011 1v7.268a2 2 0 010 3.464V16a1 1 0 11-2 0v-1.268a2 2 0 010-3.464V4a1 1 0 011-1z"/></svg>
+          Time Off Calendar <span class="admin-chip">MGR</span>
         </div>
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-ghost btn-sm" onclick="openEditSite(${s.id})">Edit</button>
-          <button class="btn btn-danger btn-sm" onclick="deleteSite(${s.id})">✕</button>
+        <div class="nav-item" data-page="adminUsers" onclick="showPage('adminUsers',this)">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3z"/></svg>
+          Manage Employees <span class="admin-chip">ADMIN</span>
+        </div>
+        <div class="nav-item" data-page="adminPto" onclick="showPage('adminPto',this)">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/></svg>
+          PTO Approval <span class="nav-badge" id="ptoPendingBadge" style="display:none">0</span>
+        </div>
+        <div class="nav-item" data-page="adminAttendance" onclick="showPage('adminAttendance',this)">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+          Attendance <span class="admin-chip">ADMIN</span>
+        </div>
+        <div class="nav-item" data-page="adminTimeclock" onclick="showPage('adminTimeclock',this)">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd"/></svg>
+          Timecards <span class="admin-chip">ADMIN</span>
+        </div>
+        <div class="nav-item" data-page="adminAlerts" onclick="showPage('adminAlerts',this)">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z"/></svg>
+          Geo Alerts <span class="admin-chip">ADMIN</span><span class="nav-badge" id="alertsBadge" style="display:none">0</span>
+        </div>
+        <div class="nav-item" data-page="adminBlackout" onclick="showPage('adminBlackout',this)">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M13.477 14.89A6 6 0 015.11 6.524l8.367 8.368zm1.414-1.414L6.524 5.11a6 6 0 018.367 8.367zM18 10a8 8 0 11-16 0 8 8 0 0116 0z" clip-rule="evenodd"/></svg>
+          Blackout Dates <span class="admin-chip">ADMIN</span>
+        </div>
+        <div class="nav-item" data-page="adminRotation" onclick="showPage('adminRotation',this)">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/></svg>
+          Rotation Order <span class="admin-chip">ADMIN</span>
+        </div>
+        <div class="nav-item" data-page="adminSettings" onclick="showPage('adminSettings',this)">
+          <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/></svg>
+          Portal Settings <span class="admin-chip">ADMIN</span>
         </div>
       </div>
-      ${s.site_notes||s.access_instructions ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-top:.5rem">
-        ${s.site_notes?`<div><div class="info-label">Notes</div><div style="font-size:12px;color:var(--text-muted)">${s.site_notes}</div></div>`:''}
-        ${s.access_instructions?`<div><div class="info-label">Access</div><div style="font-size:12px;color:var(--amber)">${s.access_instructions}</div></div>`:''}
-      </div>` : ''}
-    </div>`).join('') : '<div class="empty-state">No sites added yet. Click "+ Add Site" to add locations for this customer.</div>'}`;
+    </nav>
 
-  } else if (custTabActive === 'contacts') {
-    const contacts = c.contacts || [];
-    el.innerHTML = `<div style="display:flex;justify-content:flex-end;margin-bottom:.75rem">
-      <button class="btn btn-primary" onclick="openAddContact()">+ Add Contact</button>
-    </div>
-    <div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Name</th><th>Title</th><th>Phone</th><th>Email</th><th>Site</th><th>Role</th><th></th></tr></thead>
-      <tbody>${contacts.length ? contacts.map(ct => {
-        const site = custSitesList.find(s => s.id === ct.site_id);
-        return `<tr>
-          <td><strong>${ct.first_name} ${ct.last_name||''}</strong></td>
-          <td style="font-size:12px;color:var(--text-muted)">${ct.title||'—'}</td>
-          <td>${ct.phone||'—'}</td>
-          <td style="font-size:12px">${ct.email||'—'}</td>
-          <td style="font-size:12px;color:var(--text-muted)">${site?site.site_name:'All locations'}</td>
-          <td>${ct.is_primary?'<span class="badge badge-amber">Primary</span>':''}${ct.is_billing_contact?'<span class="badge badge-blue">Billing</span>':''}</td>
-          <td><button class="btn btn-danger btn-sm" onclick="deleteContact(${ct.id})">✕</button></td>
-        </tr>`;
-      }).join('') : '<tr><td colspan="7" style="text-align:center;color:var(--text-faint)">No contacts yet</td></tr>'}</tbody>
-    </table></div>`;
+    <main class="main-content">
 
-  } else if (custTabActive === 'equipment') {
-    const equip = c.equipment || [];
-    const byType = {};
-    equip.forEach(e => { if (!byType[e.equipment_type]) byType[e.equipment_type] = []; byType[e.equipment_type].push(e); });
-    el.innerHTML = `<div style="display:flex;justify-content:flex-end;margin-bottom:.75rem">
-      <button class="btn btn-primary" onclick="openAddEquipment()">+ Add Equipment</button>
-    </div>
-    ${Object.keys(byType).length ? Object.entries(byType).map(([type,items]) => `
-      <div style="margin-bottom:1rem">
-        <div class="dept-header" style="margin-bottom:.5rem"><h3>${type}</h3><span style="font-size:11px;color:var(--text-muted)">${items.length} unit${items.length!==1?'s':''}</span></div>
-        <div class="table-wrap"><table class="data-table">
-          <thead><tr><th>Manufacturer</th><th>Model</th><th>Serial #</th><th>Size</th><th>Site</th><th>Condition</th><th>Warranty</th><th></th></tr></thead>
-          <tbody>${items.map(e => {
-            const site = custSitesList.find(s => s.id === e.site_id);
-            const warnExpiry = e.warranty_expiry && new Date(e.warranty_expiry) < new Date();
-            return `<tr>
-              <td>${e.manufacturer||'—'}</td>
-              <td>${e.model||'—'}</td>
-              <td style="font-size:12px;font-family:monospace">${e.serial_number||'—'}</td>
-              <td>${e.size||'—'}</td>
-              <td style="font-size:12px;color:var(--text-muted)">${e.location_in_site||site&&site.site_name||'—'}</td>
-              <td><span class="badge ${e.condition==='Good'?'badge-green':e.condition==='Poor'?'badge-red':'badge-amber'}">${e.condition||'Unknown'}</span></td>
-              <td>${e.warranty_expiry?`<span style="color:${warnExpiry?'var(--danger)':'var(--text-muted)'};font-size:12px">${fmtDate(e.warranty_expiry)}</span>`:'—'}</td>
-              <td><button class="btn btn-danger btn-sm" onclick="deleteEquipment(${e.id})">✕</button></td>
-            </tr>`;
-          }).join('')}</tbody>
-        </table></div>
-      </div>`).join('') : '<div class="empty-state">No equipment on file.</div>'}`;
-
-  } else if (custTabActive === 'docs') {
-    const docs = c.docs || [];
-    const docTypeLabels = { work_order_form:'Work Order Form', pm_checklist:'PM Checklist', billing_instructions:'Billing Instructions', rate_sheet:'Rate Sheet', other:'Other' };
-    el.innerHTML = `<div style="display:flex;justify-content:flex-end;margin-bottom:.75rem">
-      <button class="btn btn-primary" onclick="openModal('partnerDocModal')">+ Upload Document</button>
-    </div>
-    ${docs.length ? `<div class="doc-grid">${docs.map(d => `
-      <div class="doc-card">
-        <div class="doc-card-icon">📄</div>
-        <div class="doc-card-info">
-          <div class="doc-card-name">${d.doc_name}</div>
-          <div class="doc-card-meta">
-            <span class="badge badge-amber" style="font-size:9px">${docTypeLabels[d.doc_type]||d.doc_type}</span>
-            <span style="font-size:11px;color:var(--text-faint)">${d.file_name} &middot; ${fmtFileSize(d.file_size)}</span>
+      <!-- DASHBOARD -->
+      <div class="page active" id="page-dashboard">
+        <div class="page-header">
+          <div><h1 class="page-title">DASHBOARD</h1><p class="page-sub" id="dashGreeting"></p></div>
+        </div>
+        <div class="stat-grid" id="dashStats"></div>
+        <div id="dailyAttendanceBrief" style="display:none;margin-bottom:1.25rem">
+          <div class="card attendance-brief-card">
+            <div class="attendance-brief-header">
+              <div>
+                <div class="attendance-brief-date" id="attendanceBriefDate"></div>
+                <div class="attendance-brief-sub">Daily Attendance Overview</div>
+              </div>
+              <button class="btn btn-ghost btn-sm" onclick="refreshAttendanceBrief()">&#8635; Refresh</button>
+            </div>
+            <div class="attendance-brief-grid" id="attendanceBriefGrid"></div>
           </div>
-          ${d.notes?`<div style="font-size:11px;color:var(--text-muted)">${d.notes}</div>`:''}
         </div>
-        <div class="doc-card-actions">
-          <a href="/api/customers/${currentCustomerId}/docs/${d.id}/download" class="btn btn-ghost btn-sm" target="_blank">&#8595; Download</a>
-          <button class="btn btn-danger btn-sm" onclick="deletePartnerDoc(${d.id})">Delete</button>
+        <div class="two-col">
+          <div class="card">
+            <div class="card-header"><span class="card-title">Latest Announcements</span><button class="btn btn-ghost btn-sm" onclick="showPage('announcements',null)">View all →</button></div>
+            <div id="dashAnnPreview"></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">On-Call Now</span></div>
+            <div id="dashOncallPreview"></div>
+          </div>
         </div>
-      </div>`).join('')}</div>` : '<div class="empty-state">No documents uploaded. Upload work order forms, PM checklists, and rate sheets for this partner.</div>'}`;
-  }
-}
-
-// ─── CUSTOMER CRUD ────────────────────────────────────────────────────────────
-async function openAddCustomer() {
-  try {
-    if (!allUsers.length) allUsers = await api('GET', '/api/users');
-  } catch(e) { allUsers = []; }
-  
-  $('custModalId').value = '';
-  $('customerModalTitle').textContent = 'Add Customer';
-  ['custName','custQbId','custBillingAddr','custBillingCity','custBillingState','custBillingZip',
-   'custBillingPhone','custBillingFax','custBillingEmail','custInternalNotes','custTaxExemptNum',
-   'custPartnerLaborNotes','custPartnerCheckin','custPartnerWOInstructions',
-   'custPartnerBillingNotes','custPartnerBillingEmail'].forEach(id => { const el=$(id); if(el) el.value=''; });
-  ['custTaxExempt','custUnion','custCertPayroll'].forEach(id => { const el=$(id); if(el) el.checked=false; });
-  if ($('custType')) $('custType').value = 'General Contractor';
-  if ($('custTerms')) $('custTerms').value = 'Net 30';
-  
-  // Populate salesperson dropdown with all users
-  const spEl = $('custSalesperson');
-  if (spEl) {
-    spEl.innerHTML = '<option value="0">— Unassigned —</option>' + 
-      allUsers.map(u=>`<option value="${u.id}">${displayName(u)}</option>`).join('');
-  }
-  togglePartnerFields();
-  openModal('customerModal');
-}
-
-function openEditCustomer() {
-  const c = currentCustomerData;
-  if (!c) return;
-  $('custModalId').value = c.id;
-  $('customerModalTitle').textContent = 'Edit Customer';
-  $('custName').value = c.company_name || '';
-  $('custQbId').value = c.qb_customer_id || '';
-  $('custType').value = c.customer_type || 'General Contractor';
-  $('custTerms').value = c.credit_terms || 'Net 30';
-  $('custBillingAddr').value = c.billing_address || '';
-  $('custBillingCity').value = c.billing_city || '';
-  $('custBillingState').value = c.billing_state || '';
-  $('custBillingZip').value = c.billing_zip || '';
-  $('custBillingPhone').value = c.billing_phone || '';
-  $('custBillingFax').value = c.billing_fax || '';
-  $('custBillingEmail').value = c.billing_email || '';
-  $('custInternalNotes').value = c.internal_notes || '';
-  $('custTaxExempt').checked = !!c.tax_exempt;
-  $('custTaxExemptNum').value = c.tax_exempt_number || '';
-  $('custUnion').checked = !!c.union_required;
-  $('custCertPayroll').checked = !!c.requires_certified_payroll;
-  // Partner fields
-  $('custPartnerLaborNotes').value = c.partner_labor_rate_notes || '';
-  $('custPartnerBillingHours').value = c.partner_billing_hours || '48';
-  $('custPartnerCheckin').value = c.partner_checkin_instructions || '';
-  $('custPartnerWOInstructions').value = c.partner_work_order_instructions || '';
-  $('custPartnerBillingNotes').value = c.partner_billing_notes || '';
-  $('custPartnerBillingEmail').value = c.partner_billing_email || '';
-  const spEl = $('custSalesperson');
-  if (spEl) spEl.value = c.assigned_salesperson_id || 0;
-  togglePartnerFields();
-  openModal('customerModal');
-}
-
-function togglePartnerFields() {
-  const typeEl = $('custType');
-  const pfEl = $('partnerFields');
-  if (!typeEl || !pfEl) return;
-  pfEl.style.display = typeEl.value === 'Partner Door Company' ? 'block' : 'none';
-}
-
-async function saveCustomer() {
-  const id = $('custModalId').value;
-  const payload = {
-    company_name: $('custName').value.trim(),
-    customer_type: $('custType').value,
-    is_partner_company: $('custType').value === 'Partner Door Company',
-    qb_customer_id: $('custQbId').value.trim(),
-    credit_terms: $('custTerms').value,
-    billing_address: $('custBillingAddr').value,
-    billing_city: $('custBillingCity').value,
-    billing_state: $('custBillingState').value.toUpperCase(),
-    billing_zip: $('custBillingZip').value,
-    billing_phone: $('custBillingPhone').value,
-    billing_fax: $('custBillingFax').value,
-    billing_email: $('custBillingEmail').value,
-    tax_exempt: $('custTaxExempt').checked,
-    tax_exempt_number: $('custTaxExemptNum').value,
-    union_required: $('custUnion').checked,
-    requires_certified_payroll: $('custCertPayroll').checked,
-    partner_labor_rate_notes: $('custPartnerLaborNotes').value,
-    partner_billing_hours: parseInt(($('custPartnerBillingHours') && $('custPartnerBillingHours').value) || '48') || 48,
-    partner_checkin_instructions: $('custPartnerCheckin').value,
-    partner_work_order_instructions: $('custPartnerWOInstructions').value,
-    partner_billing_notes: $('custPartnerBillingNotes').value,
-    partner_billing_email: $('custPartnerBillingEmail').value,
-    internal_notes: $('custInternalNotes').value,
-    assigned_salesperson_id: parseInt($('custSalesperson').value) || 0,
-    status: 'active'
-  };
-  if (!payload.company_name) return showToast('Company name is required.', 'error');
-  try {
-    if (id) {
-      await api('PUT', '/api/customers/' + id, payload);
-      showToast('Customer updated!', 'success');
-      closeModal('customerModal');
-      currentCustomerData = null;
-      await loadCustomerDetail();
-    } else {
-      const r = await api('POST', '/api/customers', payload);
-      showToast('Customer added!', 'success');
-      closeModal('customerModal');
-      openCustomerDetail(r.id);
-    }
-    loadCustomers();
-  } catch(e) { showToast(e.message, 'error'); }
-}
-
-// ─── SITES ────────────────────────────────────────────────────────────────────
-function openAddSite() {
-  $('siteModalId').value = '';
-  $('siteModalTitle').textContent = 'Add Site';
-  ['siteName','siteStoreNum','siteAddr','siteCity','siteState','siteZip','siteNotes','siteAccess'].forEach(id => { const el=$(id); if(el) el.value=''; });
-  openModal('siteModal');
-}
-
-function openEditSite(siteId) {
-  const s = custSitesList.find(x => x.id === siteId);
-  if (!s) return;
-  $('siteModalId').value = s.id;
-  $('siteModalTitle').textContent = 'Edit Site';
-  $('siteName').value = s.site_name || '';
-  $('siteStoreNum').value = s.store_number || '';
-  $('siteAddr').value = s.address || '';
-  $('siteCity').value = s.city || '';
-  $('siteState').value = s.state || '';
-  $('siteZip').value = s.zip || '';
-  $('siteNotes').value = s.site_notes || '';
-  $('siteAccess').value = s.access_instructions || '';
-  openModal('siteModal');
-}
-
-async function saveSite() {
-  const id = $('siteModalId').value;
-  const payload = {
-    site_name: $('siteName').value.trim(),
-    store_number: $('siteStoreNum').value.trim(),
-    address: $('siteAddr').value,
-    city: $('siteCity').value,
-    state: $('siteState').value.toUpperCase(),
-    zip: $('siteZip').value,
-    site_notes: $('siteNotes').value,
-    access_instructions: $('siteAccess').value
-  };
-  try {
-    if (id) await api('PUT', '/api/customers/' + currentCustomerId + '/sites/' + id, payload);
-    else await api('POST', '/api/customers/' + currentCustomerId + '/sites', payload);
-    closeModal('siteModal');
-    showToast('Site saved!', 'success');
-    currentCustomerData = null;
-    await loadCustomerDetail();
-  } catch(e) { showToast(e.message, 'error'); }
-}
-
-async function deleteSite(id) {
-  if (!confirm('Remove this site?')) return;
-  await api('DELETE', '/api/customers/' + currentCustomerId + '/sites/' + id);
-  currentCustomerData = null;
-  await loadCustomerDetail();
-}
-
-// ─── CONTACTS ─────────────────────────────────────────────────────────────────
-function openAddContact() {
-  $('contactModalId').value = '';
-  $('contactModalTitle').textContent = 'Add Contact';
-  ['contactFirst','contactLast','contactTitle','contactPhone','contactPhone2','contactEmail','contactNotes'].forEach(id => { const el=$(id); if(el) el.value=''; });
-  $('contactPrimary').checked = false;
-  $('contactBilling').checked = false;
-  const siteEl = $('contactSite');
-  siteEl.innerHTML = '<option value="0">— All locations (corporate contact) —</option>' +
-    custSitesList.map(s => `<option value="${s.id}">${s.site_name}</option>`).join('');
-  openModal('contactModal');
-}
-
-async function saveContact() {
-  const id = $('contactModalId').value;
-  const payload = {
-    first_name: $('contactFirst').value.trim(),
-    last_name: $('contactLast').value.trim(),
-    title: $('contactTitle').value,
-    phone: $('contactPhone').value,
-    phone2: $('contactPhone2').value,
-    email: $('contactEmail').value,
-    site_id: parseInt($('contactSite').value) || 0,
-    is_primary: $('contactPrimary').checked,
-    is_billing_contact: $('contactBilling').checked,
-    notes: $('contactNotes').value
-  };
-  if (!payload.first_name) return showToast('First name required.', 'error');
-  try {
-    if (id) await api('PUT', '/api/customers/' + currentCustomerId + '/contacts/' + id, payload);
-    else await api('POST', '/api/customers/' + currentCustomerId + '/contacts', payload);
-    closeModal('contactModal');
-    showToast('Contact saved!', 'success');
-    currentCustomerData = null;
-    await loadCustomerDetail();
-  } catch(e) { showToast(e.message, 'error'); }
-}
-
-async function deleteContact(id) {
-  if (!confirm('Remove this contact?')) return;
-  await api('DELETE', '/api/customers/' + currentCustomerId + '/contacts/' + id);
-  currentCustomerData = null;
-  await loadCustomerDetail();
-}
-
-// ─── EQUIPMENT ────────────────────────────────────────────────────────────────
-function openAddEquipment() {
-  $('equipModalId').value = '';
-  $('equipModalTitle').textContent = 'Add Equipment';
-  ['equipMfr','equipModel','equipSerial','equipSize','equipInstall','equipWarranty','equipLocation','equipNotes'].forEach(id => { const el=$(id); if(el) el.value=''; });
-  $('equipCondition').value = 'Good';
-  const siteEl = $('equipSite');
-  siteEl.innerHTML = '<option value="0">— Not site-specific —</option>' +
-    custSitesList.map(s => `<option value="${s.id}">${s.site_name}</option>`).join('');
-  openModal('equipmentModal');
-}
-
-async function saveEquipment() {
-  const id = $('equipModalId').value;
-  const payload = {
-    equipment_type: $('equipType').value,
-    site_id: parseInt($('equipSite').value) || 0,
-    manufacturer: $('equipMfr').value,
-    model: $('equipModel').value,
-    serial_number: $('equipSerial').value,
-    size: $('equipSize').value,
-    install_date: $('equipInstall').value,
-    warranty_expiry: $('equipWarranty').value,
-    condition: $('equipCondition').value,
-    location_in_site: $('equipLocation').value,
-    notes: $('equipNotes').value
-  };
-  try {
-    if (id) await api('PUT', '/api/customers/' + currentCustomerId + '/equipment/' + id, payload);
-    else await api('POST', '/api/customers/' + currentCustomerId + '/equipment', payload);
-    closeModal('equipmentModal');
-    showToast('Equipment saved!', 'success');
-    currentCustomerData = null;
-    await loadCustomerDetail();
-  } catch(e) { showToast(e.message, 'error'); }
-}
-
-async function deleteEquipment(id) {
-  if (!confirm('Remove this equipment record?')) return;
-  await api('DELETE', '/api/customers/' + currentCustomerId + '/equipment/' + id);
-  currentCustomerData = null;
-  await loadCustomerDetail();
-}
-
-// ─── PARTNER DOCS ─────────────────────────────────────────────────────────────
-async function savePartnerDoc() {
-  const docType = $('partnerDocType').value;
-  const docName = $('partnerDocName').value.trim();
-  const notes   = $('partnerDocNotes').value;
-  const file    = $('partnerDocFile').files[0];
-  if (!docName) return showToast('Enter a document name.', 'error');
-  if (!file) return showToast('Select a file.', 'error');
-  const prog = $('partnerDocProgress');
-  prog.style.display = 'block'; prog.textContent = 'Uploading...';
-  try {
-    const b64 = await fileToBase64(file);
-    await api('POST', '/api/customers/' + currentCustomerId + '/docs', {
-      doc_type: docType, doc_name: docName, notes,
-      file_name: file.name, file_data: b64, file_type: file.type, file_size: file.size
-    });
-    prog.style.display = 'none';
-    closeModal('partnerDocModal');
-    showToast('Document uploaded!', 'success');
-    currentCustomerData = null;
-    await loadCustomerDetail();
-  } catch(e) { prog.style.display = 'none'; showToast(e.message, 'error'); }
-}
-
-async function deletePartnerDoc(id) {
-  if (!confirm('Delete this document?')) return;
-  await api('DELETE', '/api/customers/' + currentCustomerId + '/docs/' + id);
-  currentCustomerData = null;
-  await loadCustomerDetail();
-}
-
-// ─── QB EXPORT ────────────────────────────────────────────────────────────────
-function exportQBIIF() {
-  window.open('/api/customers/export/qb-iif', '_blank');
-  showToast('QB IIF file downloading. Import into QuickBooks Desktop via File → Utilities → Import → IIF Files.', 'success');
-}
-
-// ─── MY TIMECARDS PAGE ────────────────────────────────────────────────────────
-async function renderMyTimecards() {
-  const wkEl = $('myTcWeekPicker');
-  const weekVal = getCurrentWeekValue();
-  if (wkEl) wkEl.value = wkEl.value || weekVal;
-  await loadMyTimecardPage();
-}
-
-async function loadMyTimecardPage() {
-  const wkEl = $('myTcWeekPicker');
-  const body = $('myTcBody');
-  const summary = $('myTcSummary');
-
-  // Calculate Monday of selected week (or current week)
-  let weekMonday;
-  if (wkEl && wkEl.value) {
-    const [yr, wk] = wkEl.value.split('-W');
-    // ISO week to date: Jan 4 is always in week 1
-    const jan4 = new Date(parseInt(yr), 0, 4);
-    const dayOfWeek = jan4.getDay() || 7; // treat Sunday as 7
-    weekMonday = new Date(jan4);
-    weekMonday.setDate(jan4.getDate() - dayOfWeek + 1 + (parseInt(wk) - 1) * 7);
-  } else {
-    // Current week Monday
-    const today = new Date();
-    const day = today.getDay() || 7;
-    weekMonday = new Date(today);
-    weekMonday.setDate(today.getDate() - day + 1);
-  }
-  const ws = weekMonday.toISOString().split('T')[0];
-
-  if (body) body.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:1rem 0">Loading...</div>';
-
-  try {
-    const entries = await api('GET', `/api/timeclock/my?week=${ws}`);
-    if (!entries || !entries.length) {
-      if (body) body.innerHTML = '<div class="empty-state">No time entries for this week.</div>';
-      if (summary) summary.innerHTML = '';
-      return;
-    }
-    let totalMins = 0;
-    if (body) body.innerHTML = `<div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Date</th><th>Type</th><th>Clock In</th><th>Clock Out</th><th>Hours</th><th>Job / Location</th></tr></thead>
-      <tbody>${entries.map(e => {
-        const mins = e.total_minutes || 0;
-        totalMins += mins;
-        const typeLabel = e.clock_type === 'shop' ? '🏭 Shop' : e.clock_type === 'union' ? '🤝 Union' : '📍 Field';
-        const clockIn = e.clock_in ? new Date(e.clock_in) : null;
-        const clockOut = e.clock_out ? new Date(e.clock_out) : null;
-        return `<tr>
-          <td>${clockIn ? clockIn.toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'}) : '—'}</td>
-          <td style="font-size:12px">${typeLabel}</td>
-          <td>${clockIn ? clockIn.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'}) : '—'}</td>
-          <td>${clockOut ? clockOut.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'}) : '<span class="badge badge-green" style="font-size:10px">Active</span>'}</td>
-          <td><strong>${(mins/60).toFixed(2)}</strong> hrs</td>
-          <td style="font-size:12px;color:var(--text-muted)">${e.job_name || e.customer || '—'}</td>
-        </tr>`;
-      }).join('')}</tbody>
-    </table></div>`;
-    const reg = Math.min(totalMins, 2400);
-    const ot = Math.max(0, totalMins - 2400);
-    if (summary) summary.innerHTML = `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:1rem">
-      <div class="stat-card"><div class="stat-label">Regular</div><div class="stat-value">${(reg/60).toFixed(2)} hrs</div></div>
-      <div class="stat-card"><div class="stat-label">Overtime</div><div class="stat-value" style="color:${ot>0?'var(--danger)':'var(--green)'}">${(ot/60).toFixed(2)} hrs</div></div>
-      <div class="stat-card"><div class="stat-label">Total This Week</div><div class="stat-value" style="color:var(--amber)">${(totalMins/60).toFixed(2)} hrs</div></div>
-    </div>`;
-  } catch(e) {
-    console.error('My Timecards error:', e);
-    if (body) body.innerHTML = '<div class="empty-state">Error loading timecards: ' + e.message + '</div>';
-  }
-}
-
-async function openAwardAchievement() {
-  if (!allUsers.length) try { allUsers = await api('GET','/api/users'); } catch(e){}
-  $('achEmployee').innerHTML = allUsers.map(u=>`<option value="${u.id}">${displayName(u)}</option>`).join('');
-  $('achTitle').value = '';
-  $('achDesc').value = '';
-  openModal('achievementModal');
-}
-
-async function saveAchievement() {
-  const user_id = $('achEmployee').value;
-  const title   = $('achTitle').value.trim();
-  const icon    = $('achIcon').value;
-  const description = $('achDesc').value;
-  if (!title) return showToast('Enter an achievement title.','error');
-  try {
-    await api('POST','/api/achievements',{user_id,title,description,icon});
-    closeModal('achievementModal');
-    showToast('Achievement awarded! 🏆','success');
-  } catch(e) { showToast(e.message,'error'); }
-}
-
-// Load achievements on dashboard
-async function loadMyAchievements() {
-  try {
-    const achievements = await api('GET','/api/achievements/my');
-    const el = $('myAchievements');
-    if (!el || !achievements.length) return;
-    el.innerHTML = `<div class="card-header" style="margin-bottom:.75rem"><span class="card-title">&#127942; My Achievements</span></div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px">
-        ${achievements.map(a=>`<div style="background:var(--amber-bg2);border:1px solid var(--amber-dim);border-radius:8px;padding:10px 14px;display:flex;align-items:flex-start;gap:10px">
-          <span style="font-size:24px">${a.icon}</span>
-          <div><div style="font-family:Oswald,sans-serif;font-size:14px;font-weight:600;color:var(--amber)">${a.title}</div>
-          ${a.description?`<div style="font-size:12px;color:var(--text-muted)">${a.description}</div>`:''}
-          <div style="font-size:10px;color:var(--text-faint);margin-top:3px">Awarded by ${a.awarded_by} &middot; ${fmtDate(a.awarded_at)}</div></div>
-        </div>`).join('')}
-      </div>`;
-  } catch(e) {}
-}
-
-// ─── QB BULK IMPORT ───────────────────────────────────────────────────────────
-async function runQBImport() {
-  const content = $('qbImportContent').value.trim();
-  if (!content) return showToast('Paste your IIF file contents first.','error');
-  const resultEl = $('qbImportResult');
-  resultEl.className = 'alert alert-warning';
-  resultEl.textContent = 'Importing...';
-  resultEl.style.display = 'block';
-  try {
-    const r = await api('POST','/api/customers/import/qb-iif',{iif_content: content});
-    resultEl.className = 'alert alert-success';
-    resultEl.textContent = `✓ Import complete: ${r.imported} customers added, ${r.skipped} already existed.${r.errors.length?' Some errors: '+r.errors.join(', '):''}`;
-    if (r.imported > 0) loadCustomers();
-  } catch(e) {
-    resultEl.className = 'alert alert-danger';
-    resultEl.textContent = '✗ ' + e.message;
-  }
-}
-
-// ─── DAILY ATTENDANCE BRIEF ───────────────────────────────────────────────────
-async function loadAttendanceBrief() {
-  const role = currentUser.role_type || 'technician';
-  const isManager = ['global_admin','admin','manager'].includes(role);
-  const briefEl = $('dailyAttendanceBrief');
-  if (!briefEl || !isManager) return;
-  briefEl.style.display = 'block';
-
-  // Set date
-  const now = new Date();
-  const dateEl = $('attendanceBriefDate');
-  if (dateEl) dateEl.textContent = now.toLocaleDateString('en-US', {
-    weekday:'long', month:'long', day:'numeric', year:'numeric'
-  });
-
-  await refreshAttendanceBrief();
-}
-
-async function refreshAttendanceBrief() {
-  const gridEl = $('attendanceBriefGrid');
-  if (!gridEl) return;
-  gridEl.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:.5rem 0">Loading...</div>';
-
-  try {
-    const today = new Date().toISOString().split('T')[0];
-    if (!allUsers.length) try { allUsers = await api('GET', '/api/users'); } catch(e){}
-
-    // Get today's clock-ins using the week start
-    const d = new Date(today + 'T00:00:00');
-    const day = d.getDay();
-    const diff = day === 0 ? -6 : 1 - day;
-    const weekMon = new Date(d); weekMon.setDate(d.getDate() + diff);
-    const weekStr = weekMon.toISOString().split('T')[0];
-    let clockedIn = [];
-    try { clockedIn = await api('GET', `/api/timeclock/all?week=${weekStr}`); } catch(e) {}
-    const clockedIds = new Set(clockedIn.filter(e => e.clock_in && e.clock_in.startsWith(today)).map(e => e.user_id));
-
-    // Get today's call-ins
-    let callins = [];
-    try {
-      const attData = await api('GET', '/api/attendance/all');
-      callins = (attData.callins || []).filter(c => c.call_in_date === today);
-    } catch(e) {}
-    const callinIds = new Set(callins.map(c => c.user_id));
-
-    // Get approved time off today
-    let timeoff = [];
-    try {
-      const allPto = await api('GET', '/api/pto/all-approved');
-      timeoff = allPto.filter(r => r.start_date <= today && r.end_date >= today);
-    } catch(e) {}
-    const timeoffIds = new Set(timeoff.map(r => r.user_id));
-
-    // Only field/active employees (non-admin)
-    const employees = allUsers.filter(u => !['global_admin','admin'].includes(u.role_type||''));
-
-    const inGroup      = employees.filter(u => clockedIds.has(u.id) && !callinIds.has(u.id));
-    const callinGroup  = employees.filter(u => callinIds.has(u.id));
-    const timeoffGroup = employees.filter(u => timeoffIds.has(u.id) && !callinIds.has(u.id));
-    const unknownGroup = employees.filter(u => !clockedIds.has(u.id) && !callinIds.has(u.id) && !timeoffIds.has(u.id));
-
-    const makeChip = (u, color) => {
-      const ac = u.avatar_color || avatarBg(u.first_name+(u.last_name||''));
-      return `<div class="att-chip"><div class="att-chip-avatar" style="background:${ac}22;color:${ac}">${initials(u.first_name,u.last_name||'')}</div><span>${u.first_name}${u.last_name?' '+u.last_name.charAt(0)+'.':''}</span></div>`;
-    };
-
-    gridEl.innerHTML = `
-      <div class="att-col att-col-in">
-        <div class="att-col-header"><span class="att-dot" style="background:#27ae60"></span>Clocked In <span class="att-count">${inGroup.length}</span></div>
-        <div class="att-chips">${inGroup.map(u=>makeChip(u,'#27ae60')).join('')||'<span class="att-none">None yet</span>'}</div>
+        <div id="myAchievements" style="margin-top:1rem"></div>
       </div>
-      <div class="att-col att-col-off">
-        <div class="att-col-header"><span class="att-dot" style="background:#e67e22"></span>Called In <span class="att-count">${callinGroup.length}</span></div>
-        <div class="att-chips">${callinGroup.map(u => {
-          const ci = callins.find(c=>c.user_id===u.id);
-          return `<div class="att-chip"><div class="att-chip-avatar" style="background:#e67e2222;color:#e67e22">${initials(u.first_name,u.last_name||'')}</div><span>${u.first_name} <em style="font-size:10px;color:var(--text-faint)">${ci?ci.call_in_type:''}</em></span></div>`;
-        }).join('')||'<span class="att-none">None</span>'}</div>
+
+      <!-- ANNOUNCEMENTS -->
+      <div class="page" id="page-announcements">
+        <div class="page-header">
+          <div><h1 class="page-title">ANNOUNCEMENTS</h1><p class="page-sub">Company-wide messages from management</p></div>
+          <button class="btn btn-primary" id="btnNewAnn" style="display:none" onclick="openModal('annModal')">+ New Announcement</button>
+        </div>
+        <div id="annList"></div>
       </div>
-      <div class="att-col att-col-pto">
-        <div class="att-col-header"><span class="att-dot" style="background:#3498db"></span>Scheduled Off <span class="att-count">${timeoffGroup.length}</span></div>
-        <div class="att-chips">${timeoffGroup.map(u=>makeChip(u,'#3498db')).join('')||'<span class="att-none">None</span>'}</div>
+
+      <!-- NEWS -->
+      <div class="page" id="page-news">
+        <div class="page-header">
+          <div><h1 class="page-title">COMPANY NEWS</h1><p class="page-sub">Updates, projects & company happenings</p></div>
+          <button class="btn btn-primary" id="btnNewNews" style="display:none" onclick="openModal('newsModal')">+ New Post</button>
+        </div>
+        <div id="newsList"></div>
       </div>
-      <div class="att-col att-col-unknown">
-        <div class="att-col-header"><span class="att-dot" style="background:#888"></span>Not Checked In <span class="att-count">${unknownGroup.length}</span></div>
-        <div class="att-chips">${unknownGroup.map(u=>makeChip(u,'#888')).join('')||'<span class="att-none">All accounted for ✓</span>'}</div>
-      </div>`;
-  } catch(e) {
-    gridEl.innerHTML = '<div style="color:var(--text-muted);font-size:13px">Could not load attendance data.</div>';
-    console.error(e);
-  }
-}
+
+      <!-- ON-CALL -->
+      <div class="page" id="page-oncall">
+        <div class="page-header">
+          <div><h1 class="page-title">ON-CALL SCHEDULE</h1><p class="page-sub">After-hours emergency contacts by department</p></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" id="btnLoadSchedule" style="display:none" onclick="loadKVMSchedule()">&#128196; Load KVM Schedule</button>
+            <button class="btn btn-ghost" id="btnAutoSchedule" style="display:none" onclick="openModal('autoScheduleModal')">⟳ Auto-Schedule</button>
+            <button class="btn btn-primary" id="btnNewOncall" style="display:none" onclick="openOncallModal()">+ Add Entry</button>
+          </div>
+        </div>
+        <div class="tab-bar">
+          <button class="tab active" onclick="setOncallFilter('current',this)">On Call Now</button>
+          <button class="tab" onclick="setOncallFilter('upcoming',this)">Upcoming</button>
+          <button class="tab" onclick="setOncallFilter('all',this)">All Entries</button>
+        </div>
+        <div id="oncallList"></div>
+      </div>
+
+      <!-- DIRECTORY -->
+      <div class="page" id="page-directory">
+        <div class="page-header"><h1 class="page-title">EMPLOYEE DIRECTORY</h1></div>
+        <input class="search-input" type="text" id="dirSearch" placeholder="Search by name, role, or department…" oninput="renderDirectory()" />
+        <div id="dirGrid" class="dir-grid"></div>
+      </div>
+
+      <!-- PTO -->
+      <div class="page" id="page-pto">
+        <div class="page-header">
+          <div><h1 class="page-title">TIME OFF</h1><p class="page-sub">Request and track your PTO (days-based)</p></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" style="background:var(--danger);color:#fff;border-color:var(--danger)" onclick="openSelfCallin()">&#128222; Call In Today</button>
+            <button class="btn btn-primary" onclick="openPtoReqModal()">+ Request Time Off</button>
+          </div>
+        </div>
+        <div id="ptoBalanceCard" class="card" style="margin-bottom:1.25rem"></div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">My Requests</span></div>
+          <div id="myAttendanceSummary"></div>
+          <div id="myPtoList"></div>
+        </div>
+      </div>
+
+      <!-- ADMIN: USERS -->
+      <div class="page" id="page-adminUsers">
+        <div class="page-header">
+          <div><h1 class="page-title">MANAGE EMPLOYEES</h1></div>
+          <button class="btn btn-primary" onclick="openModal('addUserModal')">+ Add Employee</button>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:1rem">
+          <input type="text" id="empSearchInput" placeholder="&#128269; Search name or username..." style="flex:1;min-width:200px" oninput="filterEmployeeTable()" />
+          <select id="empDeptFilter" onchange="filterEmployeeTable()" style="width:auto;min-width:180px">
+            <option value="">All Departments</option>
+            <option>Office Admin</option><option>Sales</option><option>Management</option>
+            <option>Executive</option><option>Technician</option>
+            <option>Field Supervisor</option><option>Dispatcher</option>
+          </select>
+          <span id="empFilterCount" style="font-size:12px;color:var(--text-faint);white-space:nowrap"></span>
+        </div>
+        <div class="card">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Employee</th><th>Username</th><th>Department</th><th>On-Call Dept</th><th>PTO Balance</th><th>Actions</th></tr></thead>
+              <tbody id="usersTbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ADMIN: PTO -->
+      <div class="page" id="page-adminPto">
+        <div class="page-header"><div><h1 class="page-title">PTO APPROVAL</h1><p class="page-sub">Review and approve employee time-off requests</p></div></div>
+        <div class="tab-bar">
+          <button class="tab active" onclick="setAdminPtoFilter('pending',this)">Pending</button>
+          <button class="tab" onclick="setAdminPtoFilter('approved',this)">Approved</button>
+          <button class="tab" onclick="setAdminPtoFilter('denied',this)">Denied</button>
+          <button class="tab" onclick="setAdminPtoFilter('all',this)">All</button>
+        </div>
+        <div id="adminPtoList"></div>
+      </div>
+
+      <!-- ADMIN: BLACKOUT DATES -->
+      <div class="page" id="page-adminBlackout">
+        <div class="page-header">
+          <div><h1 class="page-title">BLACKOUT DATES</h1><p class="page-sub">Dates when PTO requests cannot be submitted</p></div>
+          <button class="btn btn-primary" onclick="openModal('blackoutModal')">+ Add Blackout</button>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">Active Blackout Periods</span></div>
+          <div id="blackoutList"></div>
+        </div>
+      </div>
+
+      <!-- ADMIN: ROTATION -->
+      <div class="page" id="page-adminRotation">
+        <div class="page-header">
+          <div><h1 class="page-title">ROTATION ORDER</h1><p class="page-sub">Drag to reorder who rotates next in each division</p></div>
+          <button class="btn btn-primary" onclick="openAutoScheduleModal()">⟳ Auto-Schedule Builder</button>
+        </div>
+        <div class="two-col">
+          <div class="card"><div class="card-header"><span class="card-title">Overhead Door Division</span></div><div id="rotOhTable"></div></div>
+          <div class="card"><div class="card-header"><span class="card-title">Automatic Door Division</span></div><div id="rotAuTable"></div></div>
+        </div>
+      </div>
+
+      <!-- ADMIN: SETTINGS -->
+      <div class="page" id="page-adminSettings">
+        <div class="page-header"><h1 class="page-title">PORTAL SETTINGS</h1></div>
+        <div class="alert alert-warning" style="margin-bottom:1rem">
+          &#9888; <strong>Data Persistence:</strong> Render free tier resets data on redeploy.
+          Upgrade to Render Starter ($7/mo), add a Persistent Disk at mount path <strong>/data</strong>,
+          and set environment variable <strong>RENDER_DISK_PATH=/data</strong>.
+          <a href="https://render.com/docs/disks" target="_blank" style="color:var(--amber);margin-left:4px">Render Disk Docs &#8599;</a>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">Email Notifications — Microsoft 365</span></div>
+          <div id="emailTestResult" style="display:none;margin-bottom:10px"></div>
+          <div class="form-row">
+            <div class="form-group"><label>SMTP Host</label><input type="text" id="smtpHost" placeholder="smtp.office365.com" /></div>
+            <div class="form-group"><label>SMTP Port</label><input type="number" id="smtpPort" placeholder="587" /></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Email / Username</label><input type="email" id="smtpUser" placeholder="portal@kvmdoors.com" /></div>
+            <div class="form-group"><label>Password or App Password</label><input type="password" id="smtpPass" placeholder="&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;" /></div>
+          </div>
+          <div class="form-group"><label>From Name</label><input type="text" id="smtpFromName" placeholder="KVM Door Systems Portal" /></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+            <button class="btn btn-primary" onclick="saveSmtpSettings()">Save Settings</button>
+            <button class="btn btn-ghost" onclick="testEmail()">&#9993; Send Test Email to Me</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">AI Quote Assistant — API Key</span></div>
+          <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">Set your Anthropic API key to enable AI auto-fill in the Sales quote builder. The key is stored as a server environment variable on Render — never exposed to the browser.</p>
+          <div class="alert alert-warning" style="font-size:12px;">
+            To set the API key: Go to your <strong>Render dashboard → your kvm-portal service → Environment</strong> → add variable <strong>ANTHROPIC_API_KEY</strong> with your key value (starts with sk-ant-...). Then redeploy.
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">QuickBooks Customer Import</span></div>
+          <button class="btn btn-ghost" onclick="openModal('qbImportModal')">&#8659; Import from QB IIF File</button>
+        </div>
+        <div class="card">
+          <div class="card-header"><span class="card-title">Daily Attendance Emails</span></div>
+          <div id="dailyEmailResult" style="display:none;margin-bottom:10px"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-ghost" onclick="testDailyEmail('technicians')">&#9993; Test — Technician Email Now</button>
+            <button class="btn btn-ghost" onclick="testDailyEmail('office')">&#9993; Test — Office Email Now</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- PTO CALENDAR VIEW -->
+      <div class="page" id="page-ptoCalendar">
+        <div class="page-header">
+          <div><h1 class="page-title">TIME OFF CALENDAR</h1><p class="page-sub">Company-wide view of approved time off</p></div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="pto-cal-nav-btn" onclick="ptoViewShift(-1)">&#8249;</button>
+            <span id="ptoViewLabel" style="font-family:Oswald,sans-serif;font-size:15px;font-weight:600;min-width:150px;text-align:center;color:var(--amber)"></span>
+            <button class="pto-cal-nav-btn" onclick="ptoViewShift(1)">&#8250;</button>
+            <select id="ptoViewMode" onchange="renderPtoCalendar()" style="width:auto;padding:5px 10px;font-size:13px">
+              <option value="month">Month</option>
+              <option value="week">Week</option>
+            </select>
+          </div>
+        </div>
+        <div class="card" style="padding:.75rem 1rem"><div id="ptoCalendarGrid"></div></div>
+        <div class="card" style="margin-top:1rem">
+          <div class="card-header"><span class="card-title">Approved Time Off This Period</span></div>
+          <div id="ptoCalendarList"></div>
+        </div>
+      </div>
+
+      <!-- MY DOCUMENTS -->
+      <div class="page" id="page-myDocs">
+        <div class="page-header">
+          <div><h1 class="page-title">MY DOCUMENTS</h1><p class="page-sub">Your certifications, MUST cards, and important documents</p></div>
+          <button class="btn btn-primary" onclick="openModal('uploadDocModal')">+ Upload Document</button>
+        </div>
+        <div class="doc-type-tabs">
+          <button class="tab active" onclick="setDocFilter('all',this)">All</button>
+          <button class="tab" onclick="setDocFilter('certification',this)">Certifications</button>
+          <button class="tab" onclick="setDocFilter('must_card',this)">MUST Cards</button>
+          <button class="tab" onclick="setDocFilter('license',this)">Licenses</button>
+          <button class="tab" onclick="setDocFilter('other',this)">Other</button>
+        </div>
+        <div id="myDocsList"></div>
+        <div id="allDocsSection" style="display:none">
+          <div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border)">
+            <div class="card-header" style="margin-bottom:.75rem">
+              <span class="card-title">All Employee Documents</span>
+              <input type="text" id="docEmpSearch" placeholder="Filter by employee..." oninput="renderAllDocs()" style="width:200px;padding:5px 10px;font-size:12px" />
+            </div>
+            <div id="allDocsList"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- POLICIES -->
+      <div class="page" id="page-policies">
+        <div class="page-header">
+          <div><h1 class="page-title">POLICIES &amp; PROCEDURES</h1><p class="page-sub">Company policies, safety procedures, and reference documents</p></div>
+          <button class="btn btn-primary" id="btnUploadPolicy" style="display:none" onclick="openModal('uploadPolicyModal')">+ Add Document</button>
+        </div>
+        <div class="doc-type-tabs">
+          <button class="tab active" onclick="setPolicyFilter('all',this)">All</button>
+          <button class="tab" onclick="setPolicyFilter('safety',this)">Safety</button>
+          <button class="tab" onclick="setPolicyFilter('hr',this)">HR</button>
+          <button class="tab" onclick="setPolicyFilter('operations',this)">Operations</button>
+          <button class="tab" onclick="setPolicyFilter('training',this)">Training</button>
+          <button class="tab" onclick="setPolicyFilter('other',this)">Other</button>
+        </div>
+        <div id="policiesList"></div>
+      </div>
+
+      <!-- TIME CLOCK -->
+      <div class="page" id="page-timeclock">
+        <div class="page-header">
+          <div><h1 class="page-title">TIME CLOCK</h1><p class="page-sub">Clock in and out — location tracked automatically</p></div>
+        </div>
+        <div class="card" id="clockPanel">
+          <div id="clockStatusDisplay" style="text-align:center;padding:1rem 0">
+            <div id="clockStatusIcon" style="font-size:48px;margin-bottom:.5rem">⏱️</div>
+            <div id="clockStatusText" style="font-family:Oswald,sans-serif;font-size:22px;font-weight:700;color:var(--white)">Checking status...</div>
+            <div id="clockInTime" style="font-size:13px;color:var(--text-muted);margin-top:4px"></div>
+            <div id="clockElapsed" style="font-family:Oswald,sans-serif;font-size:32px;color:var(--amber);margin-top:8px"></div>
+          </div>
+          <div id="clockInForm" style="display:none">
+            <hr class="section-divider" />
+            <div class="form-group"><label>Clock-In Type</label>
+              <select id="clockTypeSelect" onchange="toggleClockType()">
+                <option value="shop">&#127981; Shop (KVM — Geofenced)</option>
+                <option value="field">&#128205; Field / Job Site</option>
+                <option value="union">&#129318; Union / Out-of-State</option>
+              </select>
+            </div>
+            <div id="jobFields" style="display:none">
+              <div class="form-group"><label>Job Name / Work Order</label><input type="text" id="clockJobName" placeholder="e.g. Commercial Door Install — Meijer Warren" /></div>
+              <div class="form-group"><label>Customer Name</label><input type="text" id="clockCustomer" placeholder="e.g. Meijer" /></div>
+            </div>
+            <div class="form-group"><label>Notes (optional)</label><input type="text" id="clockNotes" placeholder="Any notes..." /></div>
+            <div id="locationStatus" class="calc-note" style="display:none"></div>
+            <button class="btn btn-primary btn-full" style="margin-top:.5rem;padding:14px;font-size:16px;font-family:Oswald,sans-serif;letter-spacing:.08em" onclick="doClockin()">&#9654; CLOCK IN</button>
+          </div>
+          <div id="clockOutForm" style="display:none">
+            <hr class="section-divider" />
+            <div class="form-group"><label>Notes (optional)</label><input type="text" id="clockOutNotes" placeholder="End of shift notes..." /></div>
+            <button class="btn btn-full" style="margin-top:.5rem;padding:14px;font-size:16px;font-family:Oswald,sans-serif;letter-spacing:.08em;background:var(--danger);color:#fff;border-color:var(--danger)" onclick="doClockout()">&#9646;&#9646; CLOCK OUT</button>
+          </div>
+        </div>
+        <div class="card" id="geofenceCard" style="display:none">
+          <div class="card-header"><span class="card-title">&#127757; Location Status</span></div>
+          <div id="geofenceStatus"></div>
+        </div>
+        <div class="card" style="margin-top:1rem">
+          <div class="card-header">
+            <span class="card-title">My Recent Time Entries</span>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="week" id="myTimecardWeek" onchange="loadMyTimecard()" style="width:auto;padding:4px 8px;font-size:12px" />
+              <button class="btn btn-ghost btn-sm" onclick="loadMyTimecard()">Load</button>
+            </div>
+          </div>
+          <div id="myTimecardBody"></div>
+          <div id="myTimecardSummary" style="margin-top:.75rem"></div>
+        </div>
+      </div>
+
+      <!-- ADMIN: TIMECARDS -->
+      <div class="page" id="page-adminTimeclock">
+        <div class="page-header">
+          <div><h1 class="page-title">TIMECARDS</h1><p class="page-sub">All employee time entries — weekly view</p></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <input type="week" id="adminTimecardWeek" onchange="loadAdminTimecards()" style="width:auto;padding:5px 10px;font-size:13px" />
+            <button class="btn btn-ghost" onclick="loadAdminTimecards()">Load</button>
+            <button class="btn btn-primary" onclick="sendTimecardEmails()">&#9993; Email Timecards</button>
+            <button class="btn btn-ghost" onclick="exportTimecardExcel()">&#8659; Export Excel</button>
+          </div>
+        </div>
+        <div id="adminTimecardSummary" class="card" style="margin-bottom:1rem"></div>
+        <div id="adminTimecardBody"></div>
+      </div>
+
+      <!-- ADMIN: GEO ALERTS -->
+      <div class="page" id="page-adminAlerts">
+        <div class="page-header">
+          <div><h1 class="page-title">GEOFENCE ALERTS</h1><p class="page-sub">Employees who entered or left without clocking in/out</p></div>
+          <button class="btn btn-ghost" onclick="renderAlerts()">&#8635; Refresh</button>
+        </div>
+        <div id="alertsList"></div>
+      </div>
+
+      <!-- ADMIN: ATTENDANCE -->
+      <div class="page" id="page-adminAttendance">
+        <div class="page-header">
+          <div><h1 class="page-title">ATTENDANCE</h1><p class="page-sub">Call-ins, tardies, and quarterly reporting</p></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="openCallinModal()">+ Log Call-In</button>
+            <button class="btn btn-ghost" onclick="openAttEventModal()">+ Log Event</button>
+            <button class="btn btn-ghost" onclick="openQuarterlyReport()">&#128202; Quarterly Report</button>
+            <button class="btn btn-ghost" onclick="runPerfectAttendanceCheck()">&#127942; Check Perfect Attendance</button>
+            <button class="btn btn-ghost" onclick="openAwardAchievement()">&#127942; Award Achievement</button>
+          </div>
+        </div>
+        <div class="tab-bar">
+          <button class="tab active" onclick="setAttendanceTab('callins',this)">Call-Ins</button>
+          <button class="tab" onclick="setAttendanceTab('tardies',this)">Tardies</button>
+          <button class="tab" onclick="setAttendanceTab('report',this)">Quarterly Report</button>
+        </div>
+        <div id="attendanceContent"></div>
+      </div>
+
+      <!-- CUSTOMERS -->
+      <div class="page" id="page-customers">
+        <div class="page-header">
+          <div><h1 class="page-title">CUSTOMERS</h1><p class="page-sub">Customer database — all accounts, sites, and contacts</p></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-ghost" onclick="exportQBIIF()">&#8659; QB Export</button>
+            <button class="btn btn-primary" onclick="openAddCustomer()">+ Add Customer</button>
+          </div>
+        </div>
+        <div class="card" style="padding:.75rem 1rem;margin-bottom:1rem">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+            <input type="text" id="custSearch" placeholder="Search company name or city..." style="flex:1;min-width:200px" oninput="loadCustomers()" />
+            <select id="custTypeFilter" onchange="loadCustomers()" style="width:auto">
+              <option value="">All Types</option>
+              <option>General Contractor</option><option>Property Manager</option>
+              <option>End User / Building Owner</option><option>Municipality / Government</option>
+              <option>Industrial</option><option>Retail</option><option>Partner Door Company</option>
+            </select>
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+              <input type="checkbox" id="custPartnerFilter" onchange="loadCustomers()" />Partners only
+            </label>
+          </div>
+        </div>
+        <div id="customersList"></div>
+      </div>
+
+      <!-- CUSTOMER DETAIL -->
+      <div class="page" id="page-customerDetail">
+        <div class="page-header">
+          <div style="display:flex;align-items:center;gap:12px">
+            <button class="btn btn-ghost btn-sm" onclick="showPage('customers',document.querySelector('.nav-item[data-page=\'customers\']'))">&#8592; Back</button>
+            <div><h1 class="page-title" id="custDetailName">Customer</h1><p class="page-sub" id="custDetailType"></p></div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-ghost" id="custEditBtn" onclick="openEditCustomer()">&#9998; Edit</button>
+          </div>
+        </div>
+        <div id="partnerBanner" style="display:none" class="alert"></div>
+        <div class="tab-bar" style="margin-bottom:1rem">
+          <button class="tab active" onclick="setCustTab('overview',this)">Overview</button>
+          <button class="tab" onclick="setCustTab('sites',this)">Sites</button>
+          <button class="tab" onclick="setCustTab('contacts',this)">Contacts</button>
+          <button class="tab" onclick="setCustTab('equipment',this)">Equipment</button>
+          <button class="tab" onclick="setCustTab('docs',this)">Documents</button>
+        </div>
+        <div id="custDetailContent"></div>
+      </div>
+
+      <!-- MY TIMECARDS -->
+      <div class="page" id="page-myTimecards">
+        <div class="page-header">
+          <div><h1 class="page-title">MY TIMECARDS</h1><p class="page-sub">Your personal time history</p></div>
+          <input type="week" id="myTcWeekPicker" onchange="loadMyTimecardPage()" style="padding:5px 10px;font-size:13px" />
+        </div>
+        <div id="myTcBody"></div>
+        <div id="myTcSummary" style="margin-top:1rem"></div>
+      </div>
+
+      <!-- ═══ SALES & QUOTES PAGE ═══ -->
+      <div class="page" id="page-sales">
+        <div class="page-header">
+          <div><h1 class="page-title">SALES &amp; QUOTES</h1><p class="page-sub" id="salesPageSub">Create, manage, and track service quotes</p></div>
+          <div style="display:flex;gap:8px;" id="salesHeaderBtns">
+            <button class="btn btn-ghost" onclick="quotesShowList()" id="btnQuoteList">&#128203; My Quotes</button>
+            <button class="btn btn-primary" onclick="quotesNewQuote()">+ New Quote</button>
+          </div>
+        </div>
+
+        <!-- QUOTE LIST VIEW -->
+        <div id="quotes-list-view">
+          <div class="card" style="padding:0;overflow:hidden;">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+              <input type="text" id="quotes-search" placeholder="Search quotes..." oninput="quotesFilter()"
+                style="width:220px;padding:6px 10px;font-size:13px;" />
+              <select id="quotes-status-filter" onchange="quotesFilter()" style="width:auto;padding:6px 10px;font-size:13px;">
+                <option value="">All Status</option>
+                <option value="draft">Draft</option>
+                <option value="sent">Sent</option>
+                <option value="accepted">Accepted</option>
+                <option value="declined">Declined</option>
+              </select>
+              <span id="quotes-count" style="font-size:12px;color:var(--text-muted);margin-left:auto;"></span>
+            </div>
+            <div id="quotes-table-body" style="min-height:120px;">
+              <div style="padding:40px;text-align:center;color:var(--text-faint);font-size:13px;">Loading quotes...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- QUOTE BUILDER VIEW -->
+        <div id="quotes-builder-view" style="display:none;">
+
+          <!-- AI ASSISTANT -->
+          <div class="quotes-ai-panel">
+            <div class="quotes-ai-label">&#129302; AI Quote Assistant — paste notes or upload a file</div>
+            <textarea id="ai-notes-input" placeholder="Paste scope notes, emails, or job details here and click Analyze...&#10;&#10;Example: Crane Co, Jennifer Quaker, 10725 Harrison Rd Romulus MI. Dock Door 3 — new bottom section, springs, jamb seals, bumpers $2,295. Door 5 — jamb seals and bumpers $975."></textarea>
+            <div class="quotes-ai-row">
+              <label class="quotes-ai-upload-label">
+                &#128196; Upload File
+                <input type="file" id="ai-file-upload" accept="image/*,application/pdf,.doc,.docx" style="display:none;" onchange="quotesHandleFile(event)">
+              </label>
+              <div id="ai-file-preview-tag" style="display:none;font-size:11px;color:var(--text-muted);background:var(--bg-surface);padding:4px 10px;border-radius:var(--radius-sm);"></div>
+              <button class="quotes-ai-btn" id="ai-analyze-btn" onclick="quotesRunAI()">Analyze &amp; Fill Quote</button>
+              <span class="quotes-ai-status" id="ai-status-msg">Paste notes or upload a file, then click Analyze.</span>
+            </div>
+          </div>
+
+          <!-- FORM -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+            <!-- Quote Info -->
+            <div class="card" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-content:start;">
+              <div style="grid-column:1/-1;font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:4px;">Quote Info</div>
+              <div><label class="ql">Quote #</label><input class="qi" id="q-num" placeholder="e.g. 0426-27-GK"></div>
+              <div><label class="ql">Date</label><input class="qi" id="q-date" type="date"></div>
+              <div><label class="ql">Valid For</label><input class="qi" id="q-valid" value="30 days"></div>
+              <div><label class="ql">Status</label>
+                <select class="qi qi-select" id="q-status">
+                  <option value="draft">Draft</option>
+                  <option value="sent">Sent</option>
+                  <option value="accepted">Accepted</option>
+                  <option value="declined">Declined</option>
+                </select>
+              </div>
+            </div>
+            <!-- Client Info -->
+            <div class="card" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-content:start;">
+              <div style="grid-column:1/-1;font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:4px;">Client Info</div>
+              <div style="grid-column:1/-1;"><label class="ql">Company / Client Name</label><input class="qi" id="q-client" placeholder="e.g. Crane Co."></div>
+              <div><label class="ql">Contact Name</label><input class="qi" id="q-contact" placeholder="e.g. Jennifer Quaker"></div>
+              <div><label class="ql">Phone</label><input class="qi" id="q-phone" placeholder="(000) 000-0000"></div>
+              <div><label class="ql">Email</label><input class="qi" id="q-email" placeholder="contact@company.com"></div>
+              <div><label class="ql">Address</label><input class="qi" id="q-addr" placeholder="Street, City, State ZIP"></div>
+              <div style="grid-column:1/-1;"><label class="ql">Project / Job Name</label><input class="qi" id="q-project" placeholder="e.g. Door Repairs After PM"></div>
+              <div style="grid-column:1/-1;"><label class="ql">Scope Summary</label><input class="qi" id="q-scope-summary" placeholder="Brief description of overall work"></div>
+            </div>
+          </div>
+
+          <!-- SCOPE OF WORK -->
+          <div class="card" style="margin-bottom:16px;">
+            <div style="font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:12px;">Scope of Work</div>
+            <div id="q-scopes-container"></div>
+            <button onclick="quotesAddScope()" style="width:100%;padding:8px;border:1.5px dashed var(--amber);background:transparent;color:var(--amber);cursor:pointer;font-size:12px;font-weight:700;border-radius:var(--radius-sm);margin-top:8px;">+ Add Door / Section</button>
+          </div>
+
+          <!-- OPTIONS -->
+          <div class="card" style="margin-bottom:16px;">
+            <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px;">Options &amp; Add-Ons</div>
+            <div id="q-options-container"></div>
+            <button onclick="quotesAddOption()" class="q-add-line-btn">+ Add option line</button>
+          </div>
+
+          <!-- NOTES + TOTALS -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+            <div class="card">
+              <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Notes</div>
+              <textarea id="q-notes" rows="4" placeholder="Additional notes, site conditions, requirements..."
+                style="width:100%;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:8px;font-size:12.5px;resize:vertical;outline:none;font-family:inherit;box-sizing:border-box;"></textarea>
+            </div>
+            <div class="card">
+              <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">Totals</div>
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <div style="display:flex;align-items:center;gap:10px;"><span style="font-size:11px;color:var(--text-muted);min-width:80px;">Subtotal</span><input class="qi" id="q-subtotal" placeholder="$0.00" style="text-align:right;"></div>
+                <div style="display:flex;align-items:center;gap:10px;"><span style="font-size:11px;color:var(--text-muted);min-width:80px;">Tax</span><input class="qi" id="q-tax" placeholder="$0.00" style="text-align:right;"></div>
+                <div class="q-total-bar">
+                  <span style="font-size:12px;font-weight:700;flex:1;">Total Contract</span>
+                  <input id="q-total" placeholder="$0.00">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ACTIONS -->
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+            <button onclick="quotesSave()" class="btn btn-primary">&#128190; Save Quote</button>
+            <button onclick="quotesPrint()" class="btn btn-ghost">&#8982; Print / PDF</button>
+            <button onclick="quotesShowList()" class="btn btn-ghost">&#8592; Back to List</button>
+            <span id="q-save-status" style="font-size:12px;color:var(--text-muted);margin-left:auto;"></span>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- ═══ MODALS (all original modals preserved) ═══ -->
+
+<div class="modal-overlay" id="annModal" onclick="closeOnOverlay(event,'annModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">New Announcement</span><button class="modal-close" onclick="closeModal('annModal')">✕</button></div>
+    <div class="form-group"><label>Title</label><input type="text" id="annTitle" /></div>
+    <div class="form-group"><label>Priority</label><select id="annPriority"><option value="normal">Normal</option><option value="urgent">Urgent</option><option value="info">Info / FYI</option></select></div>
+    <div class="form-group"><label>Message</label><textarea id="annBody" rows="4"></textarea></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('annModal')">Cancel</button><button class="btn btn-primary" onclick="saveAnnouncement()">Post</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="newsModal" onclick="closeOnOverlay(event,'newsModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">New News Post</span><button class="modal-close" onclick="closeModal('newsModal')">✕</button></div>
+    <div class="form-group"><label>Title</label><input type="text" id="newsTitle" /></div>
+    <div class="form-group"><label>Category</label><select id="newsCat"><option>Project Update</option><option>Safety</option><option>HR</option><option>Recognition</option><option>General</option></select></div>
+    <div class="form-group"><label>Content</label><textarea id="newsBody" rows="5"></textarea></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('newsModal')">Cancel</button><button class="btn btn-primary" onclick="saveNews()">Publish</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="oncallModal" onclick="closeOnOverlay(event,'oncallModal')">
+  <div class="modal modal-lg">
+    <div class="modal-header"><span class="modal-title">Add On-Call Entry</span><button class="modal-close" onclick="closeModal('oncallModal')">&#x2715;</button></div>
+    <div class="modal-section">Overhead Door Division — 2 people</div>
+    <div class="form-group"><label>Person 1 (Leader)</label><select id="ocOH1"></select></div>
+    <div class="form-group"><label>Person 2 (Helper / Leader)</label><select id="ocOH2"></select></div>
+    <div class="modal-section">Automatic Door Division — 1 person</div>
+    <div class="form-group"><label>Technician</label><select id="ocAD1"></select></div>
+    <div class="modal-section">Schedule</div>
+    <div class="form-row">
+      <div class="form-group"><label>Start Date</label><input type="date" id="ocStart" /></div>
+      <div class="form-group"><label>End Date</label><input type="date" id="ocEnd" /></div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('oncallModal')">Cancel</button><button class="btn btn-primary" onclick="saveOncall()">Save Entry</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="autoScheduleModal" onclick="closeOnOverlay(event,'autoScheduleModal')">
+  <div class="modal modal-xl">
+    <div class="modal-header"><span class="modal-title">Auto-Schedule Builder</span><button class="modal-close" onclick="closeModal('autoScheduleModal')">✕</button></div>
+    <div class="form-row">
+      <div class="form-group"><label>Schedule Start Date</label><input type="date" id="schedStart" oninput="previewSchedule()" /></div>
+      <div class="form-group"><label>Number of Weeks</label><select id="schedWeeks" onchange="previewSchedule()"><option value="4">4 weeks</option><option value="6">6 weeks</option><option value="8" selected>8 weeks</option><option value="12">12 weeks</option><option value="26">26 weeks</option></select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Rotation Frequency</label><select id="schedFreq" onchange="previewSchedule()"><option value="1">Weekly</option><option value="2">Bi-weekly</option><option value="4">Monthly (4 weeks)</option></select></div>
+      <div class="form-group"></div>
+    </div>
+    <div class="modal-section">Continue Rotation From Position</div>
+    <div class="form-row">
+      <div class="form-group"><label>Overhead Door — Start at position #</label><input type="number" id="ohStartIdx" value="0" min="0" oninput="previewSchedule()" /></div>
+      <div class="form-group"><label>Automatic Door — Start at position #</label><input type="number" id="auStartIdx" value="0" min="0" oninput="previewSchedule()" /></div>
+    </div>
+    <div class="modal-section">Overhead Door Division Rotation Order</div>
+    <div id="rotListOverhead" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px"></div>
+    <div class="modal-section">Automatic Door Division Rotation Order</div>
+    <div id="rotListAutomatic" style="max-height:120px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px"></div>
+    <div class="modal-section">Schedule Preview</div>
+    <div id="schedPreview" style="max-height:300px;overflow-y:auto"></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('autoScheduleModal')">Cancel</button><button class="btn btn-primary" onclick="applyAutoSchedule()">Apply Schedule</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="ptoReqModal" onclick="closeOnOverlay(event,'ptoReqModal')">
+  <div class="modal modal-lg">
+    <div class="modal-header"><span class="modal-title">Request Time Off</span><button class="modal-close" onclick="closeModal('ptoReqModal')">&#x2715;</button></div>
+    <div id="blackoutWarning" class="alert alert-danger" style="display:none"></div>
+    <div id="ptoCalendarWrap">
+      <div class="pto-cal-nav">
+        <button class="pto-cal-nav-btn" onclick="ptoCalShift(-1)">&#8249;</button>
+        <div class="pto-cal-months">
+          <div class="pto-cal-month-label" id="ptoCalLabel1"></div>
+          <div class="pto-cal-month-label" id="ptoCalLabel2"></div>
+        </div>
+        <button class="pto-cal-nav-btn" onclick="ptoCalShift(1)">&#8250;</button>
+      </div>
+      <div class="pto-cal-jump">
+        <select id="ptoJumpMonth" onchange="ptoJump()"></select>
+        <select id="ptoJumpYear" onchange="ptoJump()"></select>
+      </div>
+      <div class="pto-cal-grid-wrap">
+        <div id="ptoCalGrid1" class="pto-cal-grid"></div>
+        <div id="ptoCalGrid2" class="pto-cal-grid"></div>
+      </div>
+      <div class="pto-cal-legend">
+        <span class="pto-leg-item"><span class="pto-leg-dot" style="background:var(--amber)"></span>Selected</span>
+        <span class="pto-leg-item"><span class="pto-leg-dot" style="background:var(--danger)"></span>Blackout</span>
+      </div>
+    </div>
+    <div class="form-row" style="margin-top:.75rem">
+      <div class="form-group"><label>Start Date</label><input type="date" id="ptoStart" oninput="ptoManualInput()" /></div>
+      <div class="form-group"><label>End Date</label><input type="date" id="ptoEnd" oninput="ptoManualInput()" /></div>
+    </div>
+    <div class="form-group"><label>Type</label><select id="ptoType"><option>Vacation</option><option>Personal</option><option>Sick</option><option>Bereavement</option><option>Other</option></select></div>
+    <div class="form-group"><label>Notes (optional)</label><textarea id="ptoNotes" rows="2"></textarea></div>
+    <div id="ptoDaysCalc" class="calc-note" style="display:none"></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('ptoReqModal')">Cancel</button><button class="btn btn-primary" id="ptoSubmitBtn" onclick="submitPto()">Submit Request</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="addUserModal" onclick="closeOnOverlay(event,'addUserModal')">
+  <div class="modal modal-lg">
+    <div class="modal-header"><span class="modal-title">Add Employee</span><button class="modal-close" onclick="closeModal('addUserModal')">&#x2715;</button></div>
+    <div class="form-row"><div class="form-group"><label>First Name</label><input type="text" id="addFirst" /></div><div class="form-group"><label>Last Name</label><input type="text" id="addLast" /></div></div>
+    <div class="form-row"><div class="form-group"><label>Username</label><input type="text" id="addUsername" placeholder="firstname.lastname" /></div><div class="form-group"><label>Password</label><input type="password" id="addPass" /></div></div>
+    <div class="form-row">
+      <div class="form-group"><label>Job Title</label><input type="text" id="addRole" placeholder="e.g. Field Technician" /></div>
+      <div class="form-group"><label>Department</label>
+        <select id="addDept"><option value="">— Select Department —</option><option>Office Admin</option><option>Sales</option><option>Management</option><option>Executive</option><option>Technician</option><option>Field Supervisor</option><option>Dispatcher</option></select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>On-Call Department</label><select id="addOncallDept"><option value="">Not on on-call rotation</option><option>Automatic Door Division</option><option>Overhead Door Division</option><option>Both Divisions</option></select></div>
+      <div class="form-group"><label>On-Call Role</label><select id="addOncallRole"><option value="">&#8212; Not applicable</option><option>Leader</option><option>Helper</option></select></div>
+    </div>
+    <div class="form-row"><div class="form-group"><label>Phone</label><input type="tel" id="addPhone" /></div><div class="form-group"><label>Email</label><input type="email" id="addEmail" /></div></div>
+    <div class="form-row">
+      <div class="form-group"><label>Hire Date</label><input type="date" id="addHireDate" /></div>
+      <div class="form-group"><label>Access Level</label>
+        <select id="addRoleTypeMain" onchange="document.getElementById('addRoleType').value=this.value">
+          <option value="technician">Technician</option><option value="dispatcher">Dispatcher</option><option value="sales">Sales</option><option value="billing">Billing</option><option value="manager">Manager</option><option value="admin">Admin</option><option value="global_admin">Global Admin</option>
+        </select>
+      </div>
+    </div>
+    <input type="hidden" id="addRoleType" value="technician" />
+    <div class="form-row"><div class="form-group"><label>PTO Days / Year</label><input type="number" id="addPtoTotal" value="10" min="0" /></div><div class="form-group"><label>PTO Days Remaining</label><input type="number" id="addPtoLeft" value="10" min="0" /></div></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('addUserModal')">Cancel</button><button class="btn btn-primary" onclick="saveUser()">Add Employee</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="changePwModal" onclick="closeOnOverlay(event,'changePwModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Change My Password</span><button class="modal-close" onclick="closeModal('changePwModal')">&#x2715;</button></div>
+    <div id="changePwError" class="alert alert-danger" style="display:none"></div>
+    <div class="form-group"><label>Current Password</label><input type="password" id="cpCurrent" /></div>
+    <div class="form-group"><label>New Password</label><input type="password" id="cpNew" placeholder="At least 6 characters" /></div>
+    <div class="form-group"><label>Confirm New Password</label><input type="password" id="cpConfirm" /></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('changePwModal')">Cancel</button><button class="btn btn-primary" onclick="changeMyPassword()">Update Password</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="editUserModal" onclick="closeOnOverlay(event,'editUserModal')">
+  <div class="modal modal-lg">
+    <div class="modal-header"><span class="modal-title">Edit Employee</span><button class="modal-close" onclick="closeModal('editUserModal')">&#x2715;</button></div>
+    <input type="hidden" id="editUserId" />
+    <div class="form-row"><div class="form-group"><label>First Name</label><input type="text" id="editFirst" /></div><div class="form-group"><label>Last Name</label><input type="text" id="editLast" /></div></div>
+    <div class="form-row"><div class="form-group"><label>Username</label><input type="text" id="editUsername" /></div><div class="form-group"><label>Job Title</label><input type="text" id="editRole" /></div></div>
+    <div class="form-row">
+      <div class="form-group"><label>Department</label><select id="editDept"><option value="">— Select Department —</option><option>Office Admin</option><option>Sales</option><option>Management</option><option>Executive</option><option>Technician</option><option>Field Supervisor</option><option>Dispatcher</option></select></div>
+      <div class="form-group"><label>On-Call Department</label><select id="editOncallDept"><option value="">Not on on-call rotation</option><option>Automatic Door Division</option><option>Overhead Door Division</option><option>Both Divisions</option></select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>On-Call Role</label><select id="editOncallRole"><option value="">—</option><option>Leader</option><option>Helper</option></select></div>
+      <div class="form-group"><label>Role</label><select id="editRoleType"><option value="technician">Technician</option><option value="dispatcher">Dispatcher</option><option value="sales">Sales</option><option value="billing">Billing</option><option value="manager">Manager</option><option value="admin">Admin</option><option value="global_admin">Global Admin</option></select></div>
+    </div>
+    <input type="hidden" id="editIsAdmin" value="false" />
+    <div id="editAdminOnlyNote" class="alert alert-warning" style="display:none;font-size:12px;margin-bottom:.5rem">&#128274; Manager mode — hire date, PTO, and username are admin-only.</div>
+    <div class="form-row"><div class="form-group"><label>Phone</label><input type="tel" id="editPhone" /></div><div class="form-group"><label>Email</label><input type="email" id="editEmail" /></div></div>
+    <div class="form-row"><div class="form-group"><label>PTO Days / Year</label><input type="number" id="editPtoTotal" min="0" /></div><div class="form-group"><label>PTO Days Remaining</label><input type="number" id="editPtoLeft" min="0" /></div></div>
+    <div class="form-row"><div class="form-group"><label>Hire Date</label><input type="date" id="editHireDate" /></div><div class="form-group"></div></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('editUserModal')">Cancel</button><button class="btn btn-primary" onclick="saveEditUser()">Save Changes</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="resetPwModal" onclick="closeOnOverlay(event,'resetPwModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Reset Employee Password</span><button class="modal-close" onclick="closeModal('resetPwModal')">&#x2715;</button></div>
+    <input type="hidden" id="resetPwUserId" />
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem">Resetting password for: <strong id="resetPwName" style="color:var(--text)"></strong></p>
+    <div id="resetPwError" class="alert alert-danger" style="display:none"></div>
+    <div class="form-group"><label>New Password</label><input type="password" id="resetPwNew" placeholder="At least 6 characters" /></div>
+    <div class="form-group"><label>Confirm Password</label><input type="password" id="resetPwConfirm" /></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('resetPwModal')">Cancel</button><button class="btn btn-primary" onclick="adminResetPassword()">Reset Password</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="swapOncallModal" onclick="closeOnOverlay(event,'swapOncallModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Swap On-Call Employee</span><button class="modal-close" onclick="closeModal('swapOncallModal')">&#x2715;</button></div>
+    <input type="hidden" id="swapOncallId" />
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem">Replacing: <strong id="swapOncallCurrentName" style="color:var(--amber)"></strong></p>
+    <div class="form-group"><label>Replace With</label><select id="swapOncallNewEmp"></select></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('swapOncallModal')">Cancel</button><button class="btn btn-primary" onclick="saveOncallSwap()">Confirm Swap</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="blackoutModal" onclick="closeOnOverlay(event,'blackoutModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Add Blackout Period</span><button class="modal-close" onclick="closeModal('blackoutModal')">&#x2715;</button></div>
+    <div class="form-group"><label>Label / Reason</label><input type="text" id="boLabel" placeholder="e.g. Year-End Freeze" /></div>
+    <div class="form-row"><div class="form-group"><label>Start Date</label><input type="date" id="boStart" /></div><div class="form-group"><label>End Date</label><input type="date" id="boEnd" /></div></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('blackoutModal')">Cancel</button><button class="btn btn-primary" onclick="saveBlackout()">Save Blackout</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="uploadDocModal" onclick="closeOnOverlay(event,'uploadDocModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Upload Document</span><button class="modal-close" onclick="closeModal('uploadDocModal')">&#x2715;</button></div>
+    <div class="form-group"><label>Document Name</label><input type="text" id="docName" /></div>
+    <div class="form-group"><label>Document Type</label><select id="docType"><option value="certification">Certification</option><option value="must_card">MUST Card</option><option value="license">License</option><option value="other">Other</option></select></div>
+    <div class="form-group"><label>Expiration Date (if applicable)</label><input type="date" id="docExpiry" /></div>
+    <div class="form-group"><label>Notes</label><input type="text" id="docNotes" /></div>
+    <div class="form-group"><label>File (PDF, JPG, PNG — max 5MB)</label><input type="file" id="docFile" accept=".pdf,.jpg,.jpeg,.png" style="padding:8px" /></div>
+    <div id="docUploadProgress" style="display:none" class="calc-note">Uploading...</div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('uploadDocModal')">Cancel</button><button class="btn btn-primary" onclick="uploadDocument()">Upload</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="uploadPolicyModal" onclick="closeOnOverlay(event,'uploadPolicyModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Add Policy / Procedure</span><button class="modal-close" onclick="closeModal('uploadPolicyModal')">&#x2715;</button></div>
+    <div class="form-group"><label>Document Title</label><input type="text" id="policyName" /></div>
+    <div class="form-group"><label>Category</label><select id="policyCategory"><option value="safety">Safety</option><option value="hr">HR</option><option value="operations">Operations</option><option value="training">Training</option><option value="other">Other</option></select></div>
+    <div class="form-group"><label>Description</label><textarea id="policyDesc" rows="2"></textarea></div>
+    <div class="form-group"><label>File (PDF, JPG, PNG — max 10MB)</label><input type="file" id="policyFile" accept=".pdf,.jpg,.jpeg,.png" style="padding:8px" /></div>
+    <div id="policyUploadProgress" style="display:none" class="calc-note">Uploading...</div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('uploadPolicyModal')">Cancel</button><button class="btn btn-primary" onclick="uploadPolicy()">Upload</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="callinModal" onclick="closeOnOverlay(event,'callinModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Log Call-In</span><button class="modal-close" onclick="closeModal('callinModal')">&#x2715;</button></div>
+    <div class="form-group"><label>Employee</label><select id="callinEmpSelect"></select></div>
+    <div class="form-row"><div class="form-group"><label>Date</label><input type="date" id="callinDate" /></div><div class="form-group"><label>Type</label><select id="callinType"><option>Sick</option><option>Personal</option><option>No Call No Show</option><option>FMLA</option><option>Bereavement</option><option>Union Leave</option><option>Approved Absence</option></select></div></div>
+    <div class="form-group"><label>Notes</label><input type="text" id="callinNotes" /></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('callinModal')">Cancel</button><button class="btn btn-primary" onclick="saveCallin()">Log Call-In</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="attendanceEventModal" onclick="closeOnOverlay(event,'attendanceEventModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Log Attendance Event</span><button class="modal-close" onclick="closeModal('attendanceEventModal')">&#x2715;</button></div>
+    <div class="form-group"><label>Employee</label><select id="attEventEmp"></select></div>
+    <div class="form-row"><div class="form-group"><label>Date</label><input type="date" id="attEventDate" /></div><div class="form-group"><label>Event Type</label><select id="attEventType"><option value="tardy">Tardy</option><option value="absence">Absence</option><option value="early_departure">Early Departure</option></select></div></div>
+    <div class="form-group"><label>Minutes Late/Early</label><input type="number" id="attEventMins" value="0" min="0" /></div>
+    <div class="form-group"><label>Notes</label><input type="text" id="attEventNotes" /></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('attendanceEventModal')">Cancel</button><button class="btn btn-primary" onclick="saveAttendanceEvent()">Save</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="quarterlyReportModal" onclick="closeOnOverlay(event,'quarterlyReportModal')">
+  <div class="modal modal-xl">
+    <div class="modal-header"><span class="modal-title">&#128202; Quarterly Attendance Report</span><button class="modal-close" onclick="closeModal('quarterlyReportModal')">&#x2715;</button></div>
+    <div class="form-row" style="margin-bottom:1rem"><div class="form-group"><label>Quarter</label><select id="reportQuarter"><option>Q1</option><option>Q2</option><option>Q3</option><option>Q4</option></select></div><div class="form-group"><label>Year</label><input type="number" id="reportYear" value="2026" min="2024" max="2030" /></div></div>
+    <button class="btn btn-primary" onclick="loadQuarterlyReport()" style="margin-bottom:1rem">Generate Report</button>
+    <div id="quarterlyReportContent"></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('quarterlyReportModal')">Close</button><button class="btn btn-ghost" id="btnPrintReport" style="display:none" onclick="printQuarterlyReport()">&#128438; Print Report</button></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="selfCallinModal" onclick="closeOnOverlay(event,'selfCallinModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">&#128222; Call In</span><button class="modal-close" onclick="closeModal('selfCallinModal')">&#x2715;</button></div>
+    <div class="alert alert-warning" style="margin-bottom:1rem">Submitting this will notify your manager immediately by email.</div>
+    <div class="form-row"><div class="form-group"><label>Date</label><input type="date" id="selfCallinDate" /></div><div class="form-group"><label>Reason</label><select id="selfCallinType"><option>Sick</option><option>Personal</option><option>FMLA</option><option>Bereavement</option><option>Union Leave</option></select></div></div>
+    <div class="form-group"><label>Notes (optional)</label><textarea id="selfCallinNotes" rows="2"></textarea></div>
+    <div id="selfCallinResult" style="display:none"></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('selfCallinModal')">Cancel</button><button class="btn" style="background:var(--danger);color:#fff;border-color:var(--danger)" onclick="submitSelfCallin()">Submit Call-In</button></div>
+  </div>
+</div>
+
+<div id="pwaInstallBanner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:400;background:var(--bg-card);border-top:2px solid var(--amber);padding:12px 16px;align-items:center;gap:12px;box-shadow:0 -4px 20px rgba(0,0,0,0.4)">
+  <img src="/icons/icon-72.png" style="width:40px;height:40px;border-radius:10px" alt="KVM" />
+  <div style="flex:1"><div style="font-family:Oswald,sans-serif;font-size:14px;font-weight:600;color:var(--white)">Install KVM Portal</div><div style="font-size:11px;color:var(--text-muted)">Add to your home screen for quick access</div></div>
+  <button class="btn btn-primary btn-sm" onclick="installPWA()" style="flex-shrink:0">Install</button>
+  <button class="btn btn-ghost btn-sm" onclick="dismissInstallBanner()" style="flex-shrink:0">&#x2715;</button>
+</div>
+
+<div class="modal-overlay" id="customerModal" onclick="closeOnOverlay(event,'customerModal')">
+  <div class="modal modal-xl" style="max-height:90vh;overflow-y:auto">
+    <div class="modal-header"><span class="modal-title" id="customerModalTitle">Add Customer</span><button class="modal-close" onclick="closeModal('customerModal')">&#x2715;</button></div>
+    <input type="hidden" id="custModalId" />
+    <div class="modal-section">Basic Information</div>
+    <div class="form-row"><div class="form-group" style="flex:2"><label>Company Name *</label><input type="text" id="custName" /></div><div class="form-group"><label>Customer Type</label><select id="custType" onchange="togglePartnerFields()"><option>General Contractor</option><option>Property Manager</option><option>End User / Building Owner</option><option>Municipality / Government</option><option>Industrial</option><option>Retail</option><option>Partner Door Company</option></select></div></div>
+    <div class="form-row"><div class="form-group"><label>QB Customer ID</label><input type="text" id="custQbId" /></div><div class="form-group"><label>Credit Terms</label><select id="custTerms"><option>Net 30</option><option>Net 60</option><option>Net 90</option><option>Due on Receipt</option><option>Net 15</option></select></div><div class="form-group"><label>Assigned Salesperson</label><select id="custSalesperson"><option value="0">— Unassigned —</option></select></div></div>
+    <div class="form-row"><div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="custTaxExempt" /> Tax Exempt</label></div><div class="form-group"><label>Tax Exempt #</label><input type="text" id="custTaxExemptNum" /></div><div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="custUnion" /> Union Required</label></div><div class="form-group"><label style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="custCertPayroll" /> Certified Payroll</label></div></div>
+    <div class="modal-section">Billing Address &amp; Contact</div>
+    <div class="form-group"><label>Address</label><input type="text" id="custBillingAddr" /></div>
+    <div class="form-row"><div class="form-group" style="flex:2"><label>City</label><input type="text" id="custBillingCity" /></div><div class="form-group"><label>State</label><input type="text" id="custBillingState" maxlength="2" /></div><div class="form-group"><label>ZIP</label><input type="text" id="custBillingZip" /></div></div>
+    <div class="form-row"><div class="form-group"><label>Phone</label><input type="tel" id="custBillingPhone" /></div><div class="form-group"><label>Fax</label><input type="tel" id="custBillingFax" /></div><div class="form-group"><label>Billing Email</label><input type="email" id="custBillingEmail" /></div></div>
+    <div id="partnerFields" style="display:none">
+      <div class="modal-section" style="color:var(--amber)">&#9888; Partner Door Company Settings</div>
+      <div class="form-row"><div class="form-group"><label>Billing Requirement</label><select id="custPartnerBillingHours"><option value="48">48 hours (standard)</option><option value="24">24 hours</option><option value="72">72 hours</option><option value="10days">10 days</option></select></div><div class="form-group"><label>Their Billing Email</label><input type="email" id="custPartnerBillingEmail" /></div></div>
+      <div class="form-group"><label>Labor Rate Notes</label><textarea id="custPartnerLaborNotes" rows="2"></textarea></div>
+      <div class="form-group"><label>Check-In Instructions</label><textarea id="custPartnerCheckin" rows="3"></textarea></div>
+      <div class="form-group"><label>Work Order Instructions</label><textarea id="custPartnerWOInstructions" rows="3"></textarea></div>
+      <div class="form-group"><label>Billing Notes</label><textarea id="custPartnerBillingNotes" rows="2"></textarea></div>
+    </div>
+    <div class="modal-section">Internal Notes</div>
+    <div class="form-group"><textarea id="custInternalNotes" rows="2"></textarea></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('customerModal')">Cancel</button><button class="btn btn-primary" onclick="saveCustomer()">Save Customer</button></div>
+  </div>
+</div>
+
+
+<script src="/js/app.js"></script>
+</body>
+</html>
