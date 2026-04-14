@@ -819,6 +819,56 @@
           </div>
         </div>
       </div>
+<!-- ═══ PROJECTS PAGE ═══ -->
+<div id="page-projects" class="page">
+  <div class="page-header">
+    <h1 class="page-title">🏗️ Projects</h1>
+    <button class="btn btn-primary" onclick="openAddProject()">+ New Project</button>
+  </div>
+  <div class="card" style="margin-bottom:1rem">
+    <div style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:center">
+      <input type="text" id="projSearch" placeholder="Search project, customer, job #..." style="flex:1;min-width:180px;background:var(--bg-input,#111);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:7px 10px;font-size:13px;outline:none" oninput="loadProjects()" />
+      <select id="projStatusFilter" style="background:var(--bg-input,#111);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:7px 10px;font-size:13px;outline:none" onchange="loadProjects()">
+        <option value="">All Statuses</option>
+        <option value="awarded">Awarded</option>
+        <option value="shop_drawings">Shop Drawings</option>
+        <option value="scheduled">Scheduled</option>
+        <option value="in_progress">In Progress</option>
+        <option value="punch_list">Punch List</option>
+        <option value="complete">Complete</option>
+      </select>
+    </div>
+  </div>
+  <div id="projectsList"></div>
+</div>
+
+<!-- ═══ PROJECT DETAIL PAGE ═══ -->
+<div id="page-projectDetail" class="page">
+  <div class="page-header" style="flex-wrap:wrap;gap:.5rem">
+    <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
+      <button class="btn btn-ghost btn-sm" onclick="showPage('projects',null);loadProjects()">← Projects</button>
+      <div>
+        <h1 class="page-title" id="projDetailName" style="margin:0">Project</h1>
+        <div style="display:flex;align-items:center;gap:.75rem;margin-top:3px;flex-wrap:wrap">
+          <span id="projDetailStatus"></span>
+          <span style="font-size:12px;color:var(--text-faint)" id="projDetailJob"></span>
+          <span style="font-size:12px;color:var(--text-muted)" id="projDetailCustomer"></span>
+          <span style="font-size:12px;color:var(--amber)" id="projDetailValue"></span>
+          <span style="font-size:12px;color:var(--text-muted)" id="projDetailHours"></span>
+        </div>
+      </div>
+    </div>
+    <button class="btn btn-danger btn-sm" onclick="deleteProject()" style="margin-left:auto">Delete Project</button>
+  </div>
+  <div id="projTabBar" style="display:flex;gap:4px;margin-bottom:1rem;border-bottom:1px solid var(--border);padding-bottom:.5rem;flex-wrap:wrap">
+    <button class="tab-btn active" onclick="setProjectTab('overview',this)">Overview</button>
+    <button class="tab-btn" onclick="setProjectTab('phases',this)">Phases</button>
+    <button class="tab-btn" onclick="setProjectTab('hours',this)">Hours</button>
+    <button class="tab-btn" onclick="setProjectTab('costs',this)">💰 Job Costing</button>
+    <button class="tab-btn" onclick="setProjectTab('log',this)">Project Log</button>
+  </div>
+  <div id="projDetailContent"></div>
+</div>
 
     </main>
   </div>
@@ -1122,56 +1172,6 @@
 </div>
 
 
-<!-- ═══ PROJECTS PAGE ═══ -->
-<div id="page-projects" class="page">
-  <div class="page-header">
-    <h1 class="page-title">🏗️ Projects</h1>
-    <button class="btn btn-primary" onclick="openAddProject()">+ New Project</button>
-  </div>
-  <div class="card" style="margin-bottom:1rem">
-    <div style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:center">
-      <input type="text" id="projSearch" placeholder="Search project, customer, job #..." style="flex:1;min-width:180px;background:var(--bg-input,#111);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:7px 10px;font-size:13px;outline:none" oninput="loadProjects()" />
-      <select id="projStatusFilter" style="background:var(--bg-input,#111);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:7px 10px;font-size:13px;outline:none" onchange="loadProjects()">
-        <option value="">All Statuses</option>
-        <option value="awarded">Awarded</option>
-        <option value="shop_drawings">Shop Drawings</option>
-        <option value="scheduled">Scheduled</option>
-        <option value="in_progress">In Progress</option>
-        <option value="punch_list">Punch List</option>
-        <option value="complete">Complete</option>
-      </select>
-    </div>
-  </div>
-  <div id="projectsList"></div>
-</div>
-
-<!-- ═══ PROJECT DETAIL PAGE ═══ -->
-<div id="page-projectDetail" class="page">
-  <div class="page-header" style="flex-wrap:wrap;gap:.5rem">
-    <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
-      <button class="btn btn-ghost btn-sm" onclick="showPage('projects',null);loadProjects()">← Projects</button>
-      <div>
-        <h1 class="page-title" id="projDetailName" style="margin:0">Project</h1>
-        <div style="display:flex;align-items:center;gap:.75rem;margin-top:3px;flex-wrap:wrap">
-          <span id="projDetailStatus"></span>
-          <span style="font-size:12px;color:var(--text-faint)" id="projDetailJob"></span>
-          <span style="font-size:12px;color:var(--text-muted)" id="projDetailCustomer"></span>
-          <span style="font-size:12px;color:var(--amber)" id="projDetailValue"></span>
-          <span style="font-size:12px;color:var(--text-muted)" id="projDetailHours"></span>
-        </div>
-      </div>
-    </div>
-    <button class="btn btn-danger btn-sm" onclick="deleteProject()" style="margin-left:auto">Delete Project</button>
-  </div>
-  <div id="projTabBar" style="display:flex;gap:4px;margin-bottom:1rem;border-bottom:1px solid var(--border);padding-bottom:.5rem;flex-wrap:wrap">
-    <button class="tab-btn active" onclick="setProjectTab('overview',this)">Overview</button>
-    <button class="tab-btn" onclick="setProjectTab('phases',this)">Phases</button>
-    <button class="tab-btn" onclick="setProjectTab('hours',this)">Hours</button>
-    <button class="tab-btn" onclick="setProjectTab('costs',this)">💰 Job Costing</button>
-    <button class="tab-btn" onclick="setProjectTab('log',this)">Project Log</button>
-  </div>
-  <div id="projDetailContent"></div>
-</div>
 
 <!-- ═══ PROJECT MODAL ═══ -->
 <div class="modal-overlay" id="projectModal" onclick="closeOnOverlay(event,'projectModal')">
