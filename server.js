@@ -994,8 +994,12 @@ app.get('/api/attendance/report',requireAdmin,(req,res)=>{
   res.json({quarter:q,year:y,qStart,qEnd,report});
 });
 app.get('/api/attendance/brief',requireAuth,(req,res)=>{
-  if(!req.session.isAdmin && req.session.roleType!=='manager' && req.session.roleType!=='global_admin'){
-    return res.status(403).json({error:'Forbidden'});
+  const today=new Date().toISOString().split('T')[0];
+  const ptoOff=all(`SELECT user_id,user_name,type,start_date,end_date FROM pto_requests WHERE status='approved' AND start_date<=? AND end_date>=? ORDER BY user_name`,[today,today]);
+  const calledIn=all(`SELECT user_id,user_name,call_in_type,notes FROM callins WHERE call_in_date=? ORDER BY user_name`,[today]);
+  const tardy=all(`SELECT user_id,user_name,minutes_late,notes FROM attendance WHERE event_date=? AND event_type='tardy' ORDER BY user_name`,[today]);
+  res.json({date:today,off:ptoOff,callins:calledIn,tardy:tardy});
+});
   }
   const today=new Date().toISOString().split('T')[0];
   const ptoOff=all(`SELECT user_id,user_name,type,start_date,end_date FROM pto_requests WHERE status='approved' AND start_date<=? AND end_date>=? ORDER BY user_name`,[today,today]);
