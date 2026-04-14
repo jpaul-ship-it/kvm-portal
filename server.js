@@ -418,6 +418,33 @@ async function initDb() {
     note TEXT NOT NULL,
     created_at TEXT DEFAULT (datetime('now'))
   )`); saveDb(); } catch(e){}
+  try { db.run(`CREATE TABLE IF NOT EXISTS project_costs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    po_number TEXT DEFAULT '',
+    category TEXT NOT NULL DEFAULT 'materials',
+    vendor TEXT DEFAULT '',
+    description TEXT NOT NULL,
+    quantity REAL DEFAULT 1,
+    unit_cost REAL DEFAULT 0,
+    total_cost REAL DEFAULT 0,
+    invoice_number TEXT DEFAULT '',
+    invoice_date TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    logged_by TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now'))
+  )`); saveDb(); } catch(e){}
+  try { db.run(`CREATE TABLE IF NOT EXISTS po_sequence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    month_key TEXT UNIQUE NOT NULL,
+    last_seq INTEGER DEFAULT 0
+  )`); saveDb(); } catch(e){}
+  try { db.run(`ALTER TABLE projects ADD COLUMN budget_materials REAL DEFAULT 0`); saveDb(); } catch(e){}
+  try { db.run(`ALTER TABLE projects ADD COLUMN budget_equipment REAL DEFAULT 0`); saveDb(); } catch(e){}
+  try { db.run(`ALTER TABLE projects ADD COLUMN budget_labor REAL DEFAULT 0`); saveDb(); } catch(e){}
+  try { db.run(`ALTER TABLE projects ADD COLUMN budget_subs REAL DEFAULT 0`); saveDb(); } catch(e){}
+  try { db.run(`INSERT OR IGNORE INTO settings (key,value) VALUES ('po_format','MMYY-###')`); saveDb(); } catch(e){}
+  try { db.run(`INSERT OR IGNORE INTO settings (key,value) VALUES ('po_prefix','')`); saveDb(); } catch(e){}
 
   const userCount = get('SELECT COUNT(*) as c FROM users');
   if (!userCount || userCount.c === 0) seedDatabase();
@@ -1407,6 +1434,7 @@ app.get('/api/projects/:id', requireAuth, (req, res) => {
     LEFT JOIN users u ON u.id=ph.user_id
     WHERE ph.project_id=? ORDER BY ph.work_date DESC, ph.created_at DESC`, [p.id]);
   p.notes = all('SELECT * FROM project_notes WHERE project_id=? ORDER BY created_at DESC', [p.id]);
+  p.costs = all('SELECT * FROM project_costs WHERE project_id=? ORDER BY invoice_date DESC, created_at DESC', [p.id]);
   p.total_hours = p.hours.reduce((s,h) => s + (h.hours||0), 0);
   res.json(p);
 });
@@ -1513,6 +1541,143 @@ app.post('/api/projects/:id/notes', requireAuth, (req, res) => {
 
 app.delete('/api/projects/:id/notes/:nid', requireAuth, (req, res) => {
   run('DELETE FROM project_notes WHERE id=? AND project_id=?', [req.params.nid, req.params.id]);
+  res.json({ok:true});
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── JOB COSTING ROUTES ───────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function generatePoNumber() {
+  const settings = getSettings();
+  const format = settings.po_format || 'MMYY-###';
+  const prefix = settings.po_prefix || '';
+  const now = new Date();
+  const mm = String(now.getMonth()+1).padStart(2,'0');
+  const yy = String(now.getFullYear()).slice(-2);
+  const monthKey = mm + yy;
+  // Get/increment sequence
+  let seq = get('SELECT last_seq FROM po_sequence WHERE month_key=?', [monthKey]);
+  if (!seq) { db.run('INSERT INTO po_sequence (month_key,last_seq) VALUES (?,1)', [monthKey]); saveDb(); seq = {last_seq:1}; }
+  else { db.run('UPDATE po_sequence SET last_seq=last_seq+1 WHERE month_key=?', [monthKey]); saveDb(); seq = get('SELECT last_seq FROM po_sequence WHERE month_key=?', [monthKey]); }
+  const num = seq.last_seq;
+  // Build number from format
+  const hashCount = (format.match(/#+/)||['###'])[0].length;
+  const numStr = String(num).padStart(hashCount,'0');
+  let result = format.replace('MMYY', mm+yy).replace('MM', mm).replace('YY', yy).replace(/#+/, numStr);
+  if (prefix) result = prefix + result;
+  return result;
+}
+
+// Get next PO preview (no increment)
+app.get('/api/po/next', requireAuth, (req, res) => {
+  const settings = getSettings();
+  const format = settings.po_format || 'MMYY-###';
+  const prefix = settings.po_prefix || '';
+  const now = new Date();
+  const mm = String(now.getMonth()+1).padStart(2,'0');
+  const yy = String(now.getFullYear()).slice(-2);
+  const monthKey = mm + yy;
+  const seq = get('SELECT last_seq FROM po_sequence WHERE month_key=?', [monthKey]);
+  const next = (seq ? seq.last_seq : 0) + 1;
+  const hashCount = (format.match(/#+/)||['###'])[0].length;
+  const numStr = String(next).padStart(hashCount,'0');
+  let result = format.replace('MMYY', mm+yy).replace('MM', mm).replace('YY', yy).replace(/#+/, numStr);
+  if (prefix) result = prefix + result;
+  res.json({ po_number: result });
+});
+
+// List costs for a project
+app.get('/api/projects/:id/costs', requireAuth, (req, res) => {
+  res.json(all('SELECT * FROM project_costs WHERE project_id=? ORDER BY invoice_date DESC, created_at DESC', [req.params.id]));
+});
+
+// Add cost entry
+app.post('/api/projects/:id/costs', requireAuth, (req, res) => {
+  const { category, vendor, description, quantity, unit_cost, total_cost, invoice_number, invoice_date, notes } = req.body;
+  if (!description) return res.status(400).json({error:'Description required'});
+  const po_number = generatePoNumber();
+  const logger = get('SELECT first_name,last_name FROM users WHERE id=?', [req.session.userId]);
+  const loggedBy = logger ? logger.first_name + (logger.last_name?' '+logger.last_name:'') : '';
+  const tc = total_cost || ((parseFloat(quantity)||1) * (parseFloat(unit_cost)||0));
+  const id = runGetId(`INSERT INTO project_costs (project_id,po_number,category,vendor,description,quantity,unit_cost,total_cost,invoice_number,invoice_date,notes,logged_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [req.params.id, po_number, category||'materials', vendor||'', description, parseFloat(quantity)||1, parseFloat(unit_cost)||0, parseFloat(tc)||0, invoice_number||'', invoice_date||'', notes||'', loggedBy]);
+  run("UPDATE projects SET updated_at=datetime('now') WHERE id=?", [req.params.id]);
+  res.json({id, po_number});
+});
+
+// Update cost entry
+app.put('/api/projects/:id/costs/:cid', requireAuth, (req, res) => {
+  const { category, vendor, description, quantity, unit_cost, total_cost, invoice_number, invoice_date, notes } = req.body;
+  const tc = total_cost || ((parseFloat(quantity)||1) * (parseFloat(unit_cost)||0));
+  run(`UPDATE project_costs SET category=?,vendor=?,description=?,quantity=?,unit_cost=?,total_cost=?,invoice_number=?,invoice_date=?,notes=? WHERE id=? AND project_id=?`,
+    [category||'materials', vendor||'', description, parseFloat(quantity)||1, parseFloat(unit_cost)||0, parseFloat(tc)||0, invoice_number||'', invoice_date||'', notes||'', req.params.cid, req.params.id]);
+  run("UPDATE projects SET updated_at=datetime('now') WHERE id=?", [req.params.id]);
+  res.json({ok:true});
+});
+
+app.delete('/api/projects/:id/costs/:cid', requireAuth, (req, res) => {
+  run('DELETE FROM project_costs WHERE id=? AND project_id=?', [req.params.cid, req.params.id]);
+  res.json({ok:true});
+});
+
+// AI invoice extraction
+app.post('/api/projects/:id/costs/extract', requireAuth, async (req, res) => {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return res.status(500).json({error:'ANTHROPIC_API_KEY not set'});
+  const { image_data, media_type, project_name, job_number } = req.body;
+  if (!image_data) return res.status(400).json({error:'No image data provided'});
+  try {
+    const https = require('https');
+    const payload = Buffer.from(JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1500,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: media_type||'image/jpeg', data: image_data } },
+          { type: 'text', text: `Extract all line items from this vendor invoice or receipt for a construction project.
+Project: ${project_name||'Unknown'}, Job #: ${job_number||'Unknown'}
+
+Return ONLY valid JSON, no markdown, no explanation:
+{
+  "vendor": "vendor name",
+  "invoice_number": "invoice or receipt number if visible",
+  "invoice_date": "YYYY-MM-DD format if visible, else empty string",
+  "lines": [
+    { "description": "item description", "quantity": 1, "unit_cost": 0.00, "total_cost": 0.00, "category": "materials" }
+  ]
+}
+Category must be one of: materials, equipment, subcontractors, labor, other.
+If a single lump sum, create one line. Parse all visible line items.` }
+        ]
+      }]
+    }));
+    const options = { hostname:'api.anthropic.com', path:'/v1/messages', method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','Content-Length':payload.length} };
+    const apiReq = https.request(options, apiRes => {
+      let data = '';
+      apiRes.on('data', chunk => data += chunk);
+      apiRes.on('end', () => {
+        try {
+          const r = JSON.parse(data);
+          const text = (r.content||[]).map(c=>c.text||'').join('');
+          const clean = text.replace(/```json|```/g,'').trim();
+          const parsed = JSON.parse(clean);
+          res.json(parsed);
+        } catch(e) { res.status(500).json({error:'Could not parse AI response: '+e.message}); }
+      });
+    });
+    apiReq.on('error', e => res.status(500).json({error:e.message}));
+    apiReq.write(payload); apiReq.end();
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// Update project budgets
+app.put('/api/projects/:id/budgets', requireAuth, (req, res) => {
+  const { budget_materials, budget_equipment, budget_labor, budget_subs } = req.body;
+  run(`UPDATE projects SET budget_materials=?,budget_equipment=?,budget_labor=?,budget_subs=?,updated_at=datetime('now') WHERE id=?`,
+    [parseFloat(budget_materials)||0, parseFloat(budget_equipment)||0, parseFloat(budget_labor)||0, parseFloat(budget_subs)||0, req.params.id]);
   res.json({ok:true});
 });
 
