@@ -2732,7 +2732,7 @@ async function openAddCustomer() {
   const spEl = $('custSalesperson');
   if (spEl) {
     spEl.innerHTML = '<option value="0">— Unassigned —</option>' + 
-      allUsers.map(u=>`<option value="${u.id}">${displayName(u)}</option>`).join('');
+      allUsers.filter(u=>['sales','manager','global_admin','admin'].includes(u.role_type||'')).map(u=>`<option value="${u.id}">${displayName(u)}</option>`).join('');
   }
   togglePartnerFields();
   openModal('customerModal');
