@@ -164,8 +164,6 @@ $('dashStats').innerHTML=`
   } catch(e){ console.error(e); }
 }
 
-
-function refreshAttendanceBrief(){ loadAttendanceBrief(); }
 // ─── ANNOUNCEMENTS ────────────────────────────────────────────────────────────
 function annItemHTML(a, showDelete) {
   const cls=a.priority==='urgent'?'urgent':a.priority==='info'?'info':'';
