@@ -222,12 +222,24 @@ async function initDb() {
     partner_checkin_instructions TEXT DEFAULT '',
     partner_billing_email TEXT DEFAULT '',
     partner_billing_notes TEXT DEFAULT '',
+    service_address TEXT DEFAULT '',
+    service_city TEXT DEFAULT '',
+    service_state TEXT DEFAULT '',
+    service_zip TEXT DEFAULT '',
+    service_email TEXT DEFAULT '',
+    alt_contact_name TEXT DEFAULT '',
+    alt_contact_phone TEXT DEFAULT '',
+    sms_number TEXT DEFAULT '',
+    credit_limit REAL DEFAULT 0,
+    price_level TEXT DEFAULT '',
+    map_code TEXT DEFAULT '',
     internal_notes TEXT DEFAULT '',
     status TEXT DEFAULT 'active',
     assigned_salesperson_id INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
   )`);
+  ['service_address','service_city','service_state','service_zip','service_email','alt_contact_name','alt_contact_phone','sms_number','credit_limit','price_level','map_code'].forEach(col=>{try{db.run(`ALTER TABLE customers ADD COLUMN ${col} TEXT DEFAULT ''`);}catch(e){}});
   db.run(`CREATE TABLE IF NOT EXISTS customer_sites (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     customer_id INTEGER NOT NULL,
