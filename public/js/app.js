@@ -698,7 +698,7 @@ async function saveUser() {
   const username=$('addUsername').value.trim(),password=$('addPass').value;
   if(!first_name||!username||!password) return showToast('Fill in required fields.','error');
   try {
-    await api('POST','/api/users',{username,password,first_name,last_name,role:$('addRole').value,department:$('addDept').value,oncall_dept:$('addOncallDept').value,oncall_role:$('addOncallRole').value,phone:$('addPhone').value,email:$('addEmail').is_admin:['admin','global_admin'].includes($('addRoleType').value),role_type:$('addRoleType')?$('addRoleType').value:'technician',,pto_total:parseInt($('addPtoTotal').value)||10,pto_left:parseInt($('addPtoLeft').value)||10,hire_date:$('addHireDate').value||'',avatar_color:avatarBg(first_name+last_name)});
+    await api('POST','/api/users',{username,password,first_name,last_name,role:$('addRole').value,department:$('addDept').value,oncall_dept:$('addOncallDept').value,oncall_role:$('addOncallRole').value,phone:$('addPhone').value,email:$('addEmail').value,is_admin:['admin','global_admin'].includes($('addRoleType').value),role_type:$('addRoleType')?$('addRoleType').value:'technician',pto_total:parseInt($('addPtoTotal').value)||10,pto_left:parseInt($('addPtoLeft').value)||10,hire_date:$('addHireDate').value||'',avatar_color:avatarBg(first_name+last_name)});
     closeModal('addUserModal'); ['addFirst','addLast','addUsername','addPass','addRole','addDept','addPhone','addEmail','addHireDate'].forEach(id=>$(id).value='');
     allUsers=[]; showToast('Employee added!','success'); renderAdminUsers();
   } catch(e){ showToast(e.message,'error'); }
