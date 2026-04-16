@@ -2754,6 +2754,17 @@ function openEditCustomer() {
   $('custBillingPhone').value = c.billing_phone || '';
   $('custBillingFax').value = c.billing_fax || '';
   $('custBillingEmail').value = c.billing_email || '';
+  if($('custServiceAddr')) $('custServiceAddr').value = c.service_address||'';
+  if($('custServiceCity')) $('custServiceCity').value = c.service_city||'';
+  if($('custServiceState')) $('custServiceState').value = c.service_state||'';
+  if($('custServiceZip')) $('custServiceZip').value = c.service_zip||'';
+  if($('custServiceEmail')) $('custServiceEmail').value = c.service_email||'';
+  if($('custSmsNumber')) $('custSmsNumber').value = c.sms_number||'';
+  if($('custAltContact')) $('custAltContact').value = c.alt_contact_name||'';
+  if($('custAltPhone')) $('custAltPhone').value = c.alt_contact_phone||'';
+  if($('custCreditLimit')) $('custCreditLimit').value = c.credit_limit||0;
+  if($('custPriceLevel')) $('custPriceLevel').value = c.price_level||'';
+  if($('custMapCode')) $('custMapCode').value = c.map_code||'';
   $('custInternalNotes').value = c.internal_notes || '';
   $('custTaxExempt').checked = !!c.tax_exempt;
   $('custTaxExemptNum').value = c.tax_exempt_number || '';
@@ -2804,6 +2815,17 @@ async function saveCustomer() {
     partner_work_order_instructions: $('custPartnerWOInstructions').value,
     partner_billing_notes: $('custPartnerBillingNotes').value,
     partner_billing_email: $('custPartnerBillingEmail').value,
+    service_address: $('custServiceAddr').value,
+    service_city: $('custServiceCity').value,
+    service_state: ($('custServiceState').value||'').toUpperCase(),
+    service_zip: $('custServiceZip').value,
+    service_email: $('custServiceEmail').value,
+    alt_contact_name: $('custAltContact').value,
+    alt_contact_phone: $('custAltPhone').value,
+    sms_number: $('custSmsNumber').value,
+    credit_limit: parseFloat($('custCreditLimit').value)||0,
+    price_level: $('custPriceLevel').value,
+    map_code: $('custMapCode').value,
     internal_notes: $('custInternalNotes').value,
     assigned_salesperson_id: parseInt($('custSalesperson').value) || 0,
     status: 'active'
