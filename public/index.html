@@ -426,56 +426,144 @@
       <!-- ADMIN: SETTINGS -->
       <div class="page" id="page-adminSettings">
         <div class="page-header"><h1 class="page-title">PORTAL SETTINGS</h1></div>
-        <div class="alert alert-warning" style="margin-bottom:1rem">
-          &#9888; <strong>Data Persistence:</strong> Render free tier resets data on redeploy.
-          Upgrade to Render Starter ($7/mo), add a Persistent Disk at mount path <strong>/data</strong>,
-          and set environment variable <strong>RENDER_DISK_PATH=/data</strong>.
-          <a href="https://render.com/docs/disks" target="_blank" style="color:var(--amber);margin-left:4px">Render Disk Docs &#8599;</a>
+
+        <!-- Settings sub-tabs -->
+        <div class="tabs" style="margin-bottom:1rem;flex-wrap:wrap">
+          <div class="tab active" data-settings-tab="general"  onclick="setSettingsTab('general',this)">General</div>
+          <div class="tab"        data-settings-tab="skills"   onclick="setSettingsTab('skills',this)">Skills</div>
+          <div class="tab"        data-settings-tab="trucks"   onclick="setSettingsTab('trucks',this)">Trucks / Crews</div>
+          <div class="tab"        data-settings-tab="gl"       onclick="setSettingsTab('gl',this)">GL Defaults</div>
+          <div class="tab"        data-settings-tab="coa"      onclick="setSettingsTab('coa',this)">Chart of Accounts</div>
+          <div class="tab"        data-settings-tab="backup"   onclick="setSettingsTab('backup',this)">Backup</div>
         </div>
-        <div class="card">
-          <div class="card-header"><span class="card-title">Email Notifications — Microsoft 365</span></div>
-          <div id="emailTestResult" style="display:none;margin-bottom:10px"></div>
-          <div class="form-row">
-            <div class="form-group"><label>SMTP Host</label><input type="text" id="smtpHost" placeholder="smtp.office365.com" /></div>
-            <div class="form-group"><label>SMTP Port</label><input type="number" id="smtpPort" placeholder="587" /></div>
+
+        <!-- ── GENERAL TAB (existing content) ── -->
+        <div class="settings-subpage" id="settings-sub-general">
+          <div class="alert alert-warning" style="margin-bottom:1rem">
+            &#9888; <strong>Data Persistence:</strong> Render free tier resets data on redeploy.
+            Upgrade to Render Starter ($7/mo), add a Persistent Disk at mount path <strong>/data</strong>,
+            and set environment variable <strong>RENDER_DISK_PATH=/data</strong>.
+            <a href="https://render.com/docs/disks" target="_blank" style="color:var(--amber);margin-left:4px">Render Disk Docs &#8599;</a>
           </div>
-          <div class="form-row">
-            <div class="form-group"><label>Email / Username</label><input type="email" id="smtpUser" placeholder="portal@kvmdoors.com" /></div>
-            <div class="form-group"><label>Password or App Password</label><input type="password" id="smtpPass" placeholder="&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;" /></div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">Email Notifications — Microsoft 365</span></div>
+            <div id="emailTestResult" style="display:none;margin-bottom:10px"></div>
+            <div class="form-row">
+              <div class="form-group"><label>SMTP Host</label><input type="text" id="smtpHost" placeholder="smtp.office365.com" /></div>
+              <div class="form-group"><label>SMTP Port</label><input type="number" id="smtpPort" placeholder="587" /></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>Email / Username</label><input type="email" id="smtpUser" placeholder="portal@kvmdoors.com" /></div>
+              <div class="form-group"><label>Password or App Password</label><input type="password" id="smtpPass" placeholder="&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;&#x2022;" /></div>
+            </div>
+            <div class="form-group"><label>From Name</label><input type="text" id="smtpFromName" placeholder="KVM Door Systems Portal" /></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+              <button class="btn btn-primary" onclick="saveSmtpSettings()">Save Settings</button>
+              <button class="btn btn-ghost" onclick="testEmail()">&#9993; Send Test Email to Me</button>
+            </div>
           </div>
-          <div class="form-group"><label>From Name</label><input type="text" id="smtpFromName" placeholder="KVM Door Systems Portal" /></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
-            <button class="btn btn-primary" onclick="saveSmtpSettings()">Save Settings</button>
-            <button class="btn btn-ghost" onclick="testEmail()">&#9993; Send Test Email to Me</button>
+          <div class="card">
+            <div class="card-header"><span class="card-title">AI Quote Assistant — API Key</span></div>
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">Set your Anthropic API key to enable AI auto-fill in the Sales quote builder. The key is stored as a server environment variable on Render — never exposed to the browser.</p>
+            <div class="alert alert-warning" style="font-size:12px;">
+              To set the API key: Go to your <strong>Render dashboard → your kvm-portal service → Environment</strong> → add variable <strong>ANTHROPIC_API_KEY</strong> with your key value (starts with sk-ant-...). Then redeploy.
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">QuickBooks Customer Import</span></div>
+            <button class="btn btn-ghost" onclick="openModal('qbImportModal')">&#8659; Import from QB IIF File</button>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">PO Number Format</span></div>
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">Configure how purchase order numbers are generated. Use <strong>MMYY</strong> for month/year, <strong>###</strong> for the sequence number (add more # for more digits).</p>
+            <div class="form-row">
+              <div class="form-group"><label>PO Format</label><input type="text" id="poFormat" placeholder="MMYY-###" /></div>
+              <div class="form-group"><label>Prefix (optional)</label><input type="text" id="poPrefix" placeholder="e.g. KVM- or leave blank" /></div>
+            </div>
+            <div style="font-size:12px;color:var(--text-faint);margin-bottom:.75rem" id="poFormatPreview"></div>
+            <button class="btn btn-primary" onclick="savePoSettings()">Save PO Settings</button>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">Daily Attendance Emails</span></div>
+            <div id="dailyEmailResult" style="display:none;margin-bottom:10px"></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-ghost" onclick="testDailyEmail('technicians')">&#9993; Test — Technician Email Now</button>
+              <button class="btn btn-ghost" onclick="testDailyEmail('office')">&#9993; Test — Office Email Now</button>
+            </div>
           </div>
         </div>
-        <div class="card">
-          <div class="card-header"><span class="card-title">AI Quote Assistant — API Key</span></div>
-          <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">Set your Anthropic API key to enable AI auto-fill in the Sales quote builder. The key is stored as a server environment variable on Render — never exposed to the browser.</p>
-          <div class="alert alert-warning" style="font-size:12px;">
-            To set the API key: Go to your <strong>Render dashboard → your kvm-portal service → Environment</strong> → add variable <strong>ANTHROPIC_API_KEY</strong> with your key value (starts with sk-ant-...). Then redeploy.
+
+        <!-- ── SKILLS TAB ── -->
+        <div class="settings-subpage" id="settings-sub-skills" style="display:none">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Skills Master List</span>
+              <button class="btn btn-primary btn-sm" onclick="openAddSkill()">+ Add Skill</button>
+            </div>
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">
+              These skills appear as checkboxes on employee profiles and on project required-skills selection.
+              Skills are grouped by category. Inactive skills are hidden from selection but preserved for historical data.
+            </p>
+            <div id="skillsAdminList"></div>
           </div>
         </div>
-        <div class="card">
-          <div class="card-header"><span class="card-title">QuickBooks Customer Import</span></div>
-          <button class="btn btn-ghost" onclick="openModal('qbImportModal')">&#8659; Import from QB IIF File</button>
-        </div>
-        <div class="card">
-          <div class="card-header"><span class="card-title">PO Number Format</span></div>
-          <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">Configure how purchase order numbers are generated. Use <strong>MMYY</strong> for month/year, <strong>###</strong> for the sequence number (add more # for more digits).</p>
-          <div class="form-row">
-            <div class="form-group"><label>PO Format</label><input type="text" id="poFormat" placeholder="MMYY-###" /></div>
-            <div class="form-group"><label>Prefix (optional)</label><input type="text" id="poPrefix" placeholder="e.g. KVM- or leave blank" /></div>
+
+        <!-- ── TRUCKS TAB ── -->
+        <div class="settings-subpage" id="settings-sub-trucks" style="display:none">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Trucks / Crews</span>
+              <button class="btn btn-primary btn-sm" onclick="openAddTruck()">+ Add Truck</button>
+            </div>
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">
+              Each truck is a crew anchored by a lead technician. Row names on the schedule will display the lead's name.
+              Use Shop / Flex / Delivery row types for non-crew rows. Temporary crews only appear on the schedule during
+              their date range.
+            </p>
+            <div id="trucksAdminList"></div>
           </div>
-          <div style="font-size:12px;color:var(--text-faint);margin-bottom:.75rem" id="poFormatPreview"></div>
-          <button class="btn btn-primary" onclick="savePoSettings()">Save PO Settings</button>
         </div>
-        <div class="card">
-          <div class="card-header"><span class="card-title">Daily Attendance Emails</span></div>
-          <div id="dailyEmailResult" style="display:none;margin-bottom:10px"></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn btn-ghost" onclick="testDailyEmail('technicians')">&#9993; Test — Technician Email Now</button>
-            <button class="btn btn-ghost" onclick="testDailyEmail('office')">&#9993; Test — Office Email Now</button>
+
+        <!-- ── GL DEFAULTS TAB ── -->
+        <div class="settings-subpage" id="settings-sub-gl" style="display:none">
+          <div class="card">
+            <div class="card-header"><span class="card-title">Default GL Accounts per Bill Category</span></div>
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">
+              When a bill line doesn't have a specific GL account assigned, these defaults are used. Type an account name
+              that matches exactly what's in your QuickBooks file (e.g., "5100 · COGS — Materials").
+            </p>
+            <div id="glDefaultsForm"></div>
+            <button class="btn btn-primary" onclick="saveGlDefaults()">Save GL Defaults</button>
+          </div>
+        </div>
+
+        <!-- ── CHART OF ACCOUNTS TAB ── -->
+        <div class="settings-subpage" id="settings-sub-coa" style="display:none">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">Chart of Accounts</span>
+              <div style="display:flex;gap:8px">
+                <button class="btn btn-ghost btn-sm" onclick="openCoaUpload()">&#8659; Upload from QB (CSV/IIF)</button>
+                <button class="btn btn-primary btn-sm" onclick="openAddCoa()">+ Add Account</button>
+              </div>
+            </div>
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">
+              Your QuickBooks Chart of Accounts. Used when coding bill lines to GL accounts for the QB export.
+              Upload the accounts once from QB, and the portal will stay in sync with it.
+            </p>
+            <div id="coaAdminList"></div>
+          </div>
+        </div>
+
+        <!-- ── BACKUP TAB ── -->
+        <div class="settings-subpage" id="settings-sub-backup" style="display:none">
+          <div class="card">
+            <div class="card-header"><span class="card-title">Download Database Backup</span></div>
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">
+              Download the full SQLite database file. Keep a copy before every major deploy. The file is approximately
+              the size of all your users, customers, quotes, projects, timeclock entries and settings combined.
+            </p>
+            <button class="btn btn-primary" onclick="downloadDbBackup()">&#8659; Download kvm.db</button>
           </div>
         </div>
       </div>
@@ -1036,6 +1124,39 @@
     <div class="form-row"><div class="form-group"><label>Phone</label><input type="tel" id="editPhone" /></div><div class="form-group"><label>Email</label><input type="email" id="editEmail" /></div></div>
     <div class="form-row"><div class="form-group"><label>PTO Days / Year</label><input type="number" id="editPtoTotal" min="0" /></div><div class="form-group"><label>PTO Days Remaining</label><input type="number" id="editPtoLeft" min="0" /></div></div>
     <div class="form-row"><div class="form-group"><label>Hire Date</label><input type="date" id="editHireDate" /></div><div class="form-group"></div></div>
+
+    <!-- Phase 1A: Skills, Labor Rate, Sales Department -->
+    <div class="modal-section" style="margin-top:1rem;padding-top:.75rem;border-top:1px solid var(--border);font-family:Oswald,sans-serif;font-size:13px;letter-spacing:2px;color:var(--amber);text-transform:uppercase">Skills &amp; Pay</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Burdened Labor Rate ($/hr)</label>
+        <input type="number" id="editLaborRate" step="0.01" min="0" placeholder="0.00" />
+        <div id="editLaborRateMeta" style="font-size:11px;color:var(--text-faint);margin-top:3px"></div>
+      </div>
+      <div class="form-group">
+        <label>Sales Department</label>
+        <select id="editSalesDept">
+          <option value="">— Not in sales / hybrid —</option>
+          <option value="auto_entry">Auto / Entry Doors</option>
+          <option value="new_construction">New Construction</option>
+          <option value="aftermarket">Aftermarket</option>
+        </select>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:3px">Pre-fills on projects this salesperson creates. Leave blank for hybrid / non-sales.</div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;justify-content:space-between">
+        <span>Skills</span>
+        <span style="font-size:11px;font-weight:normal;color:var(--text-muted)">
+          <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+            <input type="checkbox" id="editSkillsCheckAll" onchange="toggleAllSkills('edit',this.checked)" />
+            <span>Check all skills</span>
+          </label>
+        </span>
+      </label>
+      <div id="editSkillsGroups" style="background:#0a0a0a;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;max-height:280px;overflow-y:auto"></div>
+    </div>
+
     <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('editUserModal')">Cancel</button><button class="btn btn-primary" onclick="saveEditUser()">Save Changes</button></div>
   </div>
 </div>
@@ -1229,6 +1350,37 @@
     <div class="modal-section">Scope &amp; Notes</div>
     <div class="form-group"><label>Brief Scope of Work</label><textarea id="projModalScopeBrief" rows="3" placeholder="Brief description of work to be performed..."></textarea></div>
     <div class="form-group"><label>Internal Notes</label><textarea id="projModalNotes" rows="2" placeholder="Internal notes, special conditions..."></textarea></div>
+
+    <!-- Phase 1A: Classification -->
+    <div class="modal-section" style="margin-top:.75rem;padding-top:.75rem;border-top:1px solid var(--border)">Classification</div>
+    <div class="form-group">
+      <label>Revenue Department</label>
+      <select id="projModalRevenueDept">
+        <option value="">— Select Department —</option>
+        <option value="auto_entry">Auto / Entry Doors</option>
+        <option value="new_construction">New Construction</option>
+        <option value="aftermarket">Aftermarket</option>
+        <option value="service">Service</option>
+      </select>
+      <div style="font-size:11px;color:var(--text-faint);margin-top:3px">Used for quarterly department profitability reports. Pre-filled from salesperson if available.</div>
+    </div>
+    <div class="form-group">
+      <label>Work Types <span style="font-weight:normal;font-size:11px;color:var(--text-muted)">— what scope the crew will execute</span></label>
+      <div id="projModalWorkTypes" style="background:#0a0a0a;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;display:grid;grid-template-columns:1fr 1fr;gap:4px"></div>
+    </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;justify-content:space-between">
+        <span>Required Skills <span style="font-weight:normal;font-size:11px;color:var(--text-muted)">— specific certifications/capabilities</span></span>
+        <span style="font-size:11px;font-weight:normal;color:var(--text-muted)">
+          <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer">
+            <input type="checkbox" id="projSkillsCheckAll" onchange="toggleAllSkills('proj',this.checked)" />
+            <span>Check all</span>
+          </label>
+        </span>
+      </label>
+      <div id="projModalRequiredSkills" style="background:#0a0a0a;border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;max-height:240px;overflow-y:auto"></div>
+    </div>
+
     <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('projectModal')">Cancel</button><button class="btn btn-primary" onclick="saveProject()">Save Project</button></div>
   </div>
 </div>
@@ -1339,6 +1491,126 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('aiInvoiceModal')">Cancel</button>
       <button class="btn btn-primary" id="aiInvoiceConfirmBtn" style="display:none" onclick="confirmAiInvoice()">✓ Save Selected Items</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ PHASE 1A MODALS ═══ -->
+<!-- Skill (add/edit) -->
+<div class="modal-overlay" id="skillModal" onclick="closeOnOverlay(event,'skillModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title" id="skillModalTitle">Add Skill</span><button class="modal-close" onclick="closeModal('skillModal')">&#x2715;</button></div>
+    <input type="hidden" id="skillModalId" />
+    <div class="form-group"><label>Skill Label *</label><input type="text" id="skillModalLabel" placeholder="e.g. Renlita" /></div>
+    <div class="form-group"><label>Internal Key *</label><input type="text" id="skillModalKey" placeholder="e.g. renlita (letters, numbers, underscores)" /><div style="font-size:11px;color:var(--text-faint);margin-top:3px">Cannot be changed after creation.</div></div>
+    <div class="form-group"><label>Category</label>
+      <select id="skillModalCategory">
+        <option value="doors_sectional_coiling">Doors — Sectional &amp; Coiling</option>
+        <option value="doors_high_speed_specialty">Doors — High Speed &amp; Specialty</option>
+        <option value="dock_equipment">Dock Equipment</option>
+        <option value="auto_entry">Auto / Entry</option>
+        <option value="operator_electrical">Operator / Electrical</option>
+        <option value="specialty_structures">Specialty Structures</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Sort Order</label><input type="number" id="skillModalSort" value="10" min="0" /></div>
+      <div class="form-group"><label>Active</label>
+        <select id="skillModalActive"><option value="1">Active</option><option value="0">Inactive</option></select>
+      </div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('skillModal')">Cancel</button><button class="btn btn-primary" onclick="saveSkill()">Save Skill</button></div>
+  </div>
+</div>
+
+<!-- Truck (add/edit) -->
+<div class="modal-overlay" id="truckModal" onclick="closeOnOverlay(event,'truckModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title" id="truckModalTitle">Add Truck</span><button class="modal-close" onclick="closeModal('truckModal')">&#x2715;</button></div>
+    <input type="hidden" id="truckModalId" />
+    <div class="form-group"><label>Row Type</label>
+      <select id="truckModalRowType" onchange="onTruckRowTypeChange()">
+        <option value="truck">Truck / Crew</option>
+        <option value="shop">Shop</option>
+        <option value="delivery">Delivery</option>
+        <option value="flex">Flex</option>
+        <option value="temp_crew">Temporary Crew</option>
+      </select>
+    </div>
+    <div class="form-group" id="truckModalLeadWrap">
+      <label>Lead Technician</label>
+      <select id="truckModalLead"></select>
+      <div style="font-size:11px;color:var(--text-faint);margin-top:3px">The row label on the schedule will display this person's name.</div>
+    </div>
+    <div class="form-row" id="truckModalTempDateRow" style="display:none">
+      <div class="form-group"><label>Temp Start Date</label><input type="date" id="truckModalTempStart" /></div>
+      <div class="form-group"><label>Temp End Date</label><input type="date" id="truckModalTempEnd" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Sort Order</label><input type="number" id="truckModalSort" value="10" min="0" /></div>
+      <div class="form-group"><label>Active</label>
+        <select id="truckModalActive"><option value="1">Active</option><option value="0">Parked / Retired</option></select>
+      </div>
+    </div>
+    <div class="form-group"><label>Notes</label><input type="text" id="truckModalNotes" placeholder="Optional — e.g. 'Hollow metal truck'" /></div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('truckModal')">Cancel</button><button class="btn btn-primary" onclick="saveTruck()">Save</button></div>
+  </div>
+</div>
+
+<!-- Chart of Accounts (add/edit) -->
+<div class="modal-overlay" id="coaModal" onclick="closeOnOverlay(event,'coaModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title" id="coaModalTitle">Add Account</span><button class="modal-close" onclick="closeModal('coaModal')">&#x2715;</button></div>
+    <input type="hidden" id="coaModalId" />
+    <div class="form-row">
+      <div class="form-group"><label>Account Number</label><input type="text" id="coaModalNumber" placeholder="e.g. 5100" /></div>
+      <div class="form-group" style="flex:2"><label>Account Name *</label><input type="text" id="coaModalName" placeholder="e.g. COGS — Materials" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Account Type</label>
+        <select id="coaModalType">
+          <option value="">—</option>
+          <option value="Expense">Expense</option>
+          <option value="Cost of Goods Sold">Cost of Goods Sold</option>
+          <option value="Income">Income</option>
+          <option value="Asset">Asset</option>
+          <option value="Liability">Liability</option>
+          <option value="Equity">Equity</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Sort Order</label><input type="number" id="coaModalSort" value="0" /></div>
+    </div>
+    <div class="form-group"><label>Active</label>
+      <select id="coaModalActive"><option value="1">Active</option><option value="0">Inactive</option></select>
+    </div>
+    <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('coaModal')">Cancel</button><button class="btn btn-primary" onclick="saveCoa()">Save</button></div>
+  </div>
+</div>
+
+<!-- Chart of Accounts Upload -->
+<div class="modal-overlay" id="coaUploadModal" onclick="closeOnOverlay(event,'coaUploadModal')">
+  <div class="modal">
+    <div class="modal-header"><span class="modal-title">Upload Chart of Accounts</span><button class="modal-close" onclick="closeModal('coaUploadModal')">&#x2715;</button></div>
+    <div class="alert" style="background:#111;border:1px solid var(--amber-dim);color:var(--text-muted);margin-bottom:1rem;font-size:12px">
+      Export your Chart of Accounts from QuickBooks as a CSV or IIF file, then paste the content below.
+      Expected columns: <strong>Account Number</strong>, <strong>Account Name</strong>, optionally <strong>Type</strong>.
+      For IIF, the <strong>ACCNT</strong> rows will be imported (NAME, ACCNTTYPE, ACCNUM fields).
+    </div>
+    <div class="form-group">
+      <label>Paste CSV or IIF content</label>
+      <textarea id="coaUploadText" rows="10" placeholder="Paste file content here..." style="font-family:monospace;font-size:12px"></textarea>
+    </div>
+    <div class="form-group">
+      <label>
+        <input type="checkbox" id="coaUploadReplace" />
+        Replace existing accounts (deactivates current list before import)
+      </label>
+    </div>
+    <div id="coaUploadStatus" style="font-size:13px;margin-bottom:.5rem"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('coaUploadModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="processCoaUpload()">Import</button>
     </div>
   </div>
 </div>
