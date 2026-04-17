@@ -852,6 +852,27 @@ async function openEditUser(id) {
   const adminNote = $('editAdminOnlyNote');
   if (adminNote) adminNote.style.display = limitedMode ? 'block' : 'none';
 
+  // Phase 1A: Load skills, labor rate, sales department
+  try {
+    const ext = await api('GET', '/api/users/' + u.id + '/extended');
+    renderSkillsCheckboxes('edit', ext.skills || []);
+    if ($('editLaborRate')) $('editLaborRate').value = ext.labor_rate_burdened || '';
+    if ($('editSalesDept')) $('editSalesDept').value = ext.sales_department || '';
+    const meta = $('editLaborRateMeta');
+    if (meta) {
+      if (ext.labor_rate_updated_at) {
+        meta.textContent = 'Last updated ' + fmtDate(ext.labor_rate_updated_at) + (ext.labor_rate_updated_by_name ? ' by ' + ext.labor_rate_updated_by_name : '');
+      } else {
+        meta.textContent = 'Not set yet.';
+      }
+    }
+    const checkAll = $('editSkillsCheckAll');
+    if (checkAll) checkAll.checked = false;
+  } catch(e) {
+    // Manager may not have permission; render empty
+    renderSkillsCheckboxes('edit', []);
+  }
+
   openModal('editUserModal');
 }
 
@@ -883,6 +904,17 @@ async function saveEditUser() {
     closeModal('editUserModal');
     allUsers = []; // clear cache so next load is fresh
     showToast('Employee updated!', 'success');
+    // Phase 1A: save extended fields (skills, labor rate, sales dept)
+    try {
+      const selectedSkills = collectCheckedSkills('edit');
+      await api('PUT', '/api/users/' + id + '/skills', { skills: selectedSkills });
+      const laborInput = $('editLaborRate');
+      if (laborInput && laborInput.value !== '') {
+        await api('PUT', '/api/users/' + id + '/labor-rate', { labor_rate_burdened: parseFloat(laborInput.value)||0 });
+      }
+      const salesDept = $('editSalesDept') ? $('editSalesDept').value : '';
+      await api('PUT', '/api/users/' + id + '/sales-dept', { sales_department: salesDept });
+    } catch(e) { /* silent — extended fields optional */ }
     // Refresh whichever page is visible
     const activePage = document.querySelector('.page.active');
     if (activePage) {
@@ -3533,6 +3565,19 @@ async function openAddProject() {
   if (foremanSel) foremanSel.innerHTML = '<option value="">— No Foreman —</option>' + allUsers.map(u=>`<option value="${u.id}">${displayName(u)}</option>`).join('');
 
   renderTechCheckboxes([]);
+  // Phase 1A: work types, required skills, revenue department
+  await renderWorkTypesCheckboxes([]);
+  await renderSkillsCheckboxes('proj', []);
+  if ($('projModalRevenueDept')) {
+    // Prefill from current user's sales dept
+    try {
+      const me = currentUser || {};
+      const ext = me.id ? await api('GET','/api/users/'+me.id+'/extended').catch(()=>null) : null;
+      $('projModalRevenueDept').value = (ext && ext.sales_department) || '';
+    } catch(e) { $('projModalRevenueDept').value = ''; }
+  }
+  const projCheckAll = $('projSkillsCheckAll');
+  if (projCheckAll) projCheckAll.checked = false;
   openModal('projectModal');
 }
 
@@ -3568,6 +3613,12 @@ async function openEditProject() {
   if (foremanSel) { foremanSel.innerHTML = '<option value="">— No Foreman —</option>' + allUsers.map(u=>`<option value="${u.id}">${displayName(u)}</option>`).join(''); foremanSel.value = p.foreman_id || ''; }
 
   renderTechCheckboxes(p.assigned_techs || []);
+  // Phase 1A: classification
+  await renderWorkTypesCheckboxes(p.work_types || []);
+  await renderSkillsCheckboxes('proj', p.required_skills || []);
+  if ($('projModalRevenueDept')) $('projModalRevenueDept').value = p.revenue_department || '';
+  const projCheckAll = $('projSkillsCheckAll');
+  if (projCheckAll) projCheckAll.checked = false;
   openModal('projectModal');
 }
 
@@ -3633,16 +3684,32 @@ async function saveProject() {
   };
   if (!payload.project_name) return showToast('Project name is required.', 'error');
   try {
+    let savedId;
     if (id) {
       await api('PUT', '/api/projects/' + id, payload);
+      savedId = id;
       showToast('Project updated!', 'success');
-      closeModal('projectModal');
-      await loadProjectDetail();
     } else {
       const r = await api('POST', '/api/projects', payload);
+      savedId = r.id;
       showToast('Project created!', 'success');
-      closeModal('projectModal');
-      openProjectDetail(r.id);
+    }
+    // Phase 1A: save work-meta (work types, required skills, revenue department)
+    try {
+      const workTypes = collectCheckedWorkTypes();
+      const requiredSkills = collectCheckedSkills('proj');
+      const revenueDept = $('projModalRevenueDept') ? $('projModalRevenueDept').value : '';
+      await api('PUT', '/api/projects/' + savedId + '/work-meta', {
+        work_types: workTypes,
+        required_skills: requiredSkills,
+        revenue_department: revenueDept
+      });
+    } catch(e) { /* silent — non-critical */ }
+    closeModal('projectModal');
+    if (id) {
+      await loadProjectDetail();
+    } else {
+      openProjectDetail(savedId);
       loadProjects();
     }
   } catch(e) { showToast(e.message, 'error'); }
@@ -4547,9 +4614,526 @@ try {
    'deleteCallin','deleteAttEvent','openQuarterlyReport','loadQuarterlyReport',
    'printQuarterlyReport','runPerfectAttendanceCheck','postPerfectAttendance',
    'printPerfectAttendance','openSelfCallin','submitSelfCallin','openAwardAchievement',
-   'saveAchievement','refreshAttendanceBrief'
+   'saveAchievement','refreshAttendanceBrief',
+   // Phase 1A additions
+   'setSettingsTab','downloadDbBackup','renderSkillsCheckboxes','toggleAllSkills',
+   'collectCheckedSkills','renderWorkTypesCheckboxes','collectCheckedWorkTypes',
+   'loadSkillsAdmin','openAddSkill','openEditSkill','saveSkill','deleteSkill',
+   'loadTrucksAdmin','openAddTruck','openEditTruck','saveTruck','deleteTruck','onTruckRowTypeChange',
+   'loadCoaAdmin','openAddCoa','openEditCoa','saveCoa','deleteCoa','openCoaUpload','processCoaUpload',
+   'loadGlDefaults','saveGlDefaults'
   ].forEach(function(name){
     try { if (typeof eval(name) === 'function') window[name] = eval(name); } catch(e) {}
   });
   console.log('[KVM] Functions exposed on window');
 } catch(e) { console.error('[KVM] Exposure failed:', e); }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PHASE 1A — FOUNDATIONS: Settings sub-tabs, Skills, Trucks, CoA, Backup ══
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Caches
+let _skillsCache = null;
+let _skillCategoriesCache = null;
+let _workTypesCache = null;
+let _billCategoriesCache = null;
+let _revenueDeptsCache = null;
+
+async function loadSkillsCache() {
+  if (_skillsCache && _skillCategoriesCache) return;
+  try { _skillsCache = await api('GET','/api/skills'); } catch(e){ _skillsCache = []; }
+  try { _skillCategoriesCache = await api('GET','/api/skillcategories'); } catch(e){ _skillCategoriesCache = []; }
+}
+async function loadWorkTypesCache() {
+  if (_workTypesCache) return;
+  try { _workTypesCache = await api('GET','/api/worktypes'); } catch(e){ _workTypesCache = []; }
+}
+async function loadBillCategoriesCache() {
+  if (_billCategoriesCache) return;
+  try { _billCategoriesCache = await api('GET','/api/billcategories'); } catch(e){ _billCategoriesCache = []; }
+}
+
+// ─── Settings sub-tabs ───────────────────────────────────────────────────────
+function setSettingsTab(tab, el) {
+  document.querySelectorAll('.settings-subpage').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('[data-settings-tab]').forEach(t => t.classList.remove('active'));
+  const panel = document.getElementById('settings-sub-' + tab);
+  if (panel) panel.style.display = 'block';
+  if (el) el.classList.add('active');
+  // Lazy-load content per tab
+  if (tab === 'skills') loadSkillsAdmin();
+  if (tab === 'trucks') loadTrucksAdmin();
+  if (tab === 'gl')     loadGlDefaults();
+  if (tab === 'coa')    loadCoaAdmin();
+}
+
+// ─── Skills checkboxes (used on employee + project modals) ───────────────────
+async function renderSkillsCheckboxes(prefix, selectedKeys) {
+  await loadSkillsCache();
+  const el = document.getElementById(prefix === 'edit' ? 'editSkillsGroups' : 'projModalRequiredSkills');
+  if (!el) return;
+  const selected = new Set((selectedKeys||[]).map(String));
+  const byCat = {};
+  (_skillsCache||[]).forEach(s => {
+    const c = s.category || 'other';
+    if (!byCat[c]) byCat[c] = [];
+    byCat[c].push(s);
+  });
+  const cats = (_skillCategoriesCache||[]).slice();
+  // Include any categories not in the master list (defensive)
+  Object.keys(byCat).forEach(k => { if (!cats.find(c => c.key === k)) cats.push({key:k,label:k}); });
+
+  let html = '';
+  cats.forEach(cat => {
+    const items = byCat[cat.key] || [];
+    if (!items.length) return;
+    html += `<div style="margin-bottom:.5rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;font-family:Oswald,sans-serif;font-size:12px;letter-spacing:1px;color:var(--amber);text-transform:uppercase;margin-bottom:4px;padding-bottom:2px;border-bottom:1px solid var(--border)">
+        <span>${cat.label}</span>
+        <label style="font-size:10px;font-weight:normal;color:var(--text-muted);cursor:pointer;text-transform:none;letter-spacing:0">
+          <input type="checkbox" class="skill-cat-checkall" data-prefix="${prefix}" data-cat="${cat.key}" onchange="toggleCategorySkills('${prefix}','${cat.key}',this.checked)" />
+          <span>Check category</span>
+        </label>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px">
+        ${items.map(s => `<label style="display:flex;align-items:center;gap:6px;padding:3px 6px;font-size:13px;cursor:pointer;border-radius:4px;${selected.has(s.skill_key)?'background:var(--amber-bg2);border:1px solid var(--amber-dim)':'border:1px solid transparent'}">
+          <input type="checkbox" class="skill-chk" data-prefix="${prefix}" data-cat="${cat.key}" value="${s.skill_key}" ${selected.has(s.skill_key)?'checked':''} onchange="this.closest('label').style.background=this.checked?'var(--amber-bg2)':'transparent';this.closest('label').style.border='1px solid '+(this.checked?'var(--amber-dim)':'transparent')" />
+          <span>${s.label}</span>
+        </label>`).join('')}
+      </div>
+    </div>`;
+  });
+  if (!html) html = '<div style="font-size:12px;color:var(--text-muted);padding:.5rem">No skills defined. An admin can add them in Settings → Skills.</div>';
+  el.innerHTML = html;
+}
+
+function toggleAllSkills(prefix, checked) {
+  const container = document.getElementById(prefix === 'edit' ? 'editSkillsGroups' : 'projModalRequiredSkills');
+  if (!container) return;
+  container.querySelectorAll('input.skill-chk').forEach(cb => {
+    cb.checked = checked;
+    const lbl = cb.closest('label');
+    if (lbl) {
+      lbl.style.background = checked ? 'var(--amber-bg2)' : 'transparent';
+      lbl.style.border = '1px solid ' + (checked ? 'var(--amber-dim)' : 'transparent');
+    }
+  });
+  container.querySelectorAll('input.skill-cat-checkall').forEach(cb => { cb.checked = checked; });
+}
+
+function toggleCategorySkills(prefix, cat, checked) {
+  const container = document.getElementById(prefix === 'edit' ? 'editSkillsGroups' : 'projModalRequiredSkills');
+  if (!container) return;
+  container.querySelectorAll('input.skill-chk[data-cat="'+cat+'"]').forEach(cb => {
+    cb.checked = checked;
+    const lbl = cb.closest('label');
+    if (lbl) {
+      lbl.style.background = checked ? 'var(--amber-bg2)' : 'transparent';
+      lbl.style.border = '1px solid ' + (checked ? 'var(--amber-dim)' : 'transparent');
+    }
+  });
+}
+
+function collectCheckedSkills(prefix) {
+  const container = document.getElementById(prefix === 'edit' ? 'editSkillsGroups' : 'projModalRequiredSkills');
+  if (!container) return [];
+  return Array.from(container.querySelectorAll('input.skill-chk:checked')).map(cb => cb.value);
+}
+
+// ─── Work Types checkboxes (project modal) ───────────────────────────────────
+async function renderWorkTypesCheckboxes(selectedKeys) {
+  await loadWorkTypesCache();
+  const el = document.getElementById('projModalWorkTypes');
+  if (!el) return;
+  const selected = new Set((selectedKeys||[]).map(String));
+  el.innerHTML = (_workTypesCache||[]).map(w =>
+    `<label style="display:flex;align-items:center;gap:6px;padding:5px 8px;font-size:13px;cursor:pointer;border-radius:4px;${selected.has(w.key)?'background:var(--amber-bg2);border:1px solid var(--amber-dim)':'border:1px solid var(--border)'}">
+      <input type="checkbox" class="worktype-chk" value="${w.key}" ${selected.has(w.key)?'checked':''} onchange="this.closest('label').style.background=this.checked?'var(--amber-bg2)':'transparent';this.closest('label').style.borderColor=this.checked?'var(--amber-dim)':'var(--border)'" />
+      <span>${w.label}</span>
+    </label>`
+  ).join('');
+}
+
+function collectCheckedWorkTypes() {
+  const el = document.getElementById('projModalWorkTypes');
+  if (!el) return [];
+  return Array.from(el.querySelectorAll('input.worktype-chk:checked')).map(cb => cb.value);
+}
+
+// ─── DB Backup ───────────────────────────────────────────────────────────────
+function downloadDbBackup() {
+  // Triggers a file download from the server. Must be a direct link, not an XHR.
+  try {
+    const a = document.createElement('a');
+    a.href = '/api/admin/db-backup';
+    a.download = 'kvm-db-backup.db';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast('Download starting...', 'success');
+  } catch(e) { showToast('Download failed: ' + e.message, 'error'); }
+}
+
+// ─── Skills Admin (Settings → Skills tab) ─────────────────────────────────────
+async function loadSkillsAdmin() {
+  const el = document.getElementById('skillsAdminList');
+  if (!el) return;
+  _skillsCache = null; // invalidate so fresh pull
+  _skillCategoriesCache = null;
+  await loadSkillsCache();
+  const skills = _skillsCache || [];
+  const cats = _skillCategoriesCache || [];
+  if (!skills.length) { el.innerHTML = '<div class="empty-state">No skills defined.</div>'; return; }
+  const byCat = {};
+  skills.forEach(s => { const c = s.category||'other'; if (!byCat[c]) byCat[c]=[]; byCat[c].push(s); });
+  let html = '';
+  const catOrder = cats.slice();
+  Object.keys(byCat).forEach(k => { if (!catOrder.find(c => c.key === k)) catOrder.push({key:k,label:k}); });
+  catOrder.forEach(cat => {
+    const items = byCat[cat.key] || [];
+    if (!items.length) return;
+    html += `<div style="margin-bottom:1rem">
+      <div style="font-family:Oswald,sans-serif;font-size:13px;letter-spacing:1px;color:var(--amber);text-transform:uppercase;margin-bottom:.5rem">${cat.label}</div>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th style="width:40px">#</th><th>Label</th><th>Key</th><th style="width:80px">Sort</th><th style="width:160px">Actions</th></tr></thead><tbody>
+        ${items.map(s => `<tr>
+          <td>${s.id}</td>
+          <td>${s.label}</td>
+          <td style="font-family:monospace;font-size:12px;color:var(--text-muted)">${s.skill_key}</td>
+          <td>${s.sort_order||0}</td>
+          <td><button class="btn btn-ghost btn-sm" onclick="openEditSkill(${s.id})">Edit</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteSkill(${s.id})">Remove</button></td>
+        </tr>`).join('')}
+      </tbody></table></div>
+    </div>`;
+  });
+  el.innerHTML = html;
+}
+function openAddSkill() {
+  $('skillModalId').value = '';
+  $('skillModalTitle').textContent = 'Add Skill';
+  $('skillModalLabel').value = '';
+  $('skillModalKey').value = '';
+  $('skillModalKey').disabled = false;
+  $('skillModalCategory').value = 'doors_sectional_coiling';
+  $('skillModalSort').value = 10;
+  $('skillModalActive').value = '1';
+  openModal('skillModal');
+}
+function openEditSkill(id) {
+  const s = (_skillsCache||[]).find(x => x.id === id);
+  if (!s) return;
+  $('skillModalId').value = s.id;
+  $('skillModalTitle').textContent = 'Edit Skill';
+  $('skillModalLabel').value = s.label || '';
+  $('skillModalKey').value = s.skill_key || '';
+  $('skillModalKey').disabled = true; // key immutable
+  $('skillModalCategory').value = s.category || 'doors_sectional_coiling';
+  $('skillModalSort').value = s.sort_order || 10;
+  $('skillModalActive').value = s.active ? '1' : '0';
+  openModal('skillModal');
+}
+async function saveSkill() {
+  const id = $('skillModalId').value;
+  const label = $('skillModalLabel').value.trim();
+  const skill_key = $('skillModalKey').value.trim();
+  const category = $('skillModalCategory').value;
+  const sort_order = parseInt($('skillModalSort').value)||0;
+  const active = $('skillModalActive').value === '1';
+  if (!label || !skill_key) return showToast('Label and key are required.', 'error');
+  try {
+    if (id) {
+      await api('PUT','/api/skills/'+id,{ label, category, sort_order, active });
+    } else {
+      await api('POST','/api/skills',{ skill_key, label, category, sort_order });
+    }
+    closeModal('skillModal');
+    showToast('Skill saved.','success');
+    _skillsCache = null;
+    loadSkillsAdmin();
+  } catch(e) { showToast(e.message,'error'); }
+}
+async function deleteSkill(id) {
+  if (!confirm('Remove this skill? It will be hidden from future use but preserved for historical records.')) return;
+  try { await api('DELETE','/api/skills/'+id); _skillsCache = null; showToast('Skill removed.','success'); loadSkillsAdmin(); }
+  catch(e) { showToast(e.message,'error'); }
+}
+
+// ─── Trucks Admin (Settings → Trucks tab) ─────────────────────────────────────
+async function loadTrucksAdmin() {
+  const el = document.getElementById('trucksAdminList');
+  if (!el) return;
+  try {
+    const trucks = await api('GET','/api/trucks');
+    if (!trucks.length) { el.innerHTML = '<div class="empty-state">No trucks/crews defined yet. Click "+ Add Truck" to get started.</div>'; return; }
+    const fmtType = t => ({truck:'Truck',shop:'Shop',delivery:'Delivery',flex:'Flex',temp_crew:'Temp Crew'}[t]||t);
+    el.innerHTML = `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th style="width:50px">#</th><th style="width:50px">Sort</th><th>Lead / Label</th><th style="width:110px">Type</th><th>Notes</th><th style="width:110px">Status</th><th style="width:160px">Actions</th></tr></thead>
+      <tbody>
+        ${trucks.map(t => {
+          const label = t.row_type === 'truck' || t.row_type === 'temp_crew'
+            ? (t.lead_name || '<em style="color:var(--text-muted)">(no lead assigned)</em>')
+            : fmtType(t.row_type);
+          const dateInfo = t.row_type === 'temp_crew' && (t.temp_start_date||t.temp_end_date)
+            ? `<div style="font-size:11px;color:var(--text-muted)">${t.temp_start_date||'?'} → ${t.temp_end_date||'?'}</div>` : '';
+          return `<tr style="${t.active?'':'opacity:.5'}">
+            <td>${t.id}</td>
+            <td>${t.sort_order||0}</td>
+            <td>${label}${dateInfo}</td>
+            <td>${fmtType(t.row_type)}</td>
+            <td>${t.notes||''}</td>
+            <td><span class="badge ${t.active?'badge-green':'badge-gray'}">${t.active?'Active':'Inactive'}</span></td>
+            <td><button class="btn btn-ghost btn-sm" onclick="openEditTruck(${t.id})">Edit</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteTruck(${t.id})">Remove</button></td>
+          </tr>`;
+        }).join('')}
+      </tbody></table></div>`;
+  } catch(e) { el.innerHTML = '<div class="alert alert-danger">Error loading trucks: ' + e.message + '</div>'; }
+}
+async function populateTruckLeadDropdown(selectedId) {
+  if (!allUsers.length) try { allUsers = await api('GET','/api/users'); } catch(e){}
+  const sel = $('truckModalLead');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Select Lead —</option>' +
+    allUsers.filter(u => !['global_admin'].includes(u.role_type||''))
+      .map(u => `<option value="${u.id}" ${String(u.id)===String(selectedId)?'selected':''}>${displayName(u)}</option>`).join('');
+}
+function onTruckRowTypeChange() {
+  const rt = $('truckModalRowType').value;
+  const isCrew = (rt === 'truck' || rt === 'temp_crew');
+  $('truckModalLeadWrap').style.display = isCrew ? 'block' : 'none';
+  $('truckModalTempDateRow').style.display = rt === 'temp_crew' ? 'flex' : 'none';
+}
+async function openAddTruck() {
+  $('truckModalId').value = '';
+  $('truckModalTitle').textContent = 'Add Truck';
+  $('truckModalRowType').value = 'truck';
+  $('truckModalSort').value = 10;
+  $('truckModalActive').value = '1';
+  $('truckModalNotes').value = '';
+  $('truckModalTempStart').value = '';
+  $('truckModalTempEnd').value = '';
+  await populateTruckLeadDropdown('');
+  onTruckRowTypeChange();
+  openModal('truckModal');
+}
+async function openEditTruck(id) {
+  try {
+    const trucks = await api('GET','/api/trucks');
+    const t = trucks.find(x => x.id === id);
+    if (!t) return showToast('Truck not found.','error');
+    $('truckModalId').value = t.id;
+    $('truckModalTitle').textContent = 'Edit Truck';
+    $('truckModalRowType').value = t.row_type || 'truck';
+    $('truckModalSort').value = t.sort_order || 10;
+    $('truckModalActive').value = t.active ? '1' : '0';
+    $('truckModalNotes').value = t.notes || '';
+    $('truckModalTempStart').value = t.temp_start_date || '';
+    $('truckModalTempEnd').value = t.temp_end_date || '';
+    await populateTruckLeadDropdown(t.lead_user_id);
+    onTruckRowTypeChange();
+    openModal('truckModal');
+  } catch(e) { showToast(e.message,'error'); }
+}
+async function saveTruck() {
+  const id = $('truckModalId').value;
+  const payload = {
+    lead_user_id: parseInt($('truckModalLead').value)||0,
+    sort_order:   parseInt($('truckModalSort').value)||0,
+    row_type:     $('truckModalRowType').value,
+    notes:        $('truckModalNotes').value.trim(),
+    temp_start_date: $('truckModalTempStart').value || '',
+    temp_end_date:   $('truckModalTempEnd').value || '',
+    active:       $('truckModalActive').value === '1'
+  };
+  try {
+    if (id) await api('PUT','/api/trucks/'+id,payload);
+    else    await api('POST','/api/trucks',payload);
+    closeModal('truckModal');
+    showToast('Truck saved.','success');
+    loadTrucksAdmin();
+  } catch(e) { showToast(e.message,'error'); }
+}
+async function deleteTruck(id) {
+  if (!confirm('Remove this truck? It will be hidden but historical schedule data will be preserved.')) return;
+  try { await api('DELETE','/api/trucks/'+id); showToast('Truck removed.','success'); loadTrucksAdmin(); }
+  catch(e) { showToast(e.message,'error'); }
+}
+
+// ─── Chart of Accounts Admin (Settings → CoA tab) ────────────────────────────
+async function loadCoaAdmin() {
+  const el = document.getElementById('coaAdminList');
+  if (!el) return;
+  try {
+    const accounts = await api('GET','/api/chart-of-accounts');
+    if (!accounts.length) {
+      el.innerHTML = '<div class="empty-state">No accounts yet. Upload your QuickBooks Chart of Accounts or add accounts manually.</div>';
+      return;
+    }
+    el.innerHTML = `<div class="table-wrap"><table class="data-table">
+      <thead><tr><th style="width:120px">Number</th><th>Name</th><th style="width:180px">Type</th><th style="width:160px">Actions</th></tr></thead>
+      <tbody>
+        ${accounts.map(a => `<tr>
+          <td>${a.account_number||''}</td>
+          <td>${a.account_name}</td>
+          <td>${a.account_type||''}</td>
+          <td><button class="btn btn-ghost btn-sm" onclick="openEditCoa(${a.id})">Edit</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteCoa(${a.id})">Remove</button></td>
+        </tr>`).join('')}
+      </tbody></table></div>`;
+  } catch(e) { el.innerHTML = '<div class="alert alert-danger">Error loading accounts: ' + e.message + '</div>'; }
+}
+function openAddCoa() {
+  $('coaModalId').value = '';
+  $('coaModalTitle').textContent = 'Add Account';
+  $('coaModalNumber').value = '';
+  $('coaModalName').value = '';
+  $('coaModalType').value = '';
+  $('coaModalSort').value = 0;
+  $('coaModalActive').value = '1';
+  openModal('coaModal');
+}
+async function openEditCoa(id) {
+  try {
+    const accounts = await api('GET','/api/chart-of-accounts');
+    const a = accounts.find(x => x.id === id);
+    if (!a) return;
+    $('coaModalId').value = a.id;
+    $('coaModalTitle').textContent = 'Edit Account';
+    $('coaModalNumber').value = a.account_number||'';
+    $('coaModalName').value = a.account_name||'';
+    $('coaModalType').value = a.account_type||'';
+    $('coaModalSort').value = a.sort_order||0;
+    $('coaModalActive').value = a.active ? '1' : '0';
+    openModal('coaModal');
+  } catch(e) { showToast(e.message,'error'); }
+}
+async function saveCoa() {
+  const id = $('coaModalId').value;
+  const payload = {
+    account_number: $('coaModalNumber').value.trim(),
+    account_name:   $('coaModalName').value.trim(),
+    account_type:   $('coaModalType').value,
+    sort_order:     parseInt($('coaModalSort').value)||0,
+    active:         $('coaModalActive').value === '1'
+  };
+  if (!payload.account_name) return showToast('Account name is required.','error');
+  try {
+    if (id) await api('PUT','/api/chart-of-accounts/'+id,payload);
+    else    await api('POST','/api/chart-of-accounts',payload);
+    closeModal('coaModal');
+    showToast('Account saved.','success');
+    loadCoaAdmin();
+  } catch(e) { showToast(e.message,'error'); }
+}
+async function deleteCoa(id) {
+  if (!confirm('Remove this account?')) return;
+  try { await api('DELETE','/api/chart-of-accounts/'+id); showToast('Account removed.','success'); loadCoaAdmin(); }
+  catch(e) { showToast(e.message,'error'); }
+}
+function openCoaUpload() {
+  $('coaUploadText').value = '';
+  $('coaUploadReplace').checked = false;
+  $('coaUploadStatus').textContent = '';
+  openModal('coaUploadModal');
+}
+async function processCoaUpload() {
+  const text = ($('coaUploadText').value || '').trim();
+  const replace = $('coaUploadReplace').checked;
+  const status = $('coaUploadStatus');
+  if (!text) { status.innerHTML = '<span style="color:var(--danger)">Paste file content first.</span>'; return; }
+  status.innerHTML = 'Parsing...';
+  // Parse: IIF (ACCNT rows) OR CSV (Account Number,Account Name,Type)
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  const rows = [];
+  // Detect IIF
+  const isIIF = lines.some(l => l.startsWith('!ACCNT') || l.startsWith('ACCNT\t'));
+  if (isIIF) {
+    let headers = null;
+    lines.forEach(l => {
+      const parts = l.split('\t');
+      if (parts[0] === '!ACCNT') { headers = parts; return; }
+      if (parts[0] === 'ACCNT' && headers) {
+        const name = parts[headers.indexOf('NAME')] || '';
+        const type = parts[headers.indexOf('ACCNTTYPE')] || '';
+        const num  = parts[headers.indexOf('ACCNUM')] || '';
+        if (name) rows.push({ account_number: num.trim(), account_name: name.trim(), account_type: type.trim() });
+      }
+    });
+  } else {
+    // CSV — detect header
+    const first = lines[0].toLowerCase();
+    const hasHeader = first.includes('account') && (first.includes('name') || first.includes('number'));
+    const dataLines = hasHeader ? lines.slice(1) : lines;
+    dataLines.forEach(l => {
+      // Simple CSV split — doesn't handle quoted commas perfectly but covers 90% of QB exports
+      const parts = l.split(',').map(p => p.trim().replace(/^"|"$/g,''));
+      if (parts.length < 1 || !parts[0]) return;
+      const row = { account_number: '', account_name: '', account_type: '' };
+      if (parts.length === 1) { row.account_name = parts[0]; }
+      else if (parts.length === 2) { row.account_number = parts[0]; row.account_name = parts[1]; }
+      else { row.account_number = parts[0]; row.account_name = parts[1]; row.account_type = parts[2]||''; }
+      if (row.account_name) rows.push(row);
+    });
+  }
+  if (!rows.length) { status.innerHTML = '<span style="color:var(--danger)">No account rows detected.</span>'; return; }
+  status.innerHTML = 'Found ' + rows.length + ' accounts. Importing...';
+  try {
+    if (replace) {
+      const existing = await api('GET','/api/chart-of-accounts');
+      for (const a of existing) { try { await api('DELETE','/api/chart-of-accounts/'+a.id); } catch(e){} }
+    }
+    let ok = 0, fail = 0;
+    for (let i = 0; i < rows.length; i++) {
+      try {
+        await api('POST','/api/chart-of-accounts', { ...rows[i], sort_order: i*10 });
+        ok++;
+      } catch(e) { fail++; }
+    }
+    status.innerHTML = '<span style="color:var(--green)">Imported ' + ok + ' accounts' + (fail?' (' + fail + ' failed)':'') + '.</span>';
+    loadCoaAdmin();
+    setTimeout(() => closeModal('coaUploadModal'), 1500);
+  } catch(e) { status.innerHTML = '<span style="color:var(--danger)">' + e.message + '</span>'; }
+}
+
+// ─── GL Defaults (Settings → GL tab) ──────────────────────────────────────────
+async function loadGlDefaults() {
+  const el = document.getElementById('glDefaultsForm');
+  if (!el) return;
+  await loadBillCategoriesCache();
+  let defaults = {};
+  try { defaults = await api('GET','/api/gl-defaults'); } catch(e){}
+  el.innerHTML = (_billCategoriesCache||[]).map(c => `
+    <div class="form-group">
+      <label>${c.label}</label>
+      <input type="text" data-glcat="${c.key}" value="${(defaults[c.key]||'').replace(/"/g,'&quot;')}" placeholder="e.g. 5100 · COGS — ${c.label}" />
+    </div>
+  `).join('');
+}
+async function saveGlDefaults() {
+  const form = document.getElementById('glDefaultsForm');
+  if (!form) return;
+  const payload = {};
+  form.querySelectorAll('input[data-glcat]').forEach(inp => {
+    payload[inp.getAttribute('data-glcat')] = inp.value;
+  });
+  try { await api('PUT','/api/gl-defaults',payload); showToast('GL defaults saved.','success'); }
+  catch(e) { showToast(e.message,'error'); }
+}
+
+// Expose the Phase 1A functions on window (append to existing exposure list wasn't sufficient
+// because these are defined AFTER that exposure block). This catch-up block handles that.
+(function() {
+  try {
+    ['setSettingsTab','downloadDbBackup','renderSkillsCheckboxes','toggleAllSkills',
+     'toggleCategorySkills','collectCheckedSkills','renderWorkTypesCheckboxes',
+     'collectCheckedWorkTypes','loadSkillsAdmin','openAddSkill','openEditSkill',
+     'saveSkill','deleteSkill','loadTrucksAdmin','openAddTruck','openEditTruck',
+     'saveTruck','deleteTruck','onTruckRowTypeChange','loadCoaAdmin','openAddCoa',
+     'openEditCoa','saveCoa','deleteCoa','openCoaUpload','processCoaUpload',
+     'loadGlDefaults','saveGlDefaults'
+    ].forEach(function(name){
+      try { if (typeof eval(name) === 'function') window[name] = eval(name); } catch(e) {}
+    });
+    console.log('[KVM] Phase 1A functions exposed');
+  } catch(e) { console.error('[KVM] Phase 1A exposure failed:', e); }
+})();
