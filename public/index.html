@@ -854,13 +854,30 @@
             <!-- Client Info -->
             <div class="card" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-content:start;">
               <div style="grid-column:1/-1;font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:4px;">Client Info</div>
-              <div style="grid-column:1/-1;"><label class="ql">Company / Client Name</label><input class="qi" id="q-client" placeholder="e.g. Crane Co."></div>
+              <input type="hidden" id="q-customer-id" value="0" />
+              <div style="grid-column:1/-1;position:relative">
+                <label class="ql" style="display:flex;align-items:center;justify-content:space-between">
+                  <span>Company / Client Name</span>
+                  <label style="font-size:10px;font-weight:400;color:var(--text-muted);cursor:pointer;text-transform:none;letter-spacing:0">
+                    <input type="checkbox" id="q-client-newmode" onchange="quotesToggleClientMode(this.checked)" /> type new
+                  </label>
+                </label>
+                <input class="qi" id="q-client" placeholder="Start typing to search customers..." autocomplete="off"
+                  oninput="quotesCustomerSearchInput()" onfocus="quotesCustomerSearchInput()" onblur="setTimeout(quotesCustomerSearchBlur,200)" />
+                <div id="q-client-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:220px;overflow-y:auto;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,.4)"></div>
+                <div id="q-client-linked" style="display:none;font-size:10px;color:var(--green);margin-top:3px">&#10003; Linked to customer record</div>
+              </div>
               <div><label class="ql">Contact Name</label><input class="qi" id="q-contact" placeholder="e.g. Jennifer Quaker"></div>
               <div><label class="ql">Phone</label><input class="qi" id="q-phone" placeholder="(000) 000-0000"></div>
               <div><label class="ql">Email</label><input class="qi" id="q-email" placeholder="contact@company.com"></div>
               <div><label class="ql">Address</label><input class="qi" id="q-addr" placeholder="Street, City, State ZIP"></div>
               <div style="grid-column:1/-1;"><label class="ql">Project / Job Name</label><input class="qi" id="q-project" placeholder="e.g. Door Repairs After PM"></div>
               <div style="grid-column:1/-1;"><label class="ql">Scope Summary</label><input class="qi" id="q-scope-summary" placeholder="Brief description of overall work"></div>
+              <div style="grid-column:1/-1;padding-top:4px;border-top:1px dashed var(--border);display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-muted)">
+                <span>Sales Rep:</span>
+                <span id="q-rep-display" style="color:var(--amber);font-weight:600">—</span>
+                <span style="margin-left:auto" id="q-created-display"></span>
+              </div>
             </div>
           </div>
 
@@ -902,6 +919,7 @@
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
             <button onclick="quotesSave()" class="btn btn-primary">&#128190; Save Quote</button>
             <button onclick="quotesPrint()" class="btn btn-ghost">&#8982; Print / PDF</button>
+            <button id="q-create-project-btn" onclick="quotesCreateProjectFromQuote()" class="btn" style="display:none;background:var(--green);color:#fff;border-color:var(--green)">&#8594; Create Project from Awarded Quote</button>
             <button onclick="quotesShowList()" class="btn btn-ghost">&#8592; Back to List</button>
             <span id="q-save-status" style="font-size:12px;color:var(--text-muted);margin-left:auto;"></span>
           </div>
