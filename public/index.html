@@ -565,6 +565,24 @@
             </p>
             <button class="btn btn-primary" onclick="downloadDbBackup()">&#8659; Download kvm.db</button>
           </div>
+
+          <div class="card" style="margin-top:1rem">
+            <div class="card-header"><span class="card-title">&#129514; Test Data</span></div>
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">
+              Seed the database with realistic test customers, sites, contacts, quotes, and projects so you can
+              exercise workflows without entering real data. Every test record is tagged and can be removed with
+              one click when you&rsquo;re ready. All test records have names prefixed with &ldquo;(TEST)&rdquo; for
+              easy identification.
+            </p>
+            <div id="test-data-status" style="padding:10px 12px;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:.75rem;font-size:12.5px;color:var(--text-muted)">
+              Checking status&hellip;
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+              <button class="btn btn-primary" id="btn-seed-test-data" onclick="seedTestData()">&#10133; Seed Test Data</button>
+              <button class="btn" id="btn-purge-test-data" onclick="purgeTestData()" style="background:var(--danger);color:#fff;border-color:var(--danger);display:none">&#128465; Purge All Test Data</button>
+              <button class="btn btn-ghost btn-sm" onclick="refreshTestDataStatus()">&#8635; Refresh</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -839,7 +857,16 @@
             <!-- Quote Info -->
             <div class="card" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-content:start;">
               <div style="grid-column:1/-1;font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:4px;">Quote Info</div>
-              <div><label class="ql">Quote #</label><input class="qi" id="q-num" placeholder="e.g. 0426-27-GK"></div>
+              <div>
+                <label class="ql" style="display:flex;align-items:center;justify-content:space-between">
+                  <span>Quote #</span>
+                  <span id="q-num-hint" style="font-size:9px;font-weight:400;color:var(--text-faint);text-transform:none;letter-spacing:0">auto-assigned</span>
+                </label>
+                <div style="display:flex;gap:4px;align-items:center">
+                  <input class="qi" id="q-num" placeholder="0426-45" readonly style="background:var(--bg-surface);cursor:default;flex:1">
+                  <button type="button" id="q-num-edit-btn" onclick="quotesToggleNumEdit()" title="Override auto-assigned number" style="background:transparent;border:1px solid var(--border);color:var(--text-muted);padding:4px 8px;border-radius:var(--radius-sm);cursor:pointer;font-size:12px">&#9998;</button>
+                </div>
+              </div>
               <div><label class="ql">Date</label><input class="qi" id="q-date" type="date"></div>
               <div><label class="ql">Valid For</label><input class="qi" id="q-valid" value="30 days"></div>
               <div><label class="ql">Status</label>
