@@ -1715,9 +1715,10 @@ function startElapsedTimer() {
 }
 
 function toggleClockType() {
-  const type = $('clockTypeSelect').value;
-  $('jobFields').style.display    = type === 'field' ? 'block' : 'none';
-  $('unionFields').style.display  = type === 'union' ? 'block' : 'none';
+  const selEl = $('clockTypeSelect'); if (!selEl) return;
+  const type = selEl.value;
+  const jf = $('jobFields');    if (jf) jf.style.display    = (type === 'field' || type === 'union') ? 'block' : 'none';
+  const uf = $('unionFields');  if (uf) uf.style.display    = type === 'union' ? 'block' : 'none';
 }
 
 async function getCurrentPosition() {
@@ -4251,9 +4252,19 @@ function quotesNewQuote() {
   if($('q-save-status')) $('q-save-status').textContent = '';
   if($('ai-status-msg')) $('ai-status-msg').textContent = 'Paste notes or upload a file, then click Analyze.';
   if($('ai-file-preview-tag')) { $('ai-file-preview-tag').style.display='none'; $('ai-file-preview-tag').textContent=''; }
+  // Phase 1A.1 additions
+  if($('q-customer-id')) $('q-customer-id').value = '0';
+  if($('q-client-linked')) $('q-client-linked').style.display = 'none';
+  if($('q-client-newmode')) $('q-client-newmode').checked = false;
+  if($('q-client')) $('q-client').placeholder = 'Start typing to search customers...';
+  if($('q-rep-display')) $('q-rep-display').textContent = currentUser ? (currentUser.first_name + (currentUser.last_name?' '+currentUser.last_name:'')) : '—';
+  if($('q-created-display')) $('q-created-display').textContent = '';
+  const cpBtn = $('q-create-project-btn'); if (cpBtn) cpBtn.style.display = 'none';
   $('q-scopes-container').innerHTML = '';
   $('q-options-container').innerHTML = '';
   quotesAddScope();
+  // Pre-load customers cache for search
+  quotesLoadCustomerCache();
 }
 
 async function quotesLoadList() {
@@ -4329,11 +4340,21 @@ async function quotesOpenEdit(id) {
     if($('q-tax')) $('q-tax').value = q.tax || '';
     if($('q-total')) $('q-total').value = q.total || '';
     if($('q-save-status')) $('q-save-status').textContent = '';
+    // Phase 1A.1 additions
+    if($('q-customer-id')) $('q-customer-id').value = q.customer_id || 0;
+    if($('q-client-linked')) $('q-client-linked').style.display = q.customer_id ? 'block' : 'none';
+    if($('q-client-newmode')) $('q-client-newmode').checked = false;
+    if($('q-rep-display')) $('q-rep-display').textContent = q.rep_name || '—';
+    if($('q-created-display')) $('q-created-display').textContent = q.created_at ? ('Created ' + fmtDate(q.created_at.split(' ')[0])) : '';
+    const cpBtn = $('q-create-project-btn');
+    if (cpBtn) cpBtn.style.display = (q.status === 'accepted') ? 'inline-block' : 'none';
     $('q-scopes-container').innerHTML = '';
     $('q-options-container').innerHTML = '';
     quotesCurrentScopes.forEach(() => {});
     quotesRenderScopes();
     quotesRenderOptions();
+    // Pre-load customer cache for search
+    quotesLoadCustomerCache();
   } catch(e) { showToast('Error loading quote: ' + e.message, 'error'); }
 }
 
@@ -4344,6 +4365,7 @@ async function quotesSave() {
   const options = quotesGetOptions();
   const payload = {
     quote_number: $('q-num') ? $('q-num').value.trim() : '',
+    customer_id: $('q-customer-id') ? (parseInt($('q-customer-id').value)||0) : 0,
     client_name: $('q-client') ? $('q-client').value.trim() : '',
     contact_name: $('q-contact') ? $('q-contact').value.trim() : '',
     phone: $('q-phone') ? $('q-phone').value.trim() : '',
@@ -4368,6 +4390,9 @@ async function quotesSave() {
     }
     if (statusEl) statusEl.textContent = '✓ Saved ' + new Date().toLocaleTimeString();
     showToast('Quote saved!', 'success');
+    // Update Create Project button visibility based on current status
+    const cpBtn = $('q-create-project-btn');
+    if (cpBtn) cpBtn.style.display = ($('q-status') && $('q-status').value === 'accepted') ? 'inline-block' : 'none';
   } catch(e) { if (statusEl) statusEl.textContent = '✗ Error'; showToast(e.message, 'error'); }
 }
 
@@ -5120,20 +5145,152 @@ async function saveGlDefaults() {
   catch(e) { showToast(e.message,'error'); }
 }
 
-// Expose the Phase 1A functions on window (append to existing exposure list wasn't sufficient
-// because these are defined AFTER that exposure block). This catch-up block handles that.
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PHASE 1A.1 — QUOTE WORKFLOW (customer search, rep display, create project) 
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _quotesCustomerCache = null;
+
+async function quotesLoadCustomerCache() {
+  if (_quotesCustomerCache) return _quotesCustomerCache;
+  try { _quotesCustomerCache = await api('GET', '/api/customers'); }
+  catch(e) { _quotesCustomerCache = []; }
+  return _quotesCustomerCache;
+}
+
+function quotesToggleClientMode(newMode) {
+  const input = $('q-client');
+  const dropdown = $('q-client-dropdown');
+  const linked = $('q-client-linked');
+  if (newMode) {
+    // "Type new" mode — disable search, clear customer_id, update placeholder
+    if (input) input.placeholder = 'Type new customer name (not in list)';
+    if (dropdown) dropdown.style.display = 'none';
+    if ($('q-customer-id')) $('q-customer-id').value = '0';
+    if (linked) linked.style.display = 'none';
+  } else {
+    if (input) input.placeholder = 'Start typing to search customers...';
+  }
+}
+
+async function quotesCustomerSearchInput() {
+  // Skip search if "type new" mode is on
+  const newMode = $('q-client-newmode') && $('q-client-newmode').checked;
+  if (newMode) return;
+  const input = $('q-client');
+  const dropdown = $('q-client-dropdown');
+  if (!input || !dropdown) return;
+  const q = input.value.trim().toLowerCase();
+  // If user edited the name after linking, clear the link
+  if ($('q-customer-id') && parseInt($('q-customer-id').value) > 0) {
+    const cache = _quotesCustomerCache || [];
+    const linkedCust = cache.find(c => c.id === parseInt($('q-customer-id').value));
+    if (linkedCust && (linkedCust.company_name||'').toLowerCase() !== q) {
+      $('q-customer-id').value = '0';
+      if ($('q-client-linked')) $('q-client-linked').style.display = 'none';
+    }
+  }
+  await quotesLoadCustomerCache();
+  const cache = _quotesCustomerCache || [];
+  if (!q) {
+    // Show a few recent customers
+    const recent = cache.slice(0, 8);
+    if (!recent.length) { dropdown.style.display = 'none'; return; }
+    dropdown.innerHTML = recent.map(c => quotesCustomerOption(c)).join('');
+    dropdown.style.display = 'block';
+    return;
+  }
+  const matches = cache.filter(c => (c.company_name||'').toLowerCase().includes(q)).slice(0, 15);
+  if (!matches.length) {
+    dropdown.innerHTML = `<div style="padding:8px 10px;font-size:12px;color:var(--text-muted)">
+      No matches. <label style="color:var(--amber);cursor:pointer;text-decoration:underline" onclick="$('q-client-newmode').checked=true;quotesToggleClientMode(true);">Type as new customer</label>
+    </div>`;
+    dropdown.style.display = 'block';
+    return;
+  }
+  dropdown.innerHTML = matches.map(c => quotesCustomerOption(c)).join('');
+  dropdown.style.display = 'block';
+}
+
+function quotesCustomerOption(c) {
+  const sub = [c.billing_city, c.billing_state].filter(Boolean).join(', ');
+  return `<div style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px" 
+    onmousedown="event.preventDefault();quotesCustomerPick(${c.id})"
+    onmouseover="this.style.background='var(--bg-surface)'" onmouseout="this.style.background='transparent'">
+    <div style="font-weight:600">${escapeHtml(c.company_name||'—')}</div>
+    ${sub ? `<div style="font-size:11px;color:var(--text-muted)">${escapeHtml(sub)}</div>` : ''}
+  </div>`;
+}
+
+function quotesCustomerSearchBlur() {
+  const dd = $('q-client-dropdown');
+  if (dd) dd.style.display = 'none';
+}
+
+async function quotesCustomerPick(customerId) {
+  await quotesLoadCustomerCache();
+  const c = (_quotesCustomerCache||[]).find(x => x.id === customerId);
+  if (!c) return;
+  if ($('q-customer-id')) $('q-customer-id').value = c.id;
+  if ($('q-client')) $('q-client').value = c.company_name || '';
+  // Auto-fill billing address
+  const addrParts = [c.billing_address, c.billing_city ? (c.billing_city + (c.billing_state?', '+c.billing_state:'') + (c.billing_zip?' '+c.billing_zip:'')) : ''].filter(Boolean);
+  if ($('q-addr') && !$('q-addr').value.trim()) $('q-addr').value = addrParts.join(', ');
+  if ($('q-phone') && !$('q-phone').value.trim()) $('q-phone').value = c.billing_phone || '';
+  if ($('q-email') && !$('q-email').value.trim()) $('q-email').value = c.billing_email || '';
+  // Try to fetch a contact name if missing
+  if ($('q-contact') && !$('q-contact').value.trim()) {
+    try {
+      const full = await api('GET', '/api/customers/' + c.id);
+      if (full.contacts && full.contacts.length) {
+        const primary = full.contacts.find(ct => ct.is_primary) || full.contacts[0];
+        $('q-contact').value = ((primary.first_name||'') + ' ' + (primary.last_name||'')).trim();
+        if (!$('q-phone').value.trim() && primary.phone) $('q-phone').value = primary.phone;
+        if (!$('q-email').value.trim() && primary.email) $('q-email').value = primary.email;
+      }
+    } catch(e){}
+  }
+  if ($('q-client-linked')) $('q-client-linked').style.display = 'block';
+  const dd = $('q-client-dropdown');
+  if (dd) dd.style.display = 'none';
+  showToast('Linked to customer record.','success');
+}
+
+function escapeHtml(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+async function quotesCreateProjectFromQuote() {
+  if (!quotesCurrentId) { showToast('Save the quote first.','error'); return; }
+  const status = $('q-status') ? $('q-status').value : '';
+  if (status !== 'accepted') {
+    if (!confirm('Quote status is not "Accepted." Create project anyway?')) return;
+  }
+  if (!confirm('Create a new Project from this awarded quote?\n\nThe Project will be prefilled with the customer, location, contract value, scope, and linked back to this quote.')) return;
+  try {
+    const res = await api('POST', '/api/quotes/' + quotesCurrentId + '/create-project', {});
+    showToast('Project created!', 'success');
+    // Navigate to the new project detail
+    setTimeout(() => {
+      if (typeof openProjectDetail === 'function' && res.project_id) {
+        showPage('projects', null);
+        openProjectDetail(res.project_id);
+      }
+    }, 400);
+  } catch(e) {
+    showToast('Error: ' + e.message, 'error');
+  }
+}
+
+// Expose Phase 1A.1 functions on window for inline onclick handlers
 (function() {
   try {
-    ['setSettingsTab','downloadDbBackup','renderSkillsCheckboxes','toggleAllSkills',
-     'toggleCategorySkills','collectCheckedSkills','renderWorkTypesCheckboxes',
-     'collectCheckedWorkTypes','loadSkillsAdmin','openAddSkill','openEditSkill',
-     'saveSkill','deleteSkill','loadTrucksAdmin','openAddTruck','openEditTruck',
-     'saveTruck','deleteTruck','onTruckRowTypeChange','loadCoaAdmin','openAddCoa',
-     'openEditCoa','saveCoa','deleteCoa','openCoaUpload','processCoaUpload',
-     'loadGlDefaults','saveGlDefaults'
+    ['quotesLoadCustomerCache','quotesToggleClientMode','quotesCustomerSearchInput',
+     'quotesCustomerSearchBlur','quotesCustomerPick','quotesCreateProjectFromQuote',
+     'escapeHtml'
     ].forEach(function(name){
       try { if (typeof eval(name) === 'function') window[name] = eval(name); } catch(e) {}
     });
-    console.log('[KVM] Phase 1A functions exposed');
-  } catch(e) { console.error('[KVM] Phase 1A exposure failed:', e); }
+    console.log('[KVM] Phase 1A.1 functions exposed');
+  } catch(e) { console.error('[KVM] Phase 1A.1 exposure failed:', e); }
 })();
