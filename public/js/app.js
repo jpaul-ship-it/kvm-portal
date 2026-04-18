@@ -4265,6 +4265,9 @@ function quotesNewQuote() {
   quotesAddScope();
   // Pre-load customers cache for search
   quotesLoadCustomerCache();
+  // Phase 1A.1.1 — prefill next auto job number (peek, not allocate)
+  quotesResetNumEditState();
+  quotesPrefillNextJobNumber();
 }
 
 async function quotesLoadList() {
@@ -4348,6 +4351,10 @@ async function quotesOpenEdit(id) {
     if($('q-created-display')) $('q-created-display').textContent = q.created_at ? ('Created ' + fmtDate(q.created_at.split(' ')[0])) : '';
     const cpBtn = $('q-create-project-btn');
     if (cpBtn) cpBtn.style.display = (q.status === 'accepted') ? 'inline-block' : 'none';
+    // Phase 1A.1.1 — lock the job number on saved quotes (already assigned)
+    quotesResetNumEditState();
+    const hint = $('q-num-hint'); if (hint) hint.textContent = 'assigned';
+    const editBtn = $('q-num-edit-btn'); if (editBtn) editBtn.style.display = 'inline-block';
     $('q-scopes-container').innerHTML = '';
     $('q-options-container').innerHTML = '';
     quotesCurrentScopes.forEach(() => {});
@@ -4690,6 +4697,7 @@ function setSettingsTab(tab, el) {
   if (tab === 'trucks') loadTrucksAdmin();
   if (tab === 'gl')     loadGlDefaults();
   if (tab === 'coa')    loadCoaAdmin();
+  if (tab === 'backup') refreshTestDataStatus();
 }
 
 // ─── Skills checkboxes (used on employee + project modals) ───────────────────
@@ -5293,4 +5301,131 @@ async function quotesCreateProjectFromQuote() {
     });
     console.log('[KVM] Phase 1A.1 functions exposed');
   } catch(e) { console.error('[KVM] Phase 1A.1 exposure failed:', e); }
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PHASE 1A.1.1 — AUTO JOB NUMBERS (quote #, shared counter) ════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function quotesResetNumEditState() {
+  const input = $('q-num');
+  const editBtn = $('q-num-edit-btn');
+  const hint = $('q-num-hint');
+  if (input) { input.readOnly = true; input.style.background = 'var(--bg-surface)'; input.style.cursor = 'default'; }
+  if (editBtn) { editBtn.textContent = '\u270E'; editBtn.title = 'Override auto-assigned number'; }
+  if (hint) hint.textContent = 'auto-assigned';
+}
+
+function quotesToggleNumEdit() {
+  const input = $('q-num');
+  const editBtn = $('q-num-edit-btn');
+  const hint = $('q-num-hint');
+  if (!input) return;
+  if (input.readOnly) {
+    // Unlock for edit
+    input.readOnly = false;
+    input.style.background = 'var(--bg-card)';
+    input.style.cursor = 'text';
+    input.focus();
+    input.select();
+    if (editBtn) { editBtn.textContent = '\u2713'; editBtn.title = 'Lock number'; }
+    if (hint) hint.textContent = 'manual override — will be saved as-typed';
+  } else {
+    // Re-lock (keep current value — don't fetch new)
+    input.readOnly = true;
+    input.style.background = 'var(--bg-surface)';
+    input.style.cursor = 'default';
+    if (editBtn) { editBtn.textContent = '\u270E'; editBtn.title = 'Override auto-assigned number'; }
+    if (hint) hint.textContent = input.value ? 'locked' : 'auto-assigned';
+  }
+}
+
+async function quotesPrefillNextJobNumber() {
+  const input = $('q-num');
+  if (!input) return;
+  // Don't overwrite a user-supplied value
+  if (input.value.trim()) return;
+  try {
+    const res = await api('GET', '/api/job-number/peek');
+    if (res && res.next_number) {
+      input.value = res.next_number;
+      input.placeholder = res.next_number;
+    }
+  } catch(e) {
+    // Silent — server will assign on save anyway
+    console.warn('Job number peek failed:', e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PHASE 1A.1.2 — TEST DATA SEED / PURGE (Settings → Backup tab) ════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function refreshTestDataStatus() {
+  const box = $('test-data-status');
+  const seedBtn = $('btn-seed-test-data');
+  const purgeBtn = $('btn-purge-test-data');
+  if (!box) return;
+  try {
+    const r = await api('GET', '/api/test-data/status');
+    if (r.has_test_data) {
+      const parts = [];
+      Object.keys(r.counts || {}).forEach(k => { if (r.counts[k] > 0) parts.push(r.counts[k] + ' ' + k); });
+      box.innerHTML = '<span style="color:var(--green)">&#10003;</span> <strong>' + r.total + ' test records</strong> present: ' + parts.join(', ');
+      if (seedBtn) seedBtn.style.display = 'none';
+      if (purgeBtn) purgeBtn.style.display = 'inline-block';
+    } else {
+      box.innerHTML = 'No test data currently seeded.';
+      if (seedBtn) seedBtn.style.display = 'inline-block';
+      if (purgeBtn) purgeBtn.style.display = 'none';
+    }
+  } catch(e) {
+    box.innerHTML = '<span style="color:var(--danger)">Error: ' + e.message + '</span>';
+  }
+}
+
+async function seedTestData() {
+  if (!confirm('Seed realistic test customers, sites, contacts, quotes, and projects into the database?\n\nEvery seeded record is tagged so it can be cleanly removed later via "Purge All Test Data." All names are prefixed with "(TEST)" for easy identification.')) return;
+  const btn = $('btn-seed-test-data');
+  if (btn) { btn.disabled = true; btn.textContent = 'Seeding...'; }
+  try {
+    const r = await api('POST', '/api/test-data/seed', {});
+    const parts = [];
+    Object.keys(r.seeded || {}).forEach(k => { if (r.seeded[k] > 0) parts.push(r.seeded[k] + ' ' + k); });
+    showToast('Seeded: ' + parts.join(', '), 'success');
+    await refreshTestDataStatus();
+  } catch(e) {
+    showToast('Error: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '&#10133; Seed Test Data'; }
+  }
+}
+
+async function purgeTestData() {
+  if (!confirm('DELETE ALL TEST DATA from the database?\n\nThis will remove every record tagged as test data (prefixed with "(TEST)") — customers, sites, contacts, quotes, and projects. Real data is not affected.\n\nThis cannot be undone without restoring a backup.')) return;
+  if (!confirm('Really purge all test data? Type-sensitive check: click OK to confirm.')) return;
+  const btn = $('btn-purge-test-data');
+  if (btn) { btn.disabled = true; btn.textContent = 'Purging...'; }
+  try {
+    const r = await api('POST', '/api/test-data/purge', {});
+    const total = Object.values(r.deleted || {}).reduce((a,b)=>a+b, 0);
+    showToast('Purged ' + total + ' test records.', 'success');
+    await refreshTestDataStatus();
+  } catch(e) {
+    showToast('Error: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = '&#128465; Purge All Test Data'; }
+  }
+}
+
+// Expose Phase 1A.1.1/1A.1.2 functions on window for inline onclick handlers
+(function() {
+  try {
+    ['quotesResetNumEditState','quotesToggleNumEdit','quotesPrefillNextJobNumber',
+     'refreshTestDataStatus','seedTestData','purgeTestData'
+    ].forEach(function(name){
+      try { if (typeof eval(name) === 'function') window[name] = eval(name); } catch(e) {}
+    });
+    console.log('[KVM] Phase 1A.1.1 + 1A.1.2 functions exposed');
+  } catch(e) { console.error('[KVM] Phase 1A.1.1+1A.1.2 exposure failed:', e); }
 })();
