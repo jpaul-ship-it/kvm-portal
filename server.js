@@ -458,6 +458,23 @@ async function initDb() {
   // Phase 1A.1 — link quote to customer record
   try { db.run(`ALTER TABLE quotes ADD COLUMN customer_id INTEGER DEFAULT 0`); saveDb(); } catch(e){}
   try { db.run(`ALTER TABLE projects ADD COLUMN job_type TEXT DEFAULT 'project'`); saveDb(); } catch(e){}
+
+  // Phase 1A.1.1 — shared monthly job number counter
+  db.run(`CREATE TABLE IF NOT EXISTS job_sequence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    month_key TEXT UNIQUE NOT NULL,
+    last_seq INTEGER DEFAULT 0,
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  saveDb();
+
+  // Phase 1A.1.2 — test data tagging
+  ['customers','customer_sites','customer_contacts','customer_equipment',
+   'quotes','projects','project_phases','project_costs','project_notes','project_hours'
+  ].forEach(table => {
+    try { db.run(`ALTER TABLE ${table} ADD COLUMN is_test_data INTEGER DEFAULT 0`); saveDb(); } catch(e){}
+  });
+
   try { db.run(`INSERT OR IGNORE INTO settings (key,value) VALUES ('po_format','MMYY-###')`); saveDb(); } catch(e){}
   try { db.run(`INSERT OR IGNORE INTO settings (key,value) VALUES ('po_prefix','')`); saveDb(); } catch(e){}
 
@@ -1554,9 +1571,14 @@ app.post('/api/quotes', requireAuth, (req, res) => {
   const u = get('SELECT first_name,last_name FROM users WHERE id=?', [req.session.userId]);
   const rep_name = u.first_name + (u.last_name ? ' ' + u.last_name : '');
   const { quote_number, customer_id, client_name, contact_name, address, email, phone, project_name, scope_summary, scopes, options, notes, subtotal, tax, total, valid_for, status } = req.body;
+  // Phase 1A.1.1 — auto-assign next monthly job number if not provided
+  let finalQuoteNum = (quote_number||'').trim();
+  if (!finalQuoteNum) {
+    try { finalQuoteNum = allocateNextJobNumber(); } catch(e) { /* fall back to empty if counter fails */ }
+  }
   const id = runGetId(`INSERT INTO quotes (quote_number,rep_id,rep_name,customer_id,client_name,contact_name,address,email,phone,project_name,scope_summary,scopes,options,notes,subtotal,tax,total,valid_for,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [quote_number||'', req.session.userId, rep_name, parseInt(customer_id)||0, client_name||'', contact_name||'', address||'', email||'', phone||'', project_name||'', scope_summary||'', JSON.stringify(scopes||[]), JSON.stringify(options||[]), notes||'', subtotal||'', tax||'', total||'', valid_for||'30 days', status||'draft']);
-  res.json({ id });
+    [finalQuoteNum, req.session.userId, rep_name, parseInt(customer_id)||0, client_name||'', contact_name||'', address||'', email||'', phone||'', project_name||'', scope_summary||'', JSON.stringify(scopes||[]), JSON.stringify(options||[]), notes||'', subtotal||'', tax||'', total||'', valid_for||'30 days', status||'draft']);
+  res.json({ id, quote_number: finalQuoteNum });
 });
 
 app.put('/api/quotes/:id', requireAuth, (req, res) => {
@@ -2092,6 +2114,253 @@ app.get('/api/admin/db-backup', requireAdmin, (req, res) => {
 });
 
 // ═══ END PHASE 1A ═════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PHASE 1A.1.1 — ATOMIC JOB NUMBER COUNTER (shared quotes + service calls) ═
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Build MMYY key for a given Date (or now)
+function currentMonthKey() {
+  const d = new Date();
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const yy = String(d.getFullYear()).slice(-2);
+  return mm + yy;
+}
+
+// Atomic next-number: sql.js is single-threaded at the Node.js event loop level,
+// so this SELECT-then-UPDATE cannot be raced by another request on the same instance.
+function allocateNextJobNumber() {
+  const key = currentMonthKey();
+  let row = get('SELECT last_seq FROM job_sequence WHERE month_key=?', [key]);
+  let next;
+  if (!row) {
+    next = 1;
+    db.run(`INSERT INTO job_sequence (month_key, last_seq, updated_at) VALUES (?, ?, datetime('now'))`, [key, next]);
+  } else {
+    next = (row.last_seq || 0) + 1;
+    db.run(`UPDATE job_sequence SET last_seq=?, updated_at=datetime('now') WHERE month_key=?`, [next, key]);
+  }
+  saveDb();
+  return `${key}-${next}`;
+}
+
+// Preview the next number without allocating (for UI display hints)
+app.get('/api/job-number/peek', requireAuth, (req, res) => {
+  const key = currentMonthKey();
+  const row = get('SELECT last_seq FROM job_sequence WHERE month_key=?', [key]);
+  const next = (row ? row.last_seq||0 : 0) + 1;
+  res.json({ next_number: `${key}-${next}`, month_key: key });
+});
+
+// Allocate and return the next number (increments the counter — use only when
+// the caller commits to using this number)
+app.post('/api/job-number/next', requireAuth, (req, res) => {
+  try {
+    const num = allocateNextJobNumber();
+    res.json({ job_number: num });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PHASE 1A.1.2 — TEST DATA SEED / PURGE ═══════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.get('/api/test-data/status', requireAdmin, (req, res) => {
+  try {
+    const counts = {};
+    ['customers','customer_sites','customer_contacts','quotes','projects','project_costs','project_phases','project_notes','project_hours']
+      .forEach(t => {
+        try { const r = get(`SELECT COUNT(*) AS c FROM ${t} WHERE is_test_data=1`); counts[t] = r ? r.c : 0; }
+        catch(e) { counts[t] = 0; }
+      });
+    const total = Object.values(counts).reduce((a,b)=>a+b,0);
+    res.json({ total, counts, has_test_data: total > 0 });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/test-data/seed', requireAdmin, (req, res) => {
+  try {
+    // Guard: don't double-seed
+    const existing = get('SELECT COUNT(*) AS c FROM customers WHERE is_test_data=1');
+    if (existing && existing.c > 0) {
+      return res.status(400).json({ error: 'Test data already seeded. Purge first if you want to re-seed.' });
+    }
+
+    // Pick a salesperson user for attribution (any non-global-admin user, or admin if none)
+    const salesUser = get("SELECT id,first_name,last_name FROM users WHERE role_type IN ('sales','manager','admin') AND username != 'admin' LIMIT 1")
+                  || get("SELECT id,first_name,last_name FROM users WHERE id=?", [req.session.userId])
+                  || { id: 1, first_name: 'Admin', last_name: '' };
+    const salesName = (salesUser.first_name + ' ' + (salesUser.last_name||'')).trim();
+
+    // ── CUSTOMERS ──────────────────────────────────────────
+    const customerSeed = [
+      // [company_name, type, phone, email, addr, city, state, zip, terms, union, partner, notes]
+      ['(TEST) ABC Builders Inc', 'General Contractor', '(248) 555-1001', 'pm@abcbuilders-test.com',
+       '12450 Industrial Dr', 'Troy', 'MI', '48083', 'Net 30 Days', 1, 0, 'Test GC — union required'],
+      ['(TEST) Detroit Property Group', 'Property Manager', '(313) 555-2100', 'ops@dpg-test.com',
+       '500 Woodward Ave', 'Detroit', 'MI', '48226', 'Net 30 Days', 0, 0, 'Test property manager w/ multiple sites'],
+      ['(TEST) Great Lakes Construction', 'General Contractor', '(248) 555-3200', 'bids@glc-test.com',
+       '28000 N Campbell Rd', 'Madison Heights', 'MI', '48071', 'Net 45 days', 0, 0, 'Test GC'],
+      ['(TEST) Metro Industrial Park', 'Industrial', '(586) 555-4100', 'facilities@mip-test.com',
+       '42100 Vans Ave', 'Warren', 'MI', '48089', 'Net 30', 0, 0, 'Test industrial end-user'],
+      ['(TEST) Paslin Manufacturing', 'Industrial', '(248) 555-5200', 'maint@paslin-test.com',
+       '25001 Dequindre Rd', 'Madison Heights', 'MI', '48071', 'Net 30', 0, 0, 'Test — matches quote example'],
+      ['(TEST) Suburban Retail Holdings', 'Retail', '(248) 555-6300', 'ops@srh-test.com',
+       '2800 Livernois Rd', 'Troy', 'MI', '48083', 'Net 30 Days', 0, 0, 'Test retail chain — 8 locations'],
+      ['(TEST) DH Pace Test Partner', 'Partner Door Company', '(816) 555-7001', 'workorders@dhpace-test.com',
+       '1901 E 119th St', 'Olathe', 'KS', '66061', 'Net 45 days', 0, 1, 'Test partner door company'],
+      ['(TEST) Corewell Health System', 'End User / Building Owner', '(616) 555-8100', 'facilities@corewell-test.com',
+       '100 Michigan NE', 'Grand Rapids', 'MI', '49503', 'Net 30 Days', 0, 0, 'Test large end-user w/ multiple sites'],
+      ['(TEST) Kroger Supermarket Division', 'Retail', '(513) 555-9100', 'mw-facilities@kroger-test.com',
+       '1014 Vine St', 'Cincinnati', 'OH', '45202', 'Net 30 Days', 0, 0, 'Test retail w/ many stores'],
+      ['(TEST) Quick Fix LLC', 'End User / Building Owner', '(248) 555-0102', 'steve@quickfix-test.com',
+       '301 Main St', 'Rochester', 'MI', '48307', 'Due on receipt', 0, 0, 'Test one-off small customer'],
+      ['(TEST) Aristeo Construction', 'General Contractor', '(313) 555-1212', 'bids@aristeo-test.com',
+       '12811 Farmington Rd', 'Livonia', 'MI', '48150', 'Net 30 Days', 1, 0, 'Test GC — union'],
+      ['(TEST) Five Lakes Cold Storage', 'Industrial', '(810) 555-1313', 'plant@flcs-test.com',
+       '4140 Lapeer Rd', 'Port Huron', 'MI', '48060', 'Net 30 Days', 0, 0, 'Test industrial freezer facility'],
+      ['(TEST) Oakland County School District', 'Municipality / Government', '(248) 555-1414', 'fac@ocsd-test.gov',
+       '2100 Pontiac Lake Rd', 'Waterford', 'MI', '48328', 'Net 30 Days', 1, 0, 'Test municipal — tax exempt'],
+      ['(TEST) Home Depot Service Request', 'Retail', '(770) 555-1515', 'srs@homedepot-test.com',
+       '2455 Paces Ferry Rd NW', 'Atlanta', 'GA', '30339', 'Net 30 Days', 0, 0, 'Test big box retail'],
+      ['(TEST) Walmart Facility Mgmt', 'Retail', '(479) 555-1616', 'fm@walmart-test.com',
+       '702 SW 8th St', 'Bentonville', 'AR', '72716', 'Net 30 Days', 0, 0, 'Test big box retail'],
+    ];
+    const customerIds = {};
+    customerSeed.forEach(c => {
+      const id = runGetId(`INSERT INTO customers 
+        (company_name,customer_type,billing_phone,billing_email,billing_address,billing_city,billing_state,billing_zip,
+         credit_terms,union_required,is_partner_company,tax_exempt,internal_notes,status,assigned_salesperson_id,is_test_data)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`,
+        [c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10], c[1] === 'Municipality / Government' ? 1 : 0, c[11], 'active', salesUser.id]);
+      customerIds[c[0]] = id;
+    });
+
+    // ── CUSTOMER_SITES (multi-site customers get several) ──
+    const siteSeed = [
+      // [company_name, site_name, store_number, addr, city, state, zip]
+      ['(TEST) Detroit Property Group', 'Downtown Office Tower', '', '500 Woodward Ave', 'Detroit', 'MI', '48226'],
+      ['(TEST) Detroit Property Group', 'Westside Industrial Park', '', '8200 W Warren Ave', 'Detroit', 'MI', '48210'],
+      ['(TEST) Detroit Property Group', 'Northland Business Center', '', '21000 Greenfield Rd', 'Oak Park', 'MI', '48237'],
+      ['(TEST) Detroit Property Group', 'Troy Commerce Park', '', '3400 Stephenson Hwy', 'Troy', 'MI', '48083'],
+      ['(TEST) Detroit Property Group', 'Southfield Tower', '', '26555 Evergreen Rd', 'Southfield', 'MI', '48076'],
+      ['(TEST) Suburban Retail Holdings', 'Store #101 — Troy', '101', '400 W Big Beaver Rd', 'Troy', 'MI', '48084'],
+      ['(TEST) Suburban Retail Holdings', 'Store #102 — Novi', '102', '27500 Novi Rd', 'Novi', 'MI', '48377'],
+      ['(TEST) Suburban Retail Holdings', 'Store #103 — Sterling Hts', '103', '36500 Van Dyke Ave', 'Sterling Heights', 'MI', '48312'],
+      ['(TEST) Suburban Retail Holdings', 'Store #104 — Ann Arbor', '104', '3655 Washtenaw Ave', 'Ann Arbor', 'MI', '48104'],
+      ['(TEST) Corewell Health System', 'Beaumont Hospital — Royal Oak', '', '3601 W 13 Mile Rd', 'Royal Oak', 'MI', '48073'],
+      ['(TEST) Corewell Health System', 'Beaumont Hospital — Farmington', '', '28050 Grand River Ave', 'Farmington Hills', 'MI', '48336'],
+      ['(TEST) Corewell Health System', 'Corewell Dearborn', '', '18101 Oakwood Blvd', 'Dearborn', 'MI', '48124'],
+      ['(TEST) Kroger Supermarket Division', 'Kroger #656 — Warren', '656', '27460 Van Dyke Ave', 'Warren', 'MI', '48093'],
+      ['(TEST) Kroger Supermarket Division', 'Kroger #729 — Sterling Heights', '729', '44475 Schoenherr Rd', 'Sterling Heights', 'MI', '48313'],
+      ['(TEST) Home Depot Service Request', 'Home Depot #2810 — Madison Hts', '2810', '32525 John R Rd', 'Madison Heights', 'MI', '48071'],
+      ['(TEST) Walmart Facility Mgmt', 'Walmart SuperCenter #2692 — Taylor', '2692', '7000 Telegraph Rd', 'Taylor', 'MI', '48180'],
+      ['(TEST) Walmart Facility Mgmt', 'Walmart #1611 — Sterling Heights', '1611', '33201 Van Dyke Ave', 'Sterling Heights', 'MI', '48312'],
+    ];
+    siteSeed.forEach(s => {
+      const cid = customerIds[s[0]]; if (!cid) return;
+      runGetId(`INSERT INTO customer_sites
+        (customer_id,site_name,store_number,address,city,state,zip,status,is_test_data)
+        VALUES (?,?,?,?,?,?,?,'active',1)`,
+        [cid, s[1], s[2], s[3], s[4], s[5], s[6]]);
+    });
+
+    // ── CUSTOMER_CONTACTS (primary contacts) ──
+    const contactSeed = [
+      // [company_name, first, last, title, phone, email, is_primary]
+      ['(TEST) ABC Builders Inc', 'Bob', 'Johnson', 'Project Manager', '(248) 555-1001', 'bob@abcbuilders-test.com', 1],
+      ['(TEST) Detroit Property Group', 'Sarah', 'Chen', 'Facilities Director', '(313) 555-2100', 'sarah@dpg-test.com', 1],
+      ['(TEST) Great Lakes Construction', 'Mike', 'Sullivan', 'Estimator', '(248) 555-3200', 'mike@glc-test.com', 1],
+      ['(TEST) Paslin Manufacturing', 'Tom', 'Reilly', 'Maintenance Lead', '(248) 555-5200', 'tom@paslin-test.com', 1],
+      ['(TEST) Corewell Health System', 'Jennifer', 'Martinez', 'Facilities Coordinator', '(616) 555-8100', 'jennifer@corewell-test.com', 1],
+      ['(TEST) DH Pace Test Partner', 'Chris', 'Kowalski', 'Subcontractor Coord', '(816) 555-7001', 'chris@dhpace-test.com', 1],
+      ['(TEST) Aristeo Construction', 'Dave', 'Moretti', 'Superintendent', '(313) 555-1212', 'dave@aristeo-test.com', 1],
+      ['(TEST) Oakland County School District', 'Linda', 'Park', 'Building Services', '(248) 555-1414', 'linda@ocsd-test.gov', 1],
+    ];
+    contactSeed.forEach(c => {
+      const cid = customerIds[c[0]]; if (!cid) return;
+      db.run(`INSERT INTO customer_contacts
+        (customer_id,site_id,first_name,last_name,title,phone,email,is_primary,is_test_data)
+        VALUES (?,0,?,?,?,?,?,?,1)`,
+        [cid, c[1], c[2], c[3], c[4], c[5], c[6]]);
+    });
+    saveDb();
+
+    // ── QUOTES (varied statuses) ──
+    const quoteSeed = [
+      // [customer_key, quote_num, project_name, scope_summary, total, status]
+      ['(TEST) Paslin Manufacturing', '', 'Paslin — 4 Sectional Doors + Controls', '4 20\'x20\' sectional doors with low voltage control wiring and motors', '150000', 'draft'],
+      ['(TEST) ABC Builders Inc', '', 'ABC — New Construction Door Package', 'New construction door package for Bldg C — 12 overhead, 2 auto entry', '285000', 'sent'],
+      ['(TEST) Quick Fix LLC', '', 'Quick Fix — Spring Replacement', 'Replace broken torsion spring, service adjustment', '485', 'accepted'],
+      ['(TEST) Kroger Supermarket Division', '', 'Kroger #656 — Dock Leveler Repair', 'Repair hydraulic pump and seal on dock leveler #3', '2850', 'sent'],
+      ['(TEST) Suburban Retail Holdings', '', 'Store 101 — Entry Door Replacement', 'Replace front entry auto door assembly (Stanley)', '7900', 'accepted'],
+      ['(TEST) Corewell Health System', '', 'Beaumont Royal Oak — Fire Door PM', 'Annual drop test + maintenance on 14 fire doors', '4200', 'declined'],
+      ['(TEST) Metro Industrial Park', '', 'MIP — High Speed Door Install', 'Install new Rytec high-speed door at shipping bay', '22500', 'draft'],
+    ];
+    const quoteIds = {};
+    quoteSeed.forEach((q, idx) => {
+      const cid = customerIds[q[0]]; if (!cid) return;
+      const id = runGetId(`INSERT INTO quotes
+        (quote_number,rep_id,rep_name,customer_id,client_name,contact_name,address,phone,email,
+         project_name,scope_summary,scopes,options,notes,subtotal,tax,total,valid_for,status,is_test_data)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`,
+        [q[1], salesUser.id, salesName, cid, q[0], '', '', '', '',
+         q[2], q[3], '[]', '[]', 'Test seeded quote',
+         (parseFloat(q[4])*0.94).toFixed(2), (parseFloat(q[4])*0.06).toFixed(2), q[4],
+         '30 days', q[5]]);
+      quoteIds[idx] = id;
+    });
+
+    // ── PROJECTS (few statuses) ──
+    const projectSeed = [
+      // [customer_key, job_num, name, contract_value, status, scope]
+      ['(TEST) Quick Fix LLC', '', 'Quick Fix — Spring Replacement', '485', 'scheduled', 'Replace broken torsion spring'],
+      ['(TEST) Suburban Retail Holdings', '', 'Store 101 — Entry Door Replacement', '7900', 'in_progress', 'Auto door replacement'],
+      ['(TEST) ABC Builders Inc', '', 'ABC — Bldg C Door Package (Prior Year)', '285000', 'complete', 'Completed new construction project'],
+    ];
+    projectSeed.forEach(p => {
+      const cid = customerIds[p[0]]; if (!cid) return;
+      runGetId(`INSERT INTO projects
+        (job_number,project_name,customer_id,customer_name,contract_value,billing_type,scope_brief,status,
+         created_by,work_types,required_skills,revenue_department,job_type,is_test_data)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1)`,
+        [p[1], p[2], cid, p[0], p[3], 'aftermarket', p[5], p[4], salesUser.id,
+         '[]', '[]', 'aftermarket', 'project']);
+    });
+    saveDb();
+
+    // Final counts
+    const counts = {};
+    ['customers','customer_sites','customer_contacts','quotes','projects']
+      .forEach(t => { const r = get(`SELECT COUNT(*) AS c FROM ${t} WHERE is_test_data=1`); counts[t] = r ? r.c : 0; });
+
+    res.json({ ok: true, seeded: counts });
+  } catch(e) {
+    console.error('Test seed error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/test-data/purge', requireAdmin, (req, res) => {
+  try {
+    const tables = ['project_costs','project_hours','project_notes','project_phases','projects',
+                    'quotes','customer_contacts','customer_equipment','customer_sites','customers'];
+    const deleted = {};
+    tables.forEach(t => {
+      try {
+        const before = get(`SELECT COUNT(*) AS c FROM ${t} WHERE is_test_data=1`);
+        const n = before ? before.c : 0;
+        if (n > 0) db.run(`DELETE FROM ${t} WHERE is_test_data=1`);
+        deleted[t] = n;
+      } catch(e) { deleted[t] = 0; }
+    });
+    saveDb();
+    res.json({ ok: true, deleted });
+  } catch(e) {
+    console.error('Test purge error:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // ─── CATCH-ALL ────────────────────────────────────────────────────────────────
 app.get('*',(req,res)=>res.sendFile(path.join(__dirname,'public','index.html')));
