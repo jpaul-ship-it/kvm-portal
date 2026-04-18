@@ -455,6 +455,9 @@ async function initDb() {
   try { db.run(`ALTER TABLE projects ADD COLUMN budget_equipment REAL DEFAULT 0`); saveDb(); } catch(e){}
   try { db.run(`ALTER TABLE projects ADD COLUMN budget_labor REAL DEFAULT 0`); saveDb(); } catch(e){}
   try { db.run(`ALTER TABLE projects ADD COLUMN budget_subs REAL DEFAULT 0`); saveDb(); } catch(e){}
+  // Phase 1A.1 — link quote to customer record
+  try { db.run(`ALTER TABLE quotes ADD COLUMN customer_id INTEGER DEFAULT 0`); saveDb(); } catch(e){}
+  try { db.run(`ALTER TABLE projects ADD COLUMN job_type TEXT DEFAULT 'project'`); saveDb(); } catch(e){}
   try { db.run(`INSERT OR IGNORE INTO settings (key,value) VALUES ('po_format','MMYY-###')`); saveDb(); } catch(e){}
   try { db.run(`INSERT OR IGNORE INTO settings (key,value) VALUES ('po_prefix','')`); saveDb(); } catch(e){}
 
@@ -1550,9 +1553,9 @@ app.get('/api/quotes/:id', requireAuth, (req, res) => {
 app.post('/api/quotes', requireAuth, (req, res) => {
   const u = get('SELECT first_name,last_name FROM users WHERE id=?', [req.session.userId]);
   const rep_name = u.first_name + (u.last_name ? ' ' + u.last_name : '');
-  const { quote_number, client_name, contact_name, address, email, phone, project_name, scope_summary, scopes, options, notes, subtotal, tax, total, valid_for, status } = req.body;
-  const id = runGetId(`INSERT INTO quotes (quote_number,rep_id,rep_name,client_name,contact_name,address,email,phone,project_name,scope_summary,scopes,options,notes,subtotal,tax,total,valid_for,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [quote_number||'', req.session.userId, rep_name, client_name||'', contact_name||'', address||'', email||'', phone||'', project_name||'', scope_summary||'', JSON.stringify(scopes||[]), JSON.stringify(options||[]), notes||'', subtotal||'', tax||'', total||'', valid_for||'30 days', status||'draft']);
+  const { quote_number, customer_id, client_name, contact_name, address, email, phone, project_name, scope_summary, scopes, options, notes, subtotal, tax, total, valid_for, status } = req.body;
+  const id = runGetId(`INSERT INTO quotes (quote_number,rep_id,rep_name,customer_id,client_name,contact_name,address,email,phone,project_name,scope_summary,scopes,options,notes,subtotal,tax,total,valid_for,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [quote_number||'', req.session.userId, rep_name, parseInt(customer_id)||0, client_name||'', contact_name||'', address||'', email||'', phone||'', project_name||'', scope_summary||'', JSON.stringify(scopes||[]), JSON.stringify(options||[]), notes||'', subtotal||'', tax||'', total||'', valid_for||'30 days', status||'draft']);
   res.json({ id });
 });
 
@@ -1561,10 +1564,44 @@ app.put('/api/quotes/:id', requireAuth, (req, res) => {
   if (!q) return res.status(404).json({ error: 'Not found' });
   const role = getUserRole(req.session.userId);
   if (!ADMIN_ROLES.includes(role) && q.rep_id !== req.session.userId) return res.status(403).json({ error: 'Access denied' });
-  const { quote_number, client_name, contact_name, address, email, phone, project_name, scope_summary, scopes, options, notes, subtotal, tax, total, valid_for, status } = req.body;
-  run(`UPDATE quotes SET quote_number=?,client_name=?,contact_name=?,address=?,email=?,phone=?,project_name=?,scope_summary=?,scopes=?,options=?,notes=?,subtotal=?,tax=?,total=?,valid_for=?,status=?,updated_at=datetime('now') WHERE id=?`,
-    [quote_number||'', client_name||'', contact_name||'', address||'', email||'', phone||'', project_name||'', scope_summary||'', JSON.stringify(scopes||[]), JSON.stringify(options||[]), notes||'', subtotal||'', tax||'', total||'', valid_for||'30 days', status||'draft', req.params.id]);
+  const { quote_number, customer_id, client_name, contact_name, address, email, phone, project_name, scope_summary, scopes, options, notes, subtotal, tax, total, valid_for, status } = req.body;
+  run(`UPDATE quotes SET quote_number=?,customer_id=?,client_name=?,contact_name=?,address=?,email=?,phone=?,project_name=?,scope_summary=?,scopes=?,options=?,notes=?,subtotal=?,tax=?,total=?,valid_for=?,status=?,updated_at=datetime('now') WHERE id=?`,
+    [quote_number||'', parseInt(customer_id)||0, client_name||'', contact_name||'', address||'', email||'', phone||'', project_name||'', scope_summary||'', JSON.stringify(scopes||[]), JSON.stringify(options||[]), notes||'', subtotal||'', tax||'', total||'', valid_for||'30 days', status||'draft', req.params.id]);
   res.json({ ok: true });
+});
+
+// ═══ PHASE 1A.1 — Create Project from awarded Quote ═══
+app.post('/api/quotes/:id/create-project', requireAuth, (req, res) => {
+  const q = get('SELECT * FROM quotes WHERE id=?', [req.params.id]);
+  if (!q) return res.status(404).json({ error: 'Quote not found' });
+  // Extract contract value from total field (may have $ or commas)
+  const rawTotal = (q.total||'').toString().replace(/[^0-9.-]/g,'');
+  const contractVal = rawTotal ? parseFloat(rawTotal).toFixed(2) : '';
+  // Try to infer project name
+  const projectName = q.project_name || q.scope_summary || ('Project from Quote ' + (q.quote_number||q.id));
+  // Customer — prefer linked customer_id, fall back to client_name as text
+  const customerId = q.customer_id || 0;
+  const customerName = q.client_name || '';
+  // Location — fall back to quote address
+  const location = q.address || '';
+  // Scope — roll up scope_summary and notes
+  const scopeBrief = q.scope_summary || '';
+  const notes = q.notes || '';
+  // Try to match salesperson's department to pre-fill revenue_department
+  let revenueDept = '';
+  if (q.rep_id) {
+    const rep = get('SELECT sales_department FROM users WHERE id=?', [q.rep_id]);
+    if (rep && rep.sales_department) revenueDept = rep.sales_department;
+  }
+  const projectId = runGetId(`INSERT INTO projects
+    (job_number,project_name,customer_id,customer_name,site_id,location,quote_id,quote_number,
+     contract_value,billing_type,scope_brief,status,start_date,target_end_date,foreman_id,foreman_name,
+     assigned_techs,notes,created_by,work_types,required_skills,revenue_department,job_type)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [q.quote_number||'', projectName, customerId, customerName, 0, location, q.id, q.quote_number||'',
+     contractVal, 'aftermarket', scopeBrief, 'awarded', '', '', 0, '',
+     '[]', notes, req.session.userId, '[]', '[]', revenueDept, 'project']);
+  res.json({ ok: true, project_id: projectId });
 });
 
 app.delete('/api/quotes/:id', requireAdmin, (req, res) => {
