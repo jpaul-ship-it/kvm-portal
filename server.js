@@ -2265,74 +2265,321 @@ app.post('/api/test-data/seed', requireAdmin, (req, res) => {
         [cid, s[1], s[2], s[3], s[4], s[5], s[6]]);
     });
 
-    // ── CUSTOMER_CONTACTS (primary contacts) ──
+    // ── CUSTOMER_CONTACTS (primary contacts — all 15 customers) ──
     const contactSeed = [
-      // [company_name, first, last, title, phone, email, is_primary]
-      ['(TEST) ABC Builders Inc', 'Bob', 'Johnson', 'Project Manager', '(248) 555-1001', 'bob@abcbuilders-test.com', 1],
-      ['(TEST) Detroit Property Group', 'Sarah', 'Chen', 'Facilities Director', '(313) 555-2100', 'sarah@dpg-test.com', 1],
-      ['(TEST) Great Lakes Construction', 'Mike', 'Sullivan', 'Estimator', '(248) 555-3200', 'mike@glc-test.com', 1],
-      ['(TEST) Paslin Manufacturing', 'Tom', 'Reilly', 'Maintenance Lead', '(248) 555-5200', 'tom@paslin-test.com', 1],
-      ['(TEST) Corewell Health System', 'Jennifer', 'Martinez', 'Facilities Coordinator', '(616) 555-8100', 'jennifer@corewell-test.com', 1],
-      ['(TEST) DH Pace Test Partner', 'Chris', 'Kowalski', 'Subcontractor Coord', '(816) 555-7001', 'chris@dhpace-test.com', 1],
-      ['(TEST) Aristeo Construction', 'Dave', 'Moretti', 'Superintendent', '(313) 555-1212', 'dave@aristeo-test.com', 1],
-      ['(TEST) Oakland County School District', 'Linda', 'Park', 'Building Services', '(248) 555-1414', 'linda@ocsd-test.gov', 1],
+      // [company_key, first, last, title, phone, email]
+      ['(TEST) ABC Builders Inc', 'Bob', 'Johnson', 'Project Manager', '(248) 555-1001', 'bob@abcbuilders-test.com'],
+      ['(TEST) Detroit Property Group', 'Sarah', 'Chen', 'Facilities Director', '(313) 555-2100', 'sarah@dpg-test.com'],
+      ['(TEST) Great Lakes Construction', 'Mike', 'Sullivan', 'Estimator', '(248) 555-3200', 'mike@glc-test.com'],
+      ['(TEST) Metro Industrial Park', 'Karen', 'Black', 'Facilities Manager', '(586) 555-4100', 'karen@mip-test.com'],
+      ['(TEST) Paslin Manufacturing', 'Tom', 'Reilly', 'Maintenance Lead', '(248) 555-5200', 'tom@paslin-test.com'],
+      ['(TEST) Suburban Retail Holdings', 'Rachel', 'Green', 'Regional Ops Mgr', '(248) 555-6300', 'rachel@srh-test.com'],
+      ['(TEST) DH Pace Test Partner', 'Chris', 'Kowalski', 'Subcontractor Coord', '(816) 555-7001', 'chris@dhpace-test.com'],
+      ['(TEST) Corewell Health System', 'Jennifer', 'Martinez', 'Facilities Coordinator', '(616) 555-8100', 'jennifer@corewell-test.com'],
+      ['(TEST) Kroger Supermarket Division', 'Dan', 'Reeves', 'Midwest Facilities', '(513) 555-9100', 'dan@kroger-test.com'],
+      ['(TEST) Quick Fix LLC', 'Steve', 'Park', 'Owner', '(248) 555-0102', 'steve@quickfix-test.com'],
+      ['(TEST) Aristeo Construction', 'Dave', 'Moretti', 'Superintendent', '(313) 555-1212', 'dave@aristeo-test.com'],
+      ['(TEST) Five Lakes Cold Storage', 'Jim', 'Caldwell', 'Plant Manager', '(810) 555-1313', 'jim@flcs-test.com'],
+      ['(TEST) Oakland County School District', 'Linda', 'Park', 'Building Services', '(248) 555-1414', 'linda@ocsd-test.gov'],
+      ['(TEST) Home Depot Service Request', 'Marcus', 'Webb', 'Facilities Coord', '(770) 555-1515', 'marcus@homedepot-test.com'],
+      ['(TEST) Walmart Facility Mgmt', 'Teresa', 'Nguyen', 'Midwest Facilities', '(479) 555-1616', 'teresa@walmart-test.com'],
     ];
     contactSeed.forEach(c => {
       const cid = customerIds[c[0]]; if (!cid) return;
       db.run(`INSERT INTO customer_contacts
         (customer_id,site_id,first_name,last_name,title,phone,email,is_primary,is_test_data)
-        VALUES (?,0,?,?,?,?,?,?,1)`,
-        [cid, c[1], c[2], c[3], c[4], c[5], c[6]]);
+        VALUES (?,0,?,?,?,?,?,1,1)`,
+        [cid, c[1], c[2], c[3], c[4], c[5]]);
     });
     saveDb();
 
-    // ── QUOTES (varied statuses) ──
+    // ── QUOTES (varied statuses + REAL scope line items) ──
+    // scope format: array of { title, lines: [{ desc, price }] }
     const quoteSeed = [
-      // [customer_key, quote_num, project_name, scope_summary, total, status]
-      ['(TEST) Paslin Manufacturing', '', 'Paslin — 4 Sectional Doors + Controls', '4 20\'x20\' sectional doors with low voltage control wiring and motors', '150000', 'draft'],
-      ['(TEST) ABC Builders Inc', '', 'ABC — New Construction Door Package', 'New construction door package for Bldg C — 12 overhead, 2 auto entry', '285000', 'sent'],
-      ['(TEST) Quick Fix LLC', '', 'Quick Fix — Spring Replacement', 'Replace broken torsion spring, service adjustment', '485', 'accepted'],
-      ['(TEST) Kroger Supermarket Division', '', 'Kroger #656 — Dock Leveler Repair', 'Repair hydraulic pump and seal on dock leveler #3', '2850', 'sent'],
-      ['(TEST) Suburban Retail Holdings', '', 'Store 101 — Entry Door Replacement', 'Replace front entry auto door assembly (Stanley)', '7900', 'accepted'],
-      ['(TEST) Corewell Health System', '', 'Beaumont Royal Oak — Fire Door PM', 'Annual drop test + maintenance on 14 fire doors', '4200', 'declined'],
-      ['(TEST) Metro Industrial Park', '', 'MIP — High Speed Door Install', 'Install new Rytec high-speed door at shipping bay', '22500', 'draft'],
+      {
+        customerKey: '(TEST) Paslin Manufacturing',
+        projectName: 'Paslin — 4 Sectional Doors + Controls',
+        scopeSummary: '4 20\'x20\' sectional doors with low voltage control wiring and motors',
+        status: 'draft',
+        scopes: [
+          { title: 'Shipping Bay Doors (4 ea.)', lines: [
+            { desc: '20\'x20\' sectional doors, insulated, white', price: '92000' },
+            { desc: 'LiftMaster commercial operators (4)', price: '18000' },
+            { desc: 'Motor and track hardware, all openings', price: '12000' },
+          ]},
+          { title: 'Controls & Low-Voltage Wiring', lines: [
+            { desc: 'Safety edges, photo eyes, pull stations', price: '8500' },
+            { desc: 'Low voltage wiring + conduit runs', price: '11500' },
+          ]},
+          { title: 'Labor & Installation', lines: [
+            { desc: 'Removal of existing doors, install new', price: '8000' },
+          ]},
+        ],
+        total: '150000',
+      },
+      {
+        customerKey: '(TEST) ABC Builders Inc',
+        projectName: 'ABC — New Construction Door Package',
+        scopeSummary: 'New construction door package for Bldg C — 12 overhead, 2 auto entry',
+        status: 'sent',
+        scopes: [
+          { title: 'Dock Doors (8 ea.)', lines: [
+            { desc: '9\'x10\' insulated sectional, w/ operators', price: '112000' },
+          ]},
+          { title: 'Drive-Thru Doors (4 ea.)', lines: [
+            { desc: '12\'x14\' high-speed Rytec FastSeal', price: '88000' },
+          ]},
+          { title: 'Auto Entry (2 ea.)', lines: [
+            { desc: 'Stanley Dura-Glide SL automatic sliding', price: '32000' },
+          ]},
+          { title: 'Installation & Commissioning', lines: [
+            { desc: 'Install all openings, test, punch', price: '38000' },
+            { desc: 'Coordination w/ GC, site mgmt', price: '15000' },
+          ]},
+        ],
+        total: '285000',
+      },
+      {
+        customerKey: '(TEST) Quick Fix LLC',
+        projectName: 'Quick Fix — Spring Replacement',
+        scopeSummary: 'Replace broken torsion spring, service adjustment',
+        status: 'accepted',
+        scopes: [
+          { title: 'Spring Replacement', lines: [
+            { desc: 'Torsion spring (1 ea.)', price: '185' },
+            { desc: 'Labor — replace spring, adjust tension', price: '250' },
+            { desc: 'Service call fee', price: '50' },
+          ]},
+        ],
+        total: '485',
+      },
+      {
+        customerKey: '(TEST) Kroger Supermarket Division',
+        projectName: 'Kroger #656 — Dock Leveler Repair',
+        scopeSummary: 'Repair hydraulic pump and seal on dock leveler #3',
+        status: 'sent',
+        scopes: [
+          { title: 'Dock Leveler #3 Repair', lines: [
+            { desc: 'Replace hydraulic pump assembly', price: '1450' },
+            { desc: 'Replace pit seals and bumpers', price: '650' },
+            { desc: 'Labor (8 hrs, 2 techs)', price: '750' },
+          ]},
+        ],
+        total: '2850',
+      },
+      {
+        customerKey: '(TEST) Suburban Retail Holdings',
+        projectName: 'Store 101 — Entry Door Replacement',
+        scopeSummary: 'Replace front entry auto door assembly (Stanley)',
+        status: 'accepted',
+        scopes: [
+          { title: 'Stanley Auto Door — Front Entry', lines: [
+            { desc: 'Stanley Dura-Glide SL-50 complete assembly', price: '5800' },
+            { desc: 'Removal of existing door', price: '450' },
+            { desc: 'Install, tune, commission', price: '1650' },
+          ]},
+        ],
+        total: '7900',
+      },
+      {
+        customerKey: '(TEST) Corewell Health System',
+        projectName: 'Beaumont Royal Oak — Fire Door PM',
+        scopeSummary: 'Annual drop test + maintenance on 14 fire doors',
+        status: 'declined',
+        scopes: [
+          { title: 'Annual Fire Door Inspection', lines: [
+            { desc: 'Drop test + inspection, 14 doors', price: '2800' },
+            { desc: 'NFPA 80 compliance documentation', price: '500' },
+            { desc: 'Minor adjustments + lubrication', price: '900' },
+          ]},
+        ],
+        total: '4200',
+      },
+      {
+        customerKey: '(TEST) Metro Industrial Park',
+        projectName: 'MIP — High Speed Door Install',
+        scopeSummary: 'Install new Rytec high-speed door at shipping bay',
+        status: 'draft',
+        scopes: [
+          { title: 'Rytec Predator 14\' Installation', lines: [
+            { desc: 'Rytec Predator 14\'x14\', insulated', price: '14500' },
+            { desc: 'Activation package — motion + push buttons', price: '2200' },
+            { desc: 'Removal of existing door', price: '1200' },
+            { desc: 'Labor — install, wire, commission', price: '3800' },
+            { desc: 'Freight to site', price: '800' },
+          ]},
+        ],
+        total: '22500',
+      },
     ];
     const quoteIds = {};
     quoteSeed.forEach((q, idx) => {
-      const cid = customerIds[q[0]]; if (!cid) return;
+      const cid = customerIds[q.customerKey]; if (!cid) return;
+      // Get primary contact name if available
+      const pc = get('SELECT first_name,last_name,phone,email FROM customer_contacts WHERE customer_id=? AND is_primary=1 LIMIT 1', [cid]);
+      const contactName = pc ? ((pc.first_name||'') + ' ' + (pc.last_name||'')).trim() : '';
+      const cust = get('SELECT billing_phone,billing_email,billing_address,billing_city,billing_state,billing_zip FROM customers WHERE id=?', [cid]);
+      const addr = cust ? [cust.billing_address, [cust.billing_city, cust.billing_state].filter(Boolean).join(', '), cust.billing_zip].filter(Boolean).join(', ') : '';
+      // Compute subtotal + tax from total
+      const totalNum = parseFloat(q.total) || 0;
+      const subtotal = (totalNum / 1.06).toFixed(2);
+      const tax = (totalNum - parseFloat(subtotal)).toFixed(2);
       const id = runGetId(`INSERT INTO quotes
         (quote_number,rep_id,rep_name,customer_id,client_name,contact_name,address,phone,email,
          project_name,scope_summary,scopes,options,notes,subtotal,tax,total,valid_for,status,is_test_data)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`,
-        [q[1], salesUser.id, salesName, cid, q[0], '', '', '', '',
-         q[2], q[3], '[]', '[]', 'Test seeded quote',
-         (parseFloat(q[4])*0.94).toFixed(2), (parseFloat(q[4])*0.06).toFixed(2), q[4],
-         '30 days', q[5]]);
+        ['', salesUser.id, salesName, cid, q.customerKey, contactName, addr,
+         cust ? cust.billing_phone : '', cust ? cust.billing_email : '',
+         q.projectName, q.scopeSummary,
+         JSON.stringify(q.scopes || []), '[]',
+         'Test seeded quote with realistic scope line items.',
+         subtotal, tax, q.total,
+         '30 days', q.status]);
       quoteIds[idx] = id;
     });
 
-    // ── PROJECTS (few statuses) ──
+    // ── PROJECTS (varied statuses, with budgets) ──
     const projectSeed = [
-      // [customer_key, job_num, name, contract_value, status, scope]
-      ['(TEST) Quick Fix LLC', '', 'Quick Fix — Spring Replacement', '485', 'scheduled', 'Replace broken torsion spring'],
-      ['(TEST) Suburban Retail Holdings', '', 'Store 101 — Entry Door Replacement', '7900', 'in_progress', 'Auto door replacement'],
-      ['(TEST) ABC Builders Inc', '', 'ABC — Bldg C Door Package (Prior Year)', '285000', 'complete', 'Completed new construction project'],
+      {
+        customerKey: '(TEST) Quick Fix LLC',
+        projectName: 'Quick Fix — Spring Replacement',
+        contractValue: '485',
+        billingType: 'aftermarket',
+        status: 'scheduled',
+        scope: 'Replace broken torsion spring on residential-style sectional door at commercial facility. Service adjustment to rebalance and inspect rollers.',
+        budgets: { mat: 185, equip: 0, labor: 200, subs: 0 },
+        seedPhases: [
+          ['Parts Ordered', 'Spring on hand from shop stock', 'complete', 1],
+          ['Site Visit & Repair', 'Tech on site, replace spring, test', 'pending', 2],
+        ],
+        seedCosts: [], // too small to itemize
+        seedHours: [],
+        seedNotes: [['Customer called Tuesday — broken spring, facility manager Steve. Tech dispatched Thursday morning.']],
+      },
+      {
+        customerKey: '(TEST) Suburban Retail Holdings',
+        projectName: 'Store 101 — Entry Door Replacement',
+        contractValue: '7900',
+        billingType: 'aftermarket',
+        status: 'in_progress',
+        scope: 'Replace complete Stanley Dura-Glide SL-50 auto door assembly at front entry. Remove existing, install new, commission and train staff.',
+        budgets: { mat: 4200, equip: 200, labor: 2400, subs: 0 },
+        seedPhases: [
+          ['Material Ordered', 'Stanley door ordered, 10-day lead time', 'complete', 1],
+          ['Material Received', 'Door arrived at shop', 'complete', 2],
+          ['Installation', 'Remove existing + install new at store', 'in_progress', 3],
+          ['Commissioning & Training', 'Tune door, train store manager', 'pending', 4],
+        ],
+        seedCosts: [
+          ['materials','Stanley Access','Stanley Dura-Glide SL-50 complete assy','1','3850','3850','INV-10055'],
+          ['materials','Stanley Access','Weather stripping & threshold kit','1','285','285','INV-10055'],
+          ['equipment','United Rentals','Scissor lift rental — 2 days','2','175','350','UR-88721'],
+          ['labor','KVM Internal','Tech labor — remove existing (Mike R, 4 hrs)','4','65','260',''],
+          ['labor','KVM Internal','Tech labor — install new (Kevin B + Mike R, 6 hrs ea)','12','65','780',''],
+        ],
+        seedHours: [
+          ['Mike R','2026-04-14',4,'Removed existing Stanley auto door'],
+          ['Kevin B','2026-04-15',6,'New door install — frame setup'],
+          ['Mike R','2026-04-15',6,'New door install — hardware + operator'],
+        ],
+        seedNotes: [
+          ['Awarded 3/28. Material ordered same day, arrived 4/8. Scheduled install 4/14-4/15.'],
+          ['Existing door removed clean — no frame damage. Install went smoothly.'],
+          ['Final commissioning + staff training scheduled for 4/19.'],
+        ],
+      },
+      {
+        customerKey: '(TEST) ABC Builders Inc',
+        projectName: 'ABC — Bldg C Door Package (Prior Year)',
+        contractValue: '285000',
+        billingType: 'new_construction_monthly',
+        status: 'complete',
+        scope: 'New construction door package for Building C — 8 dock doors, 4 Rytec high-speed doors, 2 Stanley auto entries. Full install and commissioning.',
+        budgets: { mat: 188000, equip: 12000, labor: 58000, subs: 9000 },
+        seedPhases: [
+          ['Shop Drawings', 'Submit drawings for GC approval', 'complete', 1],
+          ['Material Order', 'Factory orders placed', 'complete', 2],
+          ['Delivery Staging', 'Material received + staged at site', 'complete', 3],
+          ['Install — Dock Doors', '8 sectional installs', 'complete', 4],
+          ['Install — Rytec', '4 high-speed installs', 'complete', 5],
+          ['Install — Auto Entry', 'Stanley installs', 'complete', 6],
+          ['Punch List & Close Out', 'Owner walkthrough + corrections', 'complete', 7],
+        ],
+        seedCosts: [
+          ['materials','Overhead Door Corp','8 sectional doors w/ operators','8','14000','112000','OH-22980'],
+          ['materials','Rytec','4 FastSeal high-speed doors','4','22000','88000','RYT-11287'],
+          ['materials','Stanley Access','2 Dura-Glide SL auto entries','2','16000','32000','STA-55120'],
+          ['equipment','Sunbelt Rentals','Reach lift rental — 3 weeks','21','285','5985','SB-55001'],
+          ['equipment','United Rentals','Scissor lift — 2 weeks','14','175','2450','UR-88831'],
+          ['labor','KVM Internal','Crew labor — install weeks 1-3','240','65','15600',''],
+          ['labor','KVM Internal','Crew labor — commissioning + punch','80','65','5200',''],
+          ['subs','Acme Electrical','Low voltage runs for operators','1','7800','7800','ACE-3391'],
+        ],
+        seedHours: [
+          ['Kevin B','2026-02-10',8,'Shop drawings submitted to GC'],
+          ['Kevin B','2026-03-02',10,'Dock doors install — day 1'],
+          ['Mike R','2026-03-02',10,'Dock doors install — day 1'],
+          ['Kevin B','2026-03-03',10,'Dock doors install — day 2'],
+          ['Mike R','2026-03-03',10,'Dock doors install — day 2'],
+          ['Skyler W','2026-03-09',8,'Rytec high-speed install — start'],
+        ],
+        seedNotes: [
+          ['Project kicked off January 2026 with ABC Builders — large new construction.'],
+          ['Shop drawings approved by GC 2/14.'],
+          ['All material delivered to site by end of February, on schedule.'],
+          ['Punch list complete 4/5/26 — final invoice sent.'],
+        ],
+      },
     ];
     projectSeed.forEach(p => {
-      const cid = customerIds[p[0]]; if (!cid) return;
-      runGetId(`INSERT INTO projects
+      const cid = customerIds[p.customerKey]; if (!cid) return;
+      const pid = runGetId(`INSERT INTO projects
         (job_number,project_name,customer_id,customer_name,contract_value,billing_type,scope_brief,status,
-         created_by,work_types,required_skills,revenue_department,job_type,is_test_data)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1)`,
-        [p[1], p[2], cid, p[0], p[3], 'aftermarket', p[5], p[4], salesUser.id,
-         '[]', '[]', 'aftermarket', 'project']);
+         created_by,work_types,required_skills,revenue_department,job_type,is_test_data,
+         budget_materials,budget_equipment,budget_labor,budget_subs)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)`,
+        ['', p.projectName, cid, p.customerKey, p.contractValue, p.billingType, p.scope, p.status,
+         salesUser.id, '[]', '[]', 'aftermarket', 'project',
+         p.budgets.mat, p.budgets.equip, p.budgets.labor, p.budgets.subs]);
+
+      // Phases
+      (p.seedPhases || []).forEach(ph => {
+        db.run(`INSERT INTO project_phases
+          (project_id,phase_name,description,status,sort_order,is_test_data)
+          VALUES (?,?,?,?,?,1)`,
+          [pid, ph[0], ph[1], ph[2], ph[3]]);
+      });
+
+      // Costs
+      (p.seedCosts || []).forEach(c => {
+        db.run(`INSERT INTO project_costs
+          (project_id,po_number,category,vendor,description,quantity,unit_cost,total_cost,invoice_number,logged_by,is_test_data)
+          VALUES (?,'',?,?,?,?,?,?,?,?,1)`,
+          [pid, c[0], c[1], c[2], parseFloat(c[3]), parseFloat(c[4]), parseFloat(c[5]), c[6], salesName]);
+      });
+
+      // Hours
+      (p.seedHours || []).forEach(h => {
+        db.run(`INSERT INTO project_hours
+          (project_id,user_id,user_name,work_date,hours,entry_type,notes,logged_by,is_test_data)
+          VALUES (?,?,?,?,?,'manual',?,?,1)`,
+          [pid, salesUser.id, h[0], h[1], h[2], h[3], salesName]);
+      });
+
+      // Notes
+      (p.seedNotes || []).forEach(n => {
+        db.run(`INSERT INTO project_notes
+          (project_id,author_id,author_name,note,is_test_data)
+          VALUES (?,?,?,?,1)`,
+          [pid, salesUser.id, salesName, n[0]]);
+      });
     });
     saveDb();
 
     // Final counts
     const counts = {};
-    ['customers','customer_sites','customer_contacts','quotes','projects']
-      .forEach(t => { const r = get(`SELECT COUNT(*) AS c FROM ${t} WHERE is_test_data=1`); counts[t] = r ? r.c : 0; });
+    ['customers','customer_sites','customer_contacts','quotes','projects','project_phases','project_costs','project_hours','project_notes']
+      .forEach(t => { try { const r = get(`SELECT COUNT(*) AS c FROM ${t} WHERE is_test_data=1`); counts[t] = r ? r.c : 0; } catch(e) { counts[t] = 0; } });
 
     res.json({ ok: true, seeded: counts });
   } catch(e) {
