@@ -459,6 +459,15 @@ async function initDb() {
   try { db.run(`ALTER TABLE quotes ADD COLUMN customer_id INTEGER DEFAULT 0`); saveDb(); } catch(e){}
   try { db.run(`ALTER TABLE projects ADD COLUMN job_type TEXT DEFAULT 'project'`); saveDb(); } catch(e){}
 
+  // Phase 1A.2a — Quick Job / Project fork
+  // material_status: 'from_stock' | 'ordered' | 'partial' | 'received'
+  try { db.run(`ALTER TABLE projects ADD COLUMN material_status TEXT DEFAULT 'ordered'`); saveDb(); } catch(e){}
+  try { db.run(`ALTER TABLE projects ADD COLUMN material_notes TEXT DEFAULT ''`); saveDb(); } catch(e){}
+  // bill_status: 'not_ready' | 'ready_to_bill' | 'billed' | 'paid' (simpler than a full AR state machine)
+  try { db.run(`ALTER TABLE projects ADD COLUMN bill_status TEXT DEFAULT 'not_ready'`); saveDb(); } catch(e){}
+  try { db.run(`ALTER TABLE projects ADD COLUMN bill_notes TEXT DEFAULT ''`); saveDb(); } catch(e){}
+  try { db.run(`ALTER TABLE projects ADD COLUMN invoice_number TEXT DEFAULT ''`); saveDb(); } catch(e){}
+
   // Phase 1A.1.1 — shared monthly job number counter
   db.run(`CREATE TABLE IF NOT EXISTS job_sequence (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1596,11 +1605,16 @@ app.put('/api/quotes/:id', requireAuth, (req, res) => {
 app.post('/api/quotes/:id/create-project', requireAuth, (req, res) => {
   const q = get('SELECT * FROM quotes WHERE id=?', [req.params.id]);
   if (!q) return res.status(404).json({ error: 'Quote not found' });
+  // Phase 1A.2a — accept job_type ('project' | 'quick_job') and material_status from body
+  const jobType = (req.body && req.body.job_type === 'quick_job') ? 'quick_job' : 'project';
+  const materialStatus = (req.body && ['from_stock','ordered','partial','received'].includes(req.body.material_status))
+                        ? req.body.material_status
+                        : (jobType === 'quick_job' ? 'from_stock' : 'ordered');
   // Extract contract value from total field (may have $ or commas)
   const rawTotal = (q.total||'').toString().replace(/[^0-9.-]/g,'');
   const contractVal = rawTotal ? parseFloat(rawTotal).toFixed(2) : '';
   // Try to infer project name
-  const projectName = q.project_name || q.scope_summary || ('Project from Quote ' + (q.quote_number||q.id));
+  const projectName = q.project_name || q.scope_summary || ((jobType === 'quick_job' ? 'Quick Job' : 'Project') + ' from Quote ' + (q.quote_number||q.id));
   // Customer — prefer linked customer_id, fall back to client_name as text
   const customerId = q.customer_id || 0;
   const customerName = q.client_name || '';
@@ -1615,15 +1629,19 @@ app.post('/api/quotes/:id/create-project', requireAuth, (req, res) => {
     const rep = get('SELECT sales_department FROM users WHERE id=?', [q.rep_id]);
     if (rep && rep.sales_department) revenueDept = rep.sales_department;
   }
+  // Default billing type differs by job type
+  const billingType = jobType === 'quick_job' ? 'aftermarket' : 'aftermarket';
+  // Initial status: quick jobs go to 'awarded' (ready for scheduling as soon as materials OK); projects also 'awarded'
+  const initialStatus = 'awarded';
   const projectId = runGetId(`INSERT INTO projects
     (job_number,project_name,customer_id,customer_name,site_id,location,quote_id,quote_number,
-     contract_value,billing_type,scope_brief,status,start_date,target_end_date,foreman_id,foreman_name,
+     contract_value,billing_type,scope_brief,status,material_status,bill_status,start_date,target_end_date,foreman_id,foreman_name,
      assigned_techs,notes,created_by,work_types,required_skills,revenue_department,job_type)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [q.quote_number||'', projectName, customerId, customerName, 0, location, q.id, q.quote_number||'',
-     contractVal, 'aftermarket', scopeBrief, 'awarded', '', '', 0, '',
-     '[]', notes, req.session.userId, '[]', '[]', revenueDept, 'project']);
-  res.json({ ok: true, project_id: projectId });
+     contractVal, billingType, scopeBrief, initialStatus, materialStatus, 'not_ready', '', '', 0, '',
+     '[]', notes, req.session.userId, '[]', '[]', revenueDept, jobType]);
+  res.json({ ok: true, project_id: projectId, job_type: jobType });
 });
 
 app.delete('/api/quotes/:id', requireAdmin, (req, res) => {
@@ -1647,12 +1665,17 @@ app.post('/api/quotes/:id/duplicate', requireAuth, (req, res) => {
 
 // List projects
 app.get('/api/projects', requireAuth, (req, res) => {
-  const { status, search } = req.query;
+  const { status, search, job_type } = req.query;
   let sql = `SELECT p.*, 
     (SELECT COUNT(*) FROM project_phases WHERE project_id=p.id) as phase_count,
     (SELECT COALESCE(SUM(hours),0) FROM project_hours WHERE project_id=p.id) as total_hours
     FROM projects p WHERE 1=1`;
   const params = [];
+  // Phase 1A.2a — filter by job_type; default to 'project' only so existing page stays clean
+  const effectiveJobType = job_type || 'project';
+  if (effectiveJobType !== 'all') { sql += ' AND (p.job_type=? OR (p.job_type IS NULL AND ?=?))';
+    params.push(effectiveJobType, effectiveJobType, 'project');
+  }
   if (status) { sql += ' AND p.status=?'; params.push(status); }
   if (search) { sql += ' AND (p.project_name LIKE ? OR p.customer_name LIKE ? OR p.job_number LIKE ?)'; const s='%'+search+'%'; params.push(s,s,s); }
   sql += ' ORDER BY p.updated_at DESC';
@@ -1700,15 +1723,20 @@ app.put('/api/projects/:id', requireAuth, (req, res) => {
   if (!p) return res.status(404).json({error:'Not found'});
   const { job_number, project_name, customer_id, customer_name, site_id, location, quote_id, quote_number,
     contract_value, billing_type, scope_brief, status, start_date, target_end_date, actual_end_date,
-    foreman_id, foreman_name, assigned_techs, notes } = req.body;
+    foreman_id, foreman_name, assigned_techs, notes,
+    material_status, material_notes, bill_status, bill_notes, invoice_number } = req.body;
   run(`UPDATE projects SET job_number=?,project_name=?,customer_id=?,customer_name=?,site_id=?,location=?,
     quote_id=?,quote_number=?,contract_value=?,billing_type=?,scope_brief=?,status=?,start_date=?,
     target_end_date=?,actual_end_date=?,foreman_id=?,foreman_name=?,assigned_techs=?,notes=?,
+    material_status=COALESCE(?,material_status),material_notes=COALESCE(?,material_notes),
+    bill_status=COALESCE(?,bill_status),bill_notes=COALESCE(?,bill_notes),invoice_number=COALESCE(?,invoice_number),
     updated_at=datetime('now') WHERE id=?`,
     [job_number||'', project_name, customer_id||0, customer_name||'', site_id||0, location||'',
      quote_id||0, quote_number||'', contract_value||'', billing_type||'aftermarket', scope_brief||'',
      status||'awarded', start_date||'', target_end_date||'', actual_end_date||'', foreman_id||0,
-     foreman_name||'', JSON.stringify(assigned_techs||[]), notes||'', req.params.id]);
+     foreman_name||'', JSON.stringify(assigned_techs||[]), notes||'',
+     material_status, material_notes, bill_status, bill_notes, invoice_number,
+     req.params.id]);
   res.json({ok:true});
 });
 
@@ -1718,6 +1746,26 @@ app.delete('/api/projects/:id', requireAdmin, (req, res) => {
   run('DELETE FROM project_hours WHERE project_id=?', [req.params.id]);
   run('DELETE FROM project_notes WHERE project_id=?', [req.params.id]);
   res.json({ok:true});
+});
+
+// Phase 1A.2a — quick status toggle for material / bill status without full record PUT
+app.patch('/api/projects/:id/status', requireAuth, (req, res) => {
+  const p = get('SELECT id FROM projects WHERE id=?', [req.params.id]);
+  if (!p) return res.status(404).json({error:'Not found'});
+  const { material_status, material_notes, bill_status, bill_notes, invoice_number, status } = req.body;
+  const sets = [];
+  const params = [];
+  if (material_status !== undefined) { sets.push('material_status=?'); params.push(material_status); }
+  if (material_notes !== undefined)  { sets.push('material_notes=?');  params.push(material_notes); }
+  if (bill_status !== undefined)     { sets.push('bill_status=?');     params.push(bill_status); }
+  if (bill_notes !== undefined)      { sets.push('bill_notes=?');      params.push(bill_notes); }
+  if (invoice_number !== undefined)  { sets.push('invoice_number=?');  params.push(invoice_number); }
+  if (status !== undefined)          { sets.push('status=?');          params.push(status); }
+  if (!sets.length) return res.json({ok:true, updated: 0});
+  sets.push("updated_at=datetime('now')");
+  params.push(req.params.id);
+  run(`UPDATE projects SET ${sets.join(',')} WHERE id=?`, params);
+  res.json({ok:true, updated: sets.length - 1});
 });
 
 // ─── PHASES ───────────────────────────────────────────────────────────────────
