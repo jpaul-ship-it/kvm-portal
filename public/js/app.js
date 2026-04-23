@@ -115,7 +115,7 @@ function showPage(name, el) {
   if(pg) pg.classList.add('active');
   if(el) el.classList.add('active');
   $('sidebar').classList.remove('open');
-  const map={dashboard:renderDashboard,customers:loadCustomers,customerDetail:loadCustomerDetail,projects:loadProjects,projectDetail:loadProjectDetail,quickJobs:loadQuickJobs,quickJobDetail:loadQuickJobDetail,sales:quotesShowList,myTimecards:renderMyTimecards,announcements:renderAnnouncements,news:renderNews,oncall:renderOncall,directory:renderDirectory,pto:renderPto,ptoCalendar:renderPtoCalendar,myDocs:renderMyDocs,policies:renderPolicies,timeclock:initTimeclock,adminTimeclock:loadAdminTimecards,adminAlerts:renderAlerts,adminAttendance:initAdminAttendance,adminUsers:renderAdminUsers,adminPto:renderAdminPto,adminBlackout:renderBlackouts,adminRotation:renderRotation,adminSettings:loadSettings};
+  const map={dashboard:renderDashboard,customers:loadCustomers,customerDetail:loadCustomerDetail,projects:loadProjects,projectDetail:loadProjectDetail,quickJobs:loadQuickJobs,quickJobDetail:loadQuickJobDetail,jobLog:loadJobLog,sales:quotesShowList,myTimecards:renderMyTimecards,announcements:renderAnnouncements,news:renderNews,oncall:renderOncall,directory:renderDirectory,pto:renderPto,ptoCalendar:renderPtoCalendar,myDocs:renderMyDocs,policies:renderPolicies,timeclock:initTimeclock,adminTimeclock:loadAdminTimecards,adminAlerts:renderAlerts,adminAttendance:initAdminAttendance,adminUsers:renderAdminUsers,adminPto:renderAdminPto,adminBlackout:renderBlackouts,adminRotation:renderRotation,adminSettings:loadSettings};
   if(map[name]) map[name]();
 }
 
@@ -4254,6 +4254,7 @@ function quotesNewQuote() {
   if($('ai-file-preview-tag')) { $('ai-file-preview-tag').style.display='none'; $('ai-file-preview-tag').textContent=''; }
   // Phase 1A.1 additions
   if($('q-customer-id')) $('q-customer-id').value = '0';
+  if($('q-site-id')) $('q-site-id').value = '0';
   if($('q-client-linked')) $('q-client-linked').style.display = 'none';
   if($('q-client-newmode')) $('q-client-newmode').checked = false;
   if($('q-client')) $('q-client').placeholder = 'Start typing to search customers...';
@@ -4345,6 +4346,7 @@ async function quotesOpenEdit(id) {
     if($('q-save-status')) $('q-save-status').textContent = '';
     // Phase 1A.1 additions
     if($('q-customer-id')) $('q-customer-id').value = q.customer_id || 0;
+    if($('q-site-id')) $('q-site-id').value = q.site_id || 0;
     if($('q-client-linked')) $('q-client-linked').style.display = q.customer_id ? 'block' : 'none';
     if($('q-client-newmode')) $('q-client-newmode').checked = false;
     if($('q-rep-display')) $('q-rep-display').textContent = q.rep_name || '—';
@@ -4373,6 +4375,7 @@ async function quotesSave() {
   const payload = {
     quote_number: $('q-num') ? $('q-num').value.trim() : '',
     customer_id: $('q-customer-id') ? (parseInt($('q-customer-id').value)||0) : 0,
+    site_id: $('q-site-id') ? (parseInt($('q-site-id').value)||0) : 0,
     client_name: $('q-client') ? $('q-client').value.trim() : '',
     contact_name: $('q-contact') ? $('q-contact').value.trim() : '',
     phone: $('q-phone') ? $('q-phone').value.trim() : '',
@@ -5188,38 +5191,70 @@ async function quotesCustomerSearchInput() {
   const input = $('q-client');
   const dropdown = $('q-client-dropdown');
   if (!input || !dropdown) return;
-  const q = input.value.trim().toLowerCase();
+  const q = input.value.trim();
   // If user edited the name after linking, clear the link
   if ($('q-customer-id') && parseInt($('q-customer-id').value) > 0) {
-    const cache = _quotesCustomerCache || [];
-    const linkedCust = cache.find(c => c.id === parseInt($('q-customer-id').value));
-    if (linkedCust && (linkedCust.company_name||'').toLowerCase() !== q) {
-      $('q-customer-id').value = '0';
-      if ($('q-client-linked')) $('q-client-linked').style.display = 'none';
+    // Don't auto-clear — let them deliberately re-pick. Just hide the linked badge if text changed drastically.
+  }
+  if (!q || q.length < 1) {
+    dropdown.style.display = 'none';
+    return;
+  }
+  // Debounce-ish: only hit API if query length >= 2
+  if (q.length < 2) {
+    dropdown.innerHTML = '<div style="padding:8px 10px;font-size:12px;color:var(--text-faint)">Keep typing...</div>';
+    dropdown.style.display = 'block';
+    return;
+  }
+  try {
+    const res = await api('GET', '/api/search?types=customer,site&q=' + encodeURIComponent(q));
+    const results = (res && res.results) || [];
+    if (!results.length) {
+      dropdown.innerHTML = `<div style="padding:8px 10px;font-size:12px;color:var(--text-muted)">
+        No matches. <label style="color:var(--amber);cursor:pointer;text-decoration:underline" onclick="document.getElementById('q-client-newmode').checked=true;quotesToggleClientMode(true);">Type as new customer</label>
+      </div>`;
+      dropdown.style.display = 'block';
+      return;
     }
-  }
-  await quotesLoadCustomerCache();
-  const cache = _quotesCustomerCache || [];
-  if (!q) {
-    // Show a few recent customers
-    const recent = cache.slice(0, 8);
-    if (!recent.length) { dropdown.style.display = 'none'; return; }
-    dropdown.innerHTML = recent.map(c => quotesCustomerOption(c)).join('');
+    // Group: sites first, then customers
+    const sites = results.filter(r => r.type === 'site');
+    const custs = results.filter(r => r.type === 'customer');
+    let html = '';
+    if (sites.length) {
+      html += '<div style="padding:4px 10px;background:var(--bg-surface);font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">🏪 Sites (' + sites.length + ')</div>';
+      sites.forEach(s => {
+        const testTag = s.is_test ? '<span style="font-size:9px;color:var(--amber);margin-left:4px">[TEST]</span>' : '';
+        html += `<div style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px"
+          onmousedown="event.preventDefault();quotesPickResult('site',${s.site_id},${s.customer_id})"
+          onmouseover="this.style.background='var(--bg-surface)'" onmouseout="this.style.background='transparent'">
+          <div style="font-weight:600">🏪 ${escapeHtml(s.title)}${testTag}</div>
+          ${s.context ? `<div style="font-size:11px;color:var(--text-muted)">under <strong>${escapeHtml(s.context)}</strong></div>` : ''}
+          ${s.subtitle ? `<div style="font-size:11px;color:var(--text-faint)">${escapeHtml(s.subtitle)}</div>` : ''}
+        </div>`;
+      });
+    }
+    if (custs.length) {
+      html += '<div style="padding:4px 10px;background:var(--bg-surface);font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">🏢 Customers (' + custs.length + ')</div>';
+      custs.forEach(c => {
+        const testTag = c.is_test ? '<span style="font-size:9px;color:var(--amber);margin-left:4px">[TEST]</span>' : '';
+        html += `<div style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px"
+          onmousedown="event.preventDefault();quotesPickResult('customer',0,${c.customer_id})"
+          onmouseover="this.style.background='var(--bg-surface)'" onmouseout="this.style.background='transparent'">
+          <div style="font-weight:600">🏢 ${escapeHtml(c.title)}${testTag}</div>
+          ${c.context ? `<div style="font-size:11px;color:var(--text-muted)">${escapeHtml(c.context)}</div>` : ''}
+          ${c.subtitle ? `<div style="font-size:11px;color:var(--text-faint)">${escapeHtml(c.subtitle)}</div>` : ''}
+        </div>`;
+      });
+    }
+    dropdown.innerHTML = html;
     dropdown.style.display = 'block';
-    return;
-  }
-  const matches = cache.filter(c => (c.company_name||'').toLowerCase().includes(q)).slice(0, 15);
-  if (!matches.length) {
-    dropdown.innerHTML = `<div style="padding:8px 10px;font-size:12px;color:var(--text-muted)">
-      No matches. <label style="color:var(--amber);cursor:pointer;text-decoration:underline" onclick="$('q-client-newmode').checked=true;quotesToggleClientMode(true);">Type as new customer</label>
-    </div>`;
+  } catch(e) {
+    dropdown.innerHTML = `<div style="padding:8px 10px;font-size:12px;color:var(--danger)">Error: ${escapeHtml(e.message)}</div>`;
     dropdown.style.display = 'block';
-    return;
   }
-  dropdown.innerHTML = matches.map(c => quotesCustomerOption(c)).join('');
-  dropdown.style.display = 'block';
 }
 
+// Kept for backward-compat in case anything old still calls it
 function quotesCustomerOption(c) {
   const sub = [c.billing_city, c.billing_state].filter(Boolean).join(', ');
   return `<div style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px" 
@@ -5235,33 +5270,72 @@ function quotesCustomerSearchBlur() {
   if (dd) dd.style.display = 'none';
 }
 
-async function quotesCustomerPick(customerId) {
-  await quotesLoadCustomerCache();
-  const c = (_quotesCustomerCache||[]).find(x => x.id === customerId);
-  if (!c) return;
-  if ($('q-customer-id')) $('q-customer-id').value = c.id;
-  if ($('q-client')) $('q-client').value = c.company_name || '';
-  // Auto-fill billing address
-  const addrParts = [c.billing_address, c.billing_city ? (c.billing_city + (c.billing_state?', '+c.billing_state:'') + (c.billing_zip?' '+c.billing_zip:'')) : ''].filter(Boolean);
-  if ($('q-addr') && !$('q-addr').value.trim()) $('q-addr').value = addrParts.join(', ');
-  if ($('q-phone') && !$('q-phone').value.trim()) $('q-phone').value = c.billing_phone || '';
-  if ($('q-email') && !$('q-email').value.trim()) $('q-email').value = c.billing_email || '';
-  // Try to fetch a contact name if missing
-  if ($('q-contact') && !$('q-contact').value.trim()) {
+// Phase 1A.2b — unified pick handler (site or customer)
+async function quotesPickResult(kind, siteId, customerId) {
+  if (!customerId && !siteId) return;
+  // Load the customer
+  let cust = null;
+  try { cust = await api('GET', '/api/customers/' + customerId); } catch(e) {}
+  if (!cust) { showToast('Could not load customer.','error'); return; }
+
+  if ($('q-customer-id')) $('q-customer-id').value = cust.id;
+  if ($('q-client')) $('q-client').value = cust.company_name || '';
+
+  // Site handling
+  const siteIdField = $('q-site-id');
+  if (siteIdField) siteIdField.value = siteId || 0;
+
+  let site = null;
+  if (siteId) {
+    // Fetch sites and find this one
     try {
-      const full = await api('GET', '/api/customers/' + c.id);
-      if (full.contacts && full.contacts.length) {
-        const primary = full.contacts.find(ct => ct.is_primary) || full.contacts[0];
-        $('q-contact').value = ((primary.first_name||'') + ' ' + (primary.last_name||'')).trim();
-        if (!$('q-phone').value.trim() && primary.phone) $('q-phone').value = primary.phone;
-        if (!$('q-email').value.trim() && primary.email) $('q-email').value = primary.email;
-      }
-    } catch(e){}
+      const sites = await api('GET', '/api/customers/' + customerId + '/sites');
+      site = (sites||[]).find(s => s.id === siteId);
+    } catch(e) {}
   }
-  if ($('q-client-linked')) $('q-client-linked').style.display = 'block';
+
+  // Autofill address: prefer site address if a site was picked
+  const custAddrParts = [cust.billing_address,
+    cust.billing_city ? (cust.billing_city + (cust.billing_state?', '+cust.billing_state:'') + (cust.billing_zip?' '+cust.billing_zip:'')) : ''
+  ].filter(Boolean);
+  let addrToUse = custAddrParts.join(', ');
+  if (site) {
+    const siteAddrParts = [site.address,
+      site.city ? (site.city + (site.state?', '+site.state:'') + (site.zip?' '+site.zip:'')) : ''
+    ].filter(Boolean);
+    const siteAddr = siteAddrParts.join(', ');
+    if (siteAddr) addrToUse = siteAddr;
+  }
+
+  if ($('q-addr')) {
+    // Overwrite if empty OR if a site was picked (site address is more specific)
+    if (!$('q-addr').value.trim() || site) $('q-addr').value = addrToUse;
+  }
+  if ($('q-phone') && !$('q-phone').value.trim()) $('q-phone').value = cust.billing_phone || '';
+  if ($('q-email') && !$('q-email').value.trim()) $('q-email').value = cust.billing_email || '';
+  // Contact
+  if ($('q-contact') && !$('q-contact').value.trim()) {
+    if (cust.contacts && cust.contacts.length) {
+      const primary = cust.contacts.find(ct => ct.is_primary) || cust.contacts[0];
+      $('q-contact').value = ((primary.first_name||'') + ' ' + (primary.last_name||'')).trim();
+      if (!$('q-phone').value.trim() && primary.phone) $('q-phone').value = primary.phone;
+      if (!$('q-email').value.trim() && primary.email) $('q-email').value = primary.email;
+    }
+  }
+
+  if ($('q-client-linked')) {
+    $('q-client-linked').style.display = 'block';
+    const siteLabel = site ? ' + Site: ' + (site.site_name || '') + (site.store_number ? ' #'+site.store_number : '') : '';
+    $('q-client-linked').innerHTML = '&#10003; Linked to customer record' + (siteLabel ? '<span style="color:var(--text-muted);font-weight:400"> ' + escapeHtml(siteLabel) + '</span>' : '');
+  }
   const dd = $('q-client-dropdown');
   if (dd) dd.style.display = 'none';
-  showToast('Linked to customer record.','success');
+  showToast(site ? 'Linked to customer + site.' : 'Linked to customer.','success');
+}
+
+// Kept for backward-compat — now routes to the new pick handler
+async function quotesCustomerPick(customerId) {
+  return quotesPickResult('customer', 0, customerId);
 }
 
 function escapeHtml(s) {
@@ -5938,4 +6012,377 @@ async function deleteQuickJobHours(hId) {
     });
     console.log('[KVM] Phase 1A.2a functions exposed');
   } catch(e) { console.error('[KVM] Phase 1A.2a exposure failed:', e); }
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PHASE 1A.2b — JOB LOG PAGE ═══════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _jlCache = [];
+let _jlRepsCache = null;
+
+function currentMonthKeyFrontend() {
+  const d = new Date();
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  return d.getFullYear() + '-' + mm;  // "YYYY-MM" for HTML month input
+}
+
+function yyyymmToMMYY(yyyymm) {
+  // "2026-04" -> "0426"
+  if (!yyyymm || !/^\d{4}-\d{2}$/.test(yyyymm)) return '';
+  const [yyyy, mm] = yyyymm.split('-');
+  return mm + yyyy.slice(-2);
+}
+
+async function loadJobLog() {
+  // Seed month picker if empty
+  const monthEl = $('jl-month');
+  if (monthEl && !monthEl.value) monthEl.value = currentMonthKeyFrontend();
+  // Populate rep dropdown once
+  if (!_jlRepsCache) {
+    try {
+      const users = await api('GET', '/api/users');
+      _jlRepsCache = (users||[]).filter(u => u.is_active !== 0);
+      const repSel = $('jl-rep');
+      if (repSel) {
+        repSel.innerHTML = '<option value="">All Reps</option>' + _jlRepsCache.map(u =>
+          `<option value="${u.id}">${escapeHtml(((u.first_name||'') + ' ' + (u.last_name||'')).trim())}</option>`).join('');
+      }
+    } catch(e){}
+  }
+  jobLogFetch();
+}
+
+function jobLogShiftMonth(delta) {
+  const el = $('jl-month');
+  if (!el) return;
+  let v = el.value || currentMonthKeyFrontend();
+  const [yyyy, mm] = v.split('-').map(Number);
+  const d = new Date(yyyy, mm-1 + delta, 1);
+  const newMM = String(d.getMonth()+1).padStart(2,'0');
+  el.value = d.getFullYear() + '-' + newMM;
+  jobLogFetch();
+}
+
+function jobLogSetMonth(val) {
+  // pass null to clear (all months)
+  const el = $('jl-month');
+  if (el) el.value = val || '';
+  jobLogFetch();
+}
+
+function jobLogFilter() { jobLogFetch(); }
+
+async function jobLogFetch() {
+  const body = $('jl-table-body');
+  if (body) body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-faint)">Loading...</div>';
+  const month = $('jl-month') ? $('jl-month').value : '';
+  const type = $('jl-type') ? $('jl-type').value : '';
+  const status = $('jl-status') ? $('jl-status').value : '';
+  const rep = $('jl-rep') ? $('jl-rep').value : '';
+  const search = $('jl-search') ? $('jl-search').value : '';
+  const includeTest = $('jl-include-test') && $('jl-include-test').checked ? '1' : '0';
+  const params = [];
+  if (month) params.push('month=' + encodeURIComponent(yyyymmToMMYY(month)));
+  if (type) params.push('type=' + encodeURIComponent(type));
+  if (status) params.push('status=' + encodeURIComponent(status));
+  if (rep) params.push('rep=' + encodeURIComponent(rep));
+  if (search) params.push('search=' + encodeURIComponent(search));
+  params.push('include_test=' + includeTest);
+  try {
+    const res = await api('GET', '/api/job-log?' + params.join('&'));
+    _jlCache = res.rows || [];
+    jobLogRender();
+  } catch(e) {
+    if (body) body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--danger)">Error: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function jobLogRender() {
+  const body = $('jl-table-body');
+  const tiles = $('jl-summary-tiles');
+  const countEl = $('jl-count');
+  const rows = _jlCache;
+  if (countEl) countEl.textContent = rows.length + ' record' + (rows.length !== 1 ? 's' : '');
+
+  // Summary tiles — count by type, total awarded value
+  const byType = { quote: 0, project: 0, quick_job: 0, service: 0 };
+  let totalValue = 0, awardedCount = 0, awardedValue = 0;
+  rows.forEach(r => {
+    if (byType[r.type] !== undefined) byType[r.type]++;
+    const v = parseFloat(r.contract_value) || 0;
+    totalValue += v;
+    if (r.status === 'awarded' || r.status === 'accepted' || r.status === 'complete' || r.status === 'in_progress' || r.status === 'scheduled') {
+      awardedCount++;
+      awardedValue += v;
+    }
+  });
+  if (tiles) {
+    tiles.innerHTML = `
+      <div style="padding:8px;background:var(--bg-surface);border-radius:var(--radius-sm);text-align:center">
+        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Total</div>
+        <div style="font-size:16px;font-weight:700">${rows.length}</div>
+      </div>
+      <div style="padding:8px;background:var(--bg-surface);border-radius:var(--radius-sm);text-align:center">
+        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">📝 Quotes</div>
+        <div style="font-size:16px;font-weight:700">${byType.quote}</div>
+      </div>
+      <div style="padding:8px;background:var(--bg-surface);border-radius:var(--radius-sm);text-align:center">
+        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">📋 Projects · ⚡ Quick</div>
+        <div style="font-size:16px;font-weight:700">${byType.project + byType.quick_job}</div>
+      </div>
+      <div style="padding:8px;background:var(--bg-surface);border-radius:var(--radius-sm);text-align:center">
+        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase">Awarded $ (this filter)</div>
+        <div style="font-size:16px;font-weight:700;color:var(--amber)">$${awardedValue.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})}</div>
+      </div>
+    `;
+  }
+
+  if (!rows.length) {
+    body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-faint);font-size:13px">No records match the current filters.</div>';
+    return;
+  }
+
+  const typeIcon = {
+    quote: '📝',
+    project: '📋',
+    quick_job: '⚡',
+    service: '🔧'
+  };
+  const typeLabel = {
+    quote: 'Quote',
+    project: 'Project',
+    quick_job: 'Quick Job',
+    service: 'Service'
+  };
+  const statusColor = {
+    draft:'#888', sent:'#2980b9', accepted:'var(--green)', declined:'var(--danger)',
+    awarded:'#2980b9', scheduled:'#8e44ad', in_progress:'var(--amber)', complete:'var(--green)'
+  };
+
+  body.innerHTML = `<div class="table-wrap"><table class="data-table">
+    <thead><tr>
+      <th>Job #</th><th>Date</th><th>Type</th><th>Rep</th><th>Customer · Site</th><th>Description</th><th>Status</th><th style="text-align:right">Value</th><th>Invoice #</th>
+    </tr></thead>
+    <tbody>${rows.map(r => {
+      const sc = statusColor[r.status] || 'var(--text-muted)';
+      const siteBit = r.site_display ? `<br><span style="font-size:10px;color:var(--text-faint)">📍 ${escapeHtml(r.site_display)}</span>` : '';
+      const testTag = r.is_test_data ? ' <span style="font-size:9px;color:var(--amber)">[TEST]</span>' : '';
+      return `<tr style="cursor:pointer" onclick="jobLogOpenRow('${r.type}',${r.id})">
+        <td style="font-family:monospace;font-size:12px;color:var(--amber)">${escapeHtml(r.job_number||'—')}</td>
+        <td style="font-size:11px;color:var(--text-muted)">${r.created_at ? fmtDate(r.created_at.split(' ')[0]) : '—'}</td>
+        <td style="font-size:11px"><span style="display:inline-block;padding:2px 6px;border-radius:3px;background:var(--bg-surface);border:1px solid var(--border)">${typeIcon[r.type]||''} ${typeLabel[r.type]||r.type}</span></td>
+        <td style="font-size:12px;color:var(--text-muted)">${escapeHtml(r.rep_name||'—')}</td>
+        <td style="font-size:12px"><strong>${escapeHtml(r.customer_name||'—')}${testTag}</strong>${siteBit}</td>
+        <td style="font-size:12px;color:var(--text-muted);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(r.project_name||r.scope_summary||'')}">${escapeHtml((r.project_name||r.scope_summary||'—').substring(0,60))}</td>
+        <td><span style="display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;background:${sc}22;color:${sc};border:1px solid ${sc}44;text-transform:uppercase">${escapeHtml(r.status||'—')}</span></td>
+        <td style="font-weight:600;text-align:right">${r.contract_value ? '$'+parseFloat(r.contract_value).toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:2}) : '—'}</td>
+        <td style="font-size:11px;font-family:monospace;color:var(--text-muted)">${escapeHtml(r.invoice_number||'')}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
+}
+
+function jobLogOpenRow(type, id) {
+  if (type === 'quote') {
+    showPage('sales', document.getElementById('nav-sales'));
+    setTimeout(() => { if (typeof quotesOpenEdit === 'function') quotesOpenEdit(id); }, 200);
+  } else if (type === 'quick_job') {
+    showPage('quickJobs', document.getElementById('nav-quickJobs'));
+    setTimeout(() => { if (typeof openQuickJobDetail === 'function') openQuickJobDetail(id); }, 200);
+  } else {
+    // project, service, or anything else from projects table
+    showPage('projects', document.getElementById('nav-projects'));
+    setTimeout(() => { if (typeof openProjectDetail === 'function') openProjectDetail(id); }, 200);
+  }
+}
+
+function jobLogPrint() {
+  // Print-friendly window with current filtered data
+  const month = $('jl-month') ? $('jl-month').value : '';
+  const type = $('jl-type') ? ($('jl-type').value || 'All') : 'All';
+  const status = $('jl-status') ? ($('jl-status').value || 'All') : 'All';
+  const repSel = $('jl-rep');
+  const repName = repSel && repSel.value ? (repSel.options[repSel.selectedIndex].textContent) : 'All Reps';
+
+  const rows = _jlCache;
+  if (!rows.length) { alert('No records to print.'); return; }
+
+  const win = window.open('', '_blank', 'width=900,height=700');
+  const doc = win.document;
+  const monthLabel = month ? new Date(month+'-01').toLocaleDateString(undefined,{month:'long',year:'numeric'}) : 'All Months';
+  let total = 0, awardedVal = 0, awardedCount = 0;
+  rows.forEach(r => {
+    const v = parseFloat(r.contract_value)||0; total += v;
+    if (['awarded','accepted','complete','in_progress','scheduled'].includes(r.status)) { awardedCount++; awardedVal += v; }
+  });
+
+  doc.write(`<html><head><title>Job Log — ${monthLabel}</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 20px; color: #111; }
+      h1 { font-size: 18px; margin: 0 0 4px 0; }
+      h2 { font-size: 13px; font-weight: normal; color: #555; margin: 0 0 20px 0; }
+      .summary { display: flex; gap: 20px; margin-bottom: 15px; font-size: 12px; padding: 10px; background: #f5f5f5; border: 1px solid #ddd; }
+      .summary strong { font-size: 14px; }
+      table { width: 100%; border-collapse: collapse; font-size: 11px; }
+      th, td { border-bottom: 1px solid #ccc; padding: 5px 6px; text-align: left; vertical-align: top; }
+      th { background: #eee; font-weight: 600; text-transform: uppercase; font-size: 9px; letter-spacing: .05em; }
+      tr:nth-child(even) { background: #fafafa; }
+      .right { text-align: right; }
+      .mono { font-family: 'Courier New', monospace; }
+      .tight { white-space: nowrap; }
+      @media print {
+        body { margin: 10mm; }
+        button { display: none; }
+      }
+    </style></head><body>
+    <h1>KVM Door Systems — Job Log</h1>
+    <h2>${monthLabel} &middot; Type: ${escapeHtml(type)} &middot; Status: ${escapeHtml(status)} &middot; Rep: ${escapeHtml(repName)}</h2>
+    <div class="summary">
+      <div><strong>${rows.length}</strong> total</div>
+      <div><strong>${awardedCount}</strong> awarded/in-progress</div>
+      <div><strong>$${awardedVal.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})}</strong> awarded value</div>
+      <div><strong>$${total.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})}</strong> total value (incl. drafts)</div>
+    </div>
+    <table>
+      <thead><tr>
+        <th>Job #</th><th>Date</th><th>Type</th><th>Rep</th><th>Customer / Site</th><th>Description</th><th>Status</th><th class="right">Value</th><th>Invoice</th>
+      </tr></thead>
+      <tbody>
+      ${rows.map(r => `<tr>
+        <td class="mono tight">${escapeHtml(r.job_number||'—')}</td>
+        <td class="tight">${r.created_at ? fmtDate(r.created_at.split(' ')[0]) : '—'}</td>
+        <td>${escapeHtml(r.type||'')}</td>
+        <td>${escapeHtml(r.rep_name||'—')}</td>
+        <td><strong>${escapeHtml(r.customer_name||'—')}</strong>${r.site_display ? '<br>'+escapeHtml(r.site_display) : ''}</td>
+        <td>${escapeHtml((r.project_name||r.scope_summary||'—').substring(0,80))}</td>
+        <td>${escapeHtml(r.status||'—')}</td>
+        <td class="right">${r.contract_value ? '$'+parseFloat(r.contract_value).toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0}) : '—'}</td>
+        <td class="mono">${escapeHtml(r.invoice_number||'')}</td>
+      </tr>`).join('')}
+      </tbody>
+    </table>
+    <div style="margin-top:20px;font-size:10px;color:#777">Generated ${new Date().toLocaleString()}</div>
+    <button onclick="window.print()" style="margin-top:15px;padding:8px 16px">Print</button>
+    </body></html>`);
+  doc.close();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PHASE 1A.2b — TIMECLOCK UNIFIED JOB SEARCH ═══════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function clockJobSearchInput() {
+  const input = $('clockJobSearch');
+  const dropdown = $('clockJobDropdown');
+  if (!input || !dropdown) return;
+  const q = input.value.trim();
+  if (!q || q.length < 2) {
+    dropdown.style.display = 'none';
+    return;
+  }
+  try {
+    const res = await api('GET', '/api/search?types=customer,site,job&q=' + encodeURIComponent(q));
+    const results = (res && res.results) || [];
+    if (!results.length) {
+      dropdown.innerHTML = '<div style="padding:8px 10px;font-size:12px;color:var(--text-muted)">No matches. You can still type a job name — clock in will record the text.</div>';
+      dropdown.style.display = 'block';
+      return;
+    }
+    // Section by type
+    const jobs = results.filter(r => ['quote','project','quick_job','service'].includes(r.type));
+    const sites = results.filter(r => r.type === 'site');
+    const custs = results.filter(r => r.type === 'customer');
+    let html = '';
+    if (jobs.length) {
+      html += '<div style="padding:4px 10px;background:var(--bg-surface);font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">Active Jobs</div>';
+      jobs.forEach(j => {
+        const testTag = j.is_test ? '<span style="font-size:9px;color:var(--amber);margin-left:4px">[TEST]</span>' : '';
+        html += `<div style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px"
+          onmousedown="event.preventDefault();clockJobPick('${j.type}',${j.record_id},${j.customer_id},${j.site_id},${JSON.stringify(j.title).replace(/"/g,'&quot;')})"
+          onmouseover="this.style.background='var(--bg-surface)'" onmouseout="this.style.background='transparent'">
+          <div style="font-weight:600">${escapeHtml(j.title)}${testTag}</div>
+          ${j.subtitle ? `<div style="font-size:11px;color:var(--text-muted)">${escapeHtml(j.subtitle)}</div>` : ''}
+        </div>`;
+      });
+    }
+    if (sites.length) {
+      html += '<div style="padding:4px 10px;background:var(--bg-surface);font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">🏪 Sites</div>';
+      sites.forEach(s => {
+        const testTag = s.is_test ? '<span style="font-size:9px;color:var(--amber);margin-left:4px">[TEST]</span>' : '';
+        const label = s.title + (s.context ? ' (under ' + s.context + ')' : '');
+        html += `<div style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px"
+          onmousedown="event.preventDefault();clockJobPick('site',0,${s.customer_id},${s.site_id},${JSON.stringify(label).replace(/"/g,'&quot;')})"
+          onmouseover="this.style.background='var(--bg-surface)'" onmouseout="this.style.background='transparent'">
+          <div style="font-weight:600">🏪 ${escapeHtml(s.title)}${testTag}</div>
+          ${s.context ? `<div style="font-size:11px;color:var(--text-muted)">under <strong>${escapeHtml(s.context)}</strong></div>` : ''}
+          ${s.subtitle ? `<div style="font-size:11px;color:var(--text-faint)">${escapeHtml(s.subtitle)}</div>` : ''}
+        </div>`;
+      });
+    }
+    if (custs.length) {
+      html += '<div style="padding:4px 10px;background:var(--bg-surface);font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">🏢 Customers</div>';
+      custs.forEach(c => {
+        const testTag = c.is_test ? '<span style="font-size:9px;color:var(--amber);margin-left:4px">[TEST]</span>' : '';
+        html += `<div style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px"
+          onmousedown="event.preventDefault();clockJobPick('customer',0,${c.customer_id},0,${JSON.stringify(c.title).replace(/"/g,'&quot;')})"
+          onmouseover="this.style.background='var(--bg-surface)'" onmouseout="this.style.background='transparent'">
+          <div style="font-weight:600">🏢 ${escapeHtml(c.title)}${testTag}</div>
+          ${c.subtitle ? `<div style="font-size:11px;color:var(--text-muted)">${escapeHtml(c.subtitle)}</div>` : ''}
+        </div>`;
+      });
+    }
+    dropdown.innerHTML = html;
+    dropdown.style.display = 'block';
+  } catch(e) {
+    dropdown.innerHTML = `<div style="padding:8px 10px;font-size:12px;color:var(--danger)">Error: ${escapeHtml(e.message)}</div>`;
+    dropdown.style.display = 'block';
+  }
+}
+
+function clockJobSearchBlur() {
+  const dd = $('clockJobDropdown');
+  if (dd) dd.style.display = 'none';
+}
+
+function clockJobPick(type, jobId, customerId, siteId, label) {
+  // Hidden fields the existing clock-in handler uses
+  if ($('clockJobName')) $('clockJobName').value = label || '';
+  // Customer-name text — fetch from the label's context if possible, else leave blank
+  if ($('clockCustomer')) $('clockCustomer').value = (type === 'site' && label.indexOf('(under') > -1)
+    ? label.substring(label.indexOf('(under ')+7, label.length-1)
+    : (type === 'customer' ? label : '');
+  if ($('clockJobId')) $('clockJobId').value = jobId || 0;
+  if ($('clockSiteId')) $('clockSiteId').value = siteId || 0;
+  if ($('clockCustomerId')) $('clockCustomerId').value = customerId || 0;
+  // Visual state
+  const search = $('clockJobSearch');
+  if (search) search.value = label || '';
+  const sel = $('clockJobSelected');
+  const selLabel = $('clockJobSelectedLabel');
+  if (sel) sel.style.display = 'block';
+  if (selLabel) selLabel.textContent = label || '';
+  const dd = $('clockJobDropdown');
+  if (dd) dd.style.display = 'none';
+}
+
+function clockJobClear() {
+  ['clockJobName','clockCustomer','clockJobSearch'].forEach(id => { const e=$(id); if(e) e.value=''; });
+  ['clockJobId','clockSiteId','clockCustomerId'].forEach(id => { const e=$(id); if(e) e.value='0'; });
+  const sel = $('clockJobSelected'); if (sel) sel.style.display = 'none';
+  const dd = $('clockJobDropdown'); if (dd) dd.style.display = 'none';
+}
+
+// Expose Phase 1A.2b functions on window
+(function() {
+  try {
+    ['quotesPickResult',
+     'loadJobLog','jobLogShiftMonth','jobLogSetMonth','jobLogFilter','jobLogFetch',
+     'jobLogRender','jobLogOpenRow','jobLogPrint',
+     'clockJobSearchInput','clockJobSearchBlur','clockJobPick','clockJobClear'
+    ].forEach(function(name){
+      try { if (typeof eval(name) === 'function') window[name] = eval(name); } catch(e) {}
+    });
+    console.log('[KVM] Phase 1A.2b functions exposed');
+  } catch(e) { console.error('[KVM] Phase 1A.2b exposure failed:', e); }
 })();

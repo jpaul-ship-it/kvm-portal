@@ -459,6 +459,9 @@ async function initDb() {
   try { db.run(`ALTER TABLE quotes ADD COLUMN customer_id INTEGER DEFAULT 0`); saveDb(); } catch(e){}
   try { db.run(`ALTER TABLE projects ADD COLUMN job_type TEXT DEFAULT 'project'`); saveDb(); } catch(e){}
 
+  // Phase 1A.2b — site linkage on quotes (for Kroger #56 style quotes)
+  try { db.run(`ALTER TABLE quotes ADD COLUMN site_id INTEGER DEFAULT 0`); saveDb(); } catch(e){}
+
   // Phase 1A.2a — Quick Job / Project fork
   // material_status: 'from_stock' | 'ordered' | 'partial' | 'received'
   try { db.run(`ALTER TABLE projects ADD COLUMN material_status TEXT DEFAULT 'ordered'`); saveDb(); } catch(e){}
@@ -1579,14 +1582,14 @@ app.get('/api/quotes/:id', requireAuth, (req, res) => {
 app.post('/api/quotes', requireAuth, (req, res) => {
   const u = get('SELECT first_name,last_name FROM users WHERE id=?', [req.session.userId]);
   const rep_name = u.first_name + (u.last_name ? ' ' + u.last_name : '');
-  const { quote_number, customer_id, client_name, contact_name, address, email, phone, project_name, scope_summary, scopes, options, notes, subtotal, tax, total, valid_for, status } = req.body;
+  const { quote_number, customer_id, site_id, client_name, contact_name, address, email, phone, project_name, scope_summary, scopes, options, notes, subtotal, tax, total, valid_for, status } = req.body;
   // Phase 1A.1.1 — auto-assign next monthly job number if not provided
   let finalQuoteNum = (quote_number||'').trim();
   if (!finalQuoteNum) {
     try { finalQuoteNum = allocateNextJobNumber(); } catch(e) { /* fall back to empty if counter fails */ }
   }
-  const id = runGetId(`INSERT INTO quotes (quote_number,rep_id,rep_name,customer_id,client_name,contact_name,address,email,phone,project_name,scope_summary,scopes,options,notes,subtotal,tax,total,valid_for,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [finalQuoteNum, req.session.userId, rep_name, parseInt(customer_id)||0, client_name||'', contact_name||'', address||'', email||'', phone||'', project_name||'', scope_summary||'', JSON.stringify(scopes||[]), JSON.stringify(options||[]), notes||'', subtotal||'', tax||'', total||'', valid_for||'30 days', status||'draft']);
+  const id = runGetId(`INSERT INTO quotes (quote_number,rep_id,rep_name,customer_id,site_id,client_name,contact_name,address,email,phone,project_name,scope_summary,scopes,options,notes,subtotal,tax,total,valid_for,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [finalQuoteNum, req.session.userId, rep_name, parseInt(customer_id)||0, parseInt(site_id)||0, client_name||'', contact_name||'', address||'', email||'', phone||'', project_name||'', scope_summary||'', JSON.stringify(scopes||[]), JSON.stringify(options||[]), notes||'', subtotal||'', tax||'', total||'', valid_for||'30 days', status||'draft']);
   res.json({ id, quote_number: finalQuoteNum });
 });
 
@@ -1595,9 +1598,9 @@ app.put('/api/quotes/:id', requireAuth, (req, res) => {
   if (!q) return res.status(404).json({ error: 'Not found' });
   const role = getUserRole(req.session.userId);
   if (!ADMIN_ROLES.includes(role) && q.rep_id !== req.session.userId) return res.status(403).json({ error: 'Access denied' });
-  const { quote_number, customer_id, client_name, contact_name, address, email, phone, project_name, scope_summary, scopes, options, notes, subtotal, tax, total, valid_for, status } = req.body;
-  run(`UPDATE quotes SET quote_number=?,customer_id=?,client_name=?,contact_name=?,address=?,email=?,phone=?,project_name=?,scope_summary=?,scopes=?,options=?,notes=?,subtotal=?,tax=?,total=?,valid_for=?,status=?,updated_at=datetime('now') WHERE id=?`,
-    [quote_number||'', parseInt(customer_id)||0, client_name||'', contact_name||'', address||'', email||'', phone||'', project_name||'', scope_summary||'', JSON.stringify(scopes||[]), JSON.stringify(options||[]), notes||'', subtotal||'', tax||'', total||'', valid_for||'30 days', status||'draft', req.params.id]);
+  const { quote_number, customer_id, site_id, client_name, contact_name, address, email, phone, project_name, scope_summary, scopes, options, notes, subtotal, tax, total, valid_for, status } = req.body;
+  run(`UPDATE quotes SET quote_number=?,customer_id=?,site_id=?,client_name=?,contact_name=?,address=?,email=?,phone=?,project_name=?,scope_summary=?,scopes=?,options=?,notes=?,subtotal=?,tax=?,total=?,valid_for=?,status=?,updated_at=datetime('now') WHERE id=?`,
+    [quote_number||'', parseInt(customer_id)||0, parseInt(site_id)||0, client_name||'', contact_name||'', address||'', email||'', phone||'', project_name||'', scope_summary||'', JSON.stringify(scopes||[]), JSON.stringify(options||[]), notes||'', subtotal||'', tax||'', total||'', valid_for||'30 days', status||'draft', req.params.id]);
   res.json({ ok: true });
 });
 
@@ -1618,8 +1621,17 @@ app.post('/api/quotes/:id/create-project', requireAuth, (req, res) => {
   // Customer — prefer linked customer_id, fall back to client_name as text
   const customerId = q.customer_id || 0;
   const customerName = q.client_name || '';
-  // Location — fall back to quote address
-  const location = q.address || '';
+  // Phase 1A.2b — inherit site_id from quote
+  const siteId = q.site_id || 0;
+  // Location — if site_id is set, use site's address; otherwise fall back to quote address
+  let location = q.address || '';
+  if (siteId) {
+    const site = get('SELECT address,city,state,zip FROM customer_sites WHERE id=?', [siteId]);
+    if (site) {
+      const siteAddr = [site.address, [site.city, site.state].filter(Boolean).join(', '), site.zip].filter(Boolean).join(', ');
+      if (siteAddr) location = siteAddr;
+    }
+  }
   // Scope — roll up scope_summary and notes
   const scopeBrief = q.scope_summary || '';
   const notes = q.notes || '';
@@ -1638,7 +1650,7 @@ app.post('/api/quotes/:id/create-project', requireAuth, (req, res) => {
      contract_value,billing_type,scope_brief,status,material_status,bill_status,start_date,target_end_date,foreman_id,foreman_name,
      assigned_techs,notes,created_by,work_types,required_skills,revenue_department,job_type)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [q.quote_number||'', projectName, customerId, customerName, 0, location, q.id, q.quote_number||'',
+    [q.quote_number||'', projectName, customerId, customerName, siteId, location, q.id, q.quote_number||'',
      contractVal, billingType, scopeBrief, initialStatus, materialStatus, 'not_ready', '', '', 0, '',
      '[]', notes, req.session.userId, '[]', '[]', revenueDept, jobType]);
   res.json({ ok: true, project_id: projectId, job_type: jobType });
@@ -2655,6 +2667,203 @@ app.post('/api/test-data/purge', requireAdmin, (req, res) => {
     console.error('Test purge error:', e);
     res.status(500).json({ error: e.message });
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PHASE 1A.2b — UNIFIED SEARCH (customers + sites + jobs) ═════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/search?q=kroger+56 — returns mixed results: sites + customers + jobs
+app.get('/api/search', requireAuth, (req, res) => {
+  const raw = (req.query.q || '').trim();
+  const types = (req.query.types || 'customer,site,job').split(',').map(t => t.trim());
+  if (!raw) return res.json({ query: '', results: [] });
+  const q = '%' + raw.toLowerCase() + '%';
+  const results = [];
+
+  // SITES — joined to customers for context
+  if (types.includes('site')) {
+    const sites = all(`
+      SELECT s.id AS site_id, s.site_name, s.store_number, s.address AS site_address,
+             s.city AS site_city, s.state AS site_state, s.zip AS site_zip,
+             s.customer_id, c.company_name, c.billing_phone, c.billing_email,
+             c.is_test_data AS cust_is_test
+      FROM customer_sites s
+      LEFT JOIN customers c ON c.id = s.customer_id
+      WHERE s.status IS NULL OR s.status = 'active' OR s.status = ''
+      AND (
+        LOWER(s.site_name) LIKE ? OR LOWER(s.address) LIKE ? OR LOWER(s.city) LIKE ?
+        OR LOWER(s.store_number) LIKE ? OR LOWER(c.company_name) LIKE ?
+      )
+      LIMIT 15`, [q, q, q, q, q]);
+    sites.forEach(s => {
+      const addr = [s.site_address, [s.site_city, s.site_state].filter(Boolean).join(', '), s.site_zip].filter(Boolean).join(', ');
+      results.push({
+        type: 'site',
+        site_id: s.site_id,
+        customer_id: s.customer_id,
+        title: (s.site_name || s.company_name || '—') + (s.store_number ? ' #' + s.store_number : ''),
+        subtitle: addr,
+        context: s.company_name || '',
+        phone: s.billing_phone || '',
+        email: s.billing_email || '',
+        is_test: !!s.cust_is_test
+      });
+    });
+  }
+
+  // CUSTOMERS — top-level matches
+  if (types.includes('customer')) {
+    const custs = all(`
+      SELECT id, company_name, billing_address, billing_city, billing_state, billing_zip,
+             billing_phone, billing_email, is_test_data,
+             (SELECT COUNT(*) FROM customer_sites WHERE customer_id = customers.id) AS site_count
+      FROM customers
+      WHERE status IS NULL OR status = 'active' OR status = ''
+      AND (LOWER(company_name) LIKE ? OR LOWER(billing_address) LIKE ? OR LOWER(billing_city) LIKE ?)
+      ORDER BY company_name LIMIT 10`, [q, q, q]);
+    custs.forEach(c => {
+      const addr = [c.billing_address, [c.billing_city, c.billing_state].filter(Boolean).join(', '), c.billing_zip].filter(Boolean).join(', ');
+      results.push({
+        type: 'customer',
+        customer_id: c.id,
+        site_id: 0,
+        title: c.company_name || '—',
+        subtitle: addr || (c.site_count ? `${c.site_count} location${c.site_count !== 1 ? 's' : ''}` : ''),
+        context: c.site_count ? `${c.site_count} site${c.site_count !== 1 ? 's' : ''}` : '',
+        phone: c.billing_phone || '',
+        email: c.billing_email || '',
+        is_test: !!c.is_test_data
+      });
+    });
+  }
+
+  // JOBS — quotes + projects + quick jobs by quote_number / job_number
+  if (types.includes('job')) {
+    // Quotes (searchable by quote_number; also by project name)
+    const quotes = all(`
+      SELECT id, quote_number, client_name, project_name, status, customer_id, site_id, is_test_data
+      FROM quotes
+      WHERE LOWER(quote_number) LIKE ? OR LOWER(project_name) LIKE ?
+      LIMIT 10`, [q, q]);
+    quotes.forEach(qr => {
+      results.push({
+        type: 'quote',
+        record_id: qr.id,
+        customer_id: qr.customer_id || 0,
+        site_id: qr.site_id || 0,
+        title: '📝 Quote ' + (qr.quote_number || qr.id) + ' — ' + (qr.client_name || '—'),
+        subtitle: qr.project_name || '',
+        context: qr.status || 'draft',
+        is_test: !!qr.is_test_data
+      });
+    });
+    const projects = all(`
+      SELECT id, job_number, customer_name, project_name, status, customer_id, site_id, job_type, is_test_data
+      FROM projects
+      WHERE LOWER(job_number) LIKE ? OR LOWER(project_name) LIKE ?
+      LIMIT 10`, [q, q]);
+    projects.forEach(pr => {
+      const icon = pr.job_type === 'quick_job' ? '⚡' : '📋';
+      const label = pr.job_type === 'quick_job' ? 'Quick Job' : 'Project';
+      results.push({
+        type: pr.job_type || 'project',
+        record_id: pr.id,
+        customer_id: pr.customer_id || 0,
+        site_id: pr.site_id || 0,
+        title: icon + ' ' + label + ' ' + (pr.job_number || pr.id) + ' — ' + (pr.customer_name || '—'),
+        subtitle: pr.project_name || '',
+        context: pr.status || '',
+        is_test: !!pr.is_test_data
+      });
+    });
+  }
+
+  res.json({ query: raw, results });
+});
+
+// Convenience: GET a single customer's sites (used by quote builder when picking customer-level)
+app.get('/api/customers/:id/sites', requireAuth, (req, res) => {
+  const sites = all(`SELECT id, site_name, store_number, address, city, state, zip FROM customer_sites
+    WHERE customer_id=? ORDER BY site_name`, [req.params.id]);
+  res.json(sites);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PHASE 1A.2b — JOB LOG (unified quotes + projects + quick jobs + service) ═
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/job-log?month=0426&type=quote&rep=5&status=accepted&search=kroger
+app.get('/api/job-log', requireAuth, (req, res) => {
+  const { month, type, rep, status, search, include_test } = req.query;
+  const includeTest = include_test === '1' || include_test === 'true';
+  const params = [];
+  const rows = [];
+
+  // Month filter — month_key like "0426"
+  // Matching by SUBSTR(created_at, 1, 7) = 'YYYY-MM'; we convert MMYY -> YYYY-MM
+  let yyyymm = null;
+  if (month && /^\d{4}$/.test(month)) {
+    const mm = month.substring(0,2);
+    const yy = month.substring(2,4);
+    const yyyy = '20' + yy;
+    yyyymm = yyyy + '-' + mm;
+  }
+
+  const searchLike = search ? '%' + search.toLowerCase() + '%' : null;
+
+  // QUOTES (not type=project, not type=quick_job)
+  if (!type || type === 'quote' || type === 'all') {
+    let sql = `SELECT id, quote_number AS job_number, created_at, rep_id, rep_name, customer_id, site_id,
+      client_name AS customer_name, project_name, scope_summary, status, total AS contract_value,
+      is_test_data, 'quote' AS type, NULL AS invoice_number
+      FROM quotes WHERE 1=1`;
+    const qparams = [];
+    if (!includeTest) sql += ' AND (is_test_data IS NULL OR is_test_data=0)';
+    if (yyyymm) { sql += " AND SUBSTR(created_at, 1, 7) = ?"; qparams.push(yyyymm); }
+    if (rep) { sql += ' AND rep_id=?'; qparams.push(rep); }
+    if (status && status !== '') { sql += ' AND status=?'; qparams.push(status); }
+    if (searchLike) { sql += ' AND (LOWER(quote_number) LIKE ? OR LOWER(client_name) LIKE ? OR LOWER(project_name) LIKE ?)'; qparams.push(searchLike, searchLike, searchLike); }
+    sql += ' ORDER BY created_at DESC LIMIT 500';
+    all(sql, qparams).forEach(r => rows.push(r));
+  }
+
+  // PROJECTS + QUICK JOBS + SERVICE from projects table
+  if (!type || type === 'project' || type === 'quick_job' || type === 'service' || type === 'all') {
+    let sql = `SELECT p.id, p.job_number, p.created_at,
+      p.created_by AS rep_id,
+      (SELECT (u.first_name || ' ' || u.last_name) FROM users u WHERE u.id=p.created_by) AS rep_name,
+      p.customer_id, p.site_id,
+      p.customer_name, p.project_name, p.scope_brief AS scope_summary,
+      p.status, p.contract_value, p.is_test_data,
+      COALESCE(p.job_type, 'project') AS type,
+      p.invoice_number
+      FROM projects p WHERE 1=1`;
+    const pparams = [];
+    if (!includeTest) sql += ' AND (p.is_test_data IS NULL OR p.is_test_data=0)';
+    if (type === 'project')   { sql += " AND COALESCE(p.job_type,'project')='project'"; }
+    if (type === 'quick_job') { sql += " AND p.job_type='quick_job'"; }
+    if (type === 'service')   { sql += " AND p.job_type='service'"; }
+    if (yyyymm) { sql += " AND SUBSTR(p.created_at, 1, 7) = ?"; pparams.push(yyyymm); }
+    if (rep) { sql += ' AND p.created_by=?'; pparams.push(rep); }
+    if (status && status !== '') { sql += ' AND p.status=?'; pparams.push(status); }
+    if (searchLike) { sql += ' AND (LOWER(p.job_number) LIKE ? OR LOWER(p.customer_name) LIKE ? OR LOWER(p.project_name) LIKE ?)'; pparams.push(searchLike, searchLike, searchLike); }
+    sql += ' ORDER BY p.created_at DESC LIMIT 500';
+    all(sql, pparams).forEach(r => rows.push(r));
+  }
+
+  // Enrich with site name if site_id is set
+  rows.forEach(r => {
+    if (r.site_id) {
+      const s = get('SELECT site_name, store_number FROM customer_sites WHERE id=?', [r.site_id]);
+      if (s) r.site_display = (s.site_name || '') + (s.store_number ? ' #' + s.store_number : '');
+    }
+  });
+
+  // Sort by created_at desc globally
+  rows.sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+
+  res.json({ count: rows.length, rows });
 });
 
 // ─── CATCH-ALL ────────────────────────────────────────────────────────────────

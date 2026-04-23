@@ -204,6 +204,11 @@
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z"/></svg>
         Quick Jobs
       </div>
+      <!-- ─── JOB LOG NAV ITEM (Phase 1A.2b) ─── -->
+      <div class="nav-item" data-page="jobLog" onclick="showPage('jobLog',this)" id="nav-jobLog">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M2 5a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5zm3.293 1.293a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 01-1.414-1.414L7.586 10 5.293 7.707a1 1 0 010-1.414zM11 12a1 1 0 100 2h3a1 1 0 100-2h-3z" clip-rule="evenodd"/></svg>
+        Job Log
+      </div>
       <!-- ─── PROJECTS NAV ITEM ─── -->
       <div class="nav-item" data-page="projects" onclick="showPage('projects',this)" id="nav-projects">
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 6a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1v-2zm0 6a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1v-2z" clip-rule="evenodd"/></svg>
@@ -676,8 +681,22 @@
               </select>
             </div>
             <div id="jobFields" style="display:none">
-              <div class="form-group"><label>Job Name / Work Order</label><input type="text" id="clockJobName" placeholder="e.g. Commercial Door Install — Meijer Warren" /></div>
-              <div class="form-group"><label>Customer Name</label><input type="text" id="clockCustomer" placeholder="e.g. Meijer" /></div>
+              <div class="form-group" style="position:relative">
+                <label>Job <span style="font-size:10px;color:var(--text-faint);font-weight:400">&mdash; search by job #, customer, or site</span></label>
+                <input type="text" id="clockJobSearch" placeholder="Type to search: 0426-45, Kroger 56, Troy MI..." autocomplete="off"
+                  oninput="clockJobSearchInput()" onfocus="clockJobSearchInput()" onblur="setTimeout(clockJobSearchBlur,200)" />
+                <div id="clockJobDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);max-height:240px;overflow-y:auto;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,.4)"></div>
+                <div id="clockJobSelected" style="display:none;margin-top:6px;padding:8px 10px;background:var(--bg-surface);border-left:3px solid var(--green);border-radius:var(--radius-sm);font-size:12px">
+                  <span style="color:var(--green);font-weight:600">&#10003; Linked: </span><span id="clockJobSelectedLabel"></span>
+                  <button type="button" onclick="clockJobClear()" style="float:right;background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:14px" title="Clear">&times;</button>
+                </div>
+              </div>
+              <!-- Legacy hidden fields kept so backend POST still works -->
+              <input type="hidden" id="clockJobName" />
+              <input type="hidden" id="clockCustomer" />
+              <input type="hidden" id="clockJobId" value="0" />
+              <input type="hidden" id="clockSiteId" value="0" />
+              <input type="hidden" id="clockCustomerId" value="0" />
             </div>
             <div class="form-group"><label>Notes (optional)</label><input type="text" id="clockNotes" placeholder="Any notes..." /></div>
             <div id="locationStatus" class="calc-note" style="display:none"></div>
@@ -813,6 +832,7 @@
         <div class="page-header">
           <div><h1 class="page-title">QUOTES</h1><p class="page-sub" id="salesPageSub">Create, manage, and track quotes</p></div>
           <div style="display:flex;gap:8px;" id="salesHeaderBtns">
+            <button class="btn btn-ghost" onclick="showPage('jobLog',document.getElementById('nav-jobLog'))" title="Open Job Log">📒 Job Log</button>
             <button class="btn btn-ghost" onclick="quotesShowList()" id="btnQuoteList">&#128203; My Quotes</button>
             <button class="btn btn-primary" onclick="quotesNewQuote()">+ New Quote</button>
           </div>
@@ -887,6 +907,7 @@
             <div class="card" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;align-content:start;">
               <div style="grid-column:1/-1;font-size:10px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:4px;">Client Info</div>
               <input type="hidden" id="q-customer-id" value="0" />
+              <input type="hidden" id="q-site-id" value="0" />
               <div style="grid-column:1/-1;position:relative">
                 <label class="ql" style="display:flex;align-items:center;justify-content:space-between">
                   <span>Company / Client Name</span>
@@ -961,7 +982,10 @@
 <div id="page-projects" class="page">
   <div class="page-header">
     <h1 class="page-title">🏗️ Projects</h1>
-    <button class="btn btn-primary" onclick="openAddProject()">+ New Project</button>
+    <div style="display:flex;gap:8px;margin-left:auto">
+      <button class="btn btn-ghost" onclick="showPage('jobLog',document.getElementById('nav-jobLog'))" title="Open Job Log">📒 Job Log</button>
+      <button class="btn btn-primary" onclick="openAddProject()">+ New Project</button>
+    </div>
   </div>
   <div class="card" style="margin-bottom:1rem">
     <div style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:center">
@@ -1015,6 +1039,9 @@
       <h1 class="page-title">⚡ QUICK JOBS</h1>
       <p class="page-sub">Small, fast turn-around jobs — springs, weatherseal, service returns. Billed on completion.</p>
     </div>
+    <div style="display:flex;gap:8px;margin-left:auto">
+      <button class="btn btn-ghost" onclick="showPage('jobLog',document.getElementById('nav-jobLog'))" title="Open Job Log">📒 Job Log</button>
+    </div>
   </div>
   <div class="card" style="padding:0;overflow:hidden">
     <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
@@ -1064,6 +1091,65 @@
     </div>
   </div>
   <div id="qjDetailContent"></div>
+</div>
+
+<!-- ═══ JOB LOG PAGE (Phase 1A.2b) ═══ -->
+<div id="page-jobLog" class="page">
+  <div class="page-header" style="flex-wrap:wrap;gap:.5rem">
+    <div>
+      <h1 class="page-title">📒 JOB LOG</h1>
+      <p class="page-sub">Unified list of all quotes, projects, quick jobs, and service calls. Replaces the monthly Excel job log.</p>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-left:auto">
+      <button class="btn btn-ghost btn-sm" onclick="jobLogPrint()">🖨 Print / Export</button>
+    </div>
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden">
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <!-- Month picker -->
+      <div style="display:flex;align-items:center;gap:4px">
+        <button class="btn btn-ghost btn-sm" onclick="jobLogShiftMonth(-1)" title="Previous month">&#8249;</button>
+        <input type="month" id="jl-month" onchange="jobLogFilter()" style="width:auto;padding:6px 10px;font-size:13px" />
+        <button class="btn btn-ghost btn-sm" onclick="jobLogShiftMonth(1)" title="Next month">&#8250;</button>
+        <button class="btn btn-ghost btn-sm" onclick="jobLogSetMonth(null)" title="All months">All</button>
+      </div>
+      <select id="jl-type" onchange="jobLogFilter()" style="width:auto;padding:6px 10px;font-size:13px">
+        <option value="">All Types</option>
+        <option value="quote">📝 Quote</option>
+        <option value="project">📋 Project</option>
+        <option value="quick_job">⚡ Quick Job</option>
+        <option value="service">🔧 Service Call</option>
+      </select>
+      <select id="jl-status" onchange="jobLogFilter()" style="width:auto;padding:6px 10px;font-size:13px">
+        <option value="">All Statuses</option>
+        <option value="draft">Draft</option>
+        <option value="sent">Sent</option>
+        <option value="accepted">Accepted</option>
+        <option value="declined">Declined</option>
+        <option value="awarded">Awarded</option>
+        <option value="scheduled">Scheduled</option>
+        <option value="in_progress">In Progress</option>
+        <option value="complete">Complete</option>
+      </select>
+      <select id="jl-rep" onchange="jobLogFilter()" style="width:auto;padding:6px 10px;font-size:13px">
+        <option value="">All Reps</option>
+      </select>
+      <input type="text" id="jl-search" placeholder="Search job#, customer, description..." oninput="jobLogFilter()" style="width:260px;padding:6px 10px;font-size:13px" />
+      <label style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:4px;cursor:pointer">
+        <input type="checkbox" id="jl-include-test" onchange="jobLogFilter()" /> include test data
+      </label>
+      <span id="jl-count" style="font-size:12px;color:var(--text-muted);margin-left:auto"></span>
+    </div>
+
+    <!-- Summary tiles -->
+    <div id="jl-summary-tiles" style="padding:10px 16px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+    </div>
+
+    <div id="jl-table-body" style="min-height:160px">
+      <div style="padding:40px;text-align:center;color:var(--text-faint);font-size:13px">Loading...</div>
+    </div>
+  </div>
 </div>
 
     </main>
