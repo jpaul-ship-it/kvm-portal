@@ -1583,10 +1583,33 @@ app.post('/api/quotes', requireAuth, (req, res) => {
   const u = get('SELECT first_name,last_name FROM users WHERE id=?', [req.session.userId]);
   const rep_name = u.first_name + (u.last_name ? ' ' + u.last_name : '');
   const { quote_number, customer_id, site_id, client_name, contact_name, address, email, phone, project_name, scope_summary, scopes, options, notes, subtotal, tax, total, valid_for, status } = req.body;
-  // Phase 1A.1.1 — auto-assign next monthly job number if not provided
+  // Phase 1A.1.1 — auto-assign next monthly job number.
+  // Rules:
+  //   1) Empty / whitespace → allocate fresh
+  //   2) Matches the current "next" number (i.e. client just sent the peek value) → allocate fresh
+  //   3) Already in use on another quote or project → allocate fresh (prevent duplicates)
+  //   4) Otherwise → accept as-is (user typed a manual override like 0426-45A)
   let finalQuoteNum = (quote_number||'').trim();
   if (!finalQuoteNum) {
-    try { finalQuoteNum = allocateNextJobNumber(); } catch(e) { /* fall back to empty if counter fails */ }
+    try { finalQuoteNum = allocateNextJobNumber(); } catch(e) {}
+  } else {
+    // Check if this matches the current peek (server-driven; user didn't override)
+    let shouldReallocate = false;
+    try {
+      const key = currentMonthKey();
+      const row = get('SELECT last_seq FROM job_sequence WHERE month_key=?', [key]);
+      const peekNext = `${key}-${(row ? row.last_seq||0 : 0) + 1}`;
+      if (finalQuoteNum === peekNext) shouldReallocate = true;
+    } catch(e) {}
+    // Check for duplicate against existing quotes/projects
+    if (!shouldReallocate) {
+      const dupQ = get('SELECT id FROM quotes WHERE quote_number=? LIMIT 1', [finalQuoteNum]);
+      const dupP = get('SELECT id FROM projects WHERE job_number=? LIMIT 1', [finalQuoteNum]);
+      if (dupQ || dupP) shouldReallocate = true;
+    }
+    if (shouldReallocate) {
+      try { finalQuoteNum = allocateNextJobNumber(); } catch(e) {}
+    }
   }
   const id = runGetId(`INSERT INTO quotes (quote_number,rep_id,rep_name,customer_id,site_id,client_name,contact_name,address,email,phone,project_name,scope_summary,scopes,options,notes,subtotal,tax,total,valid_for,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [finalQuoteNum, req.session.userId, rep_name, parseInt(customer_id)||0, parseInt(site_id)||0, client_name||'', contact_name||'', address||'', email||'', phone||'', project_name||'', scope_summary||'', JSON.stringify(scopes||[]), JSON.stringify(options||[]), notes||'', subtotal||'', tax||'', total||'', valid_for||'30 days', status||'draft']);
@@ -2690,7 +2713,7 @@ app.get('/api/search', requireAuth, (req, res) => {
              c.is_test_data AS cust_is_test
       FROM customer_sites s
       LEFT JOIN customers c ON c.id = s.customer_id
-      WHERE s.status IS NULL OR s.status = 'active' OR s.status = ''
+      WHERE (s.status IS NULL OR s.status = 'active' OR s.status = '')
       AND (
         LOWER(s.site_name) LIKE ? OR LOWER(s.address) LIKE ? OR LOWER(s.city) LIKE ?
         OR LOWER(s.store_number) LIKE ? OR LOWER(c.company_name) LIKE ?
@@ -2719,7 +2742,7 @@ app.get('/api/search', requireAuth, (req, res) => {
              billing_phone, billing_email, is_test_data,
              (SELECT COUNT(*) FROM customer_sites WHERE customer_id = customers.id) AS site_count
       FROM customers
-      WHERE status IS NULL OR status = 'active' OR status = ''
+      WHERE (status IS NULL OR status = 'active' OR status = '')
       AND (LOWER(company_name) LIKE ? OR LOWER(billing_address) LIKE ? OR LOWER(billing_city) LIKE ?)
       ORDER BY company_name LIMIT 10`, [q, q, q]);
     custs.forEach(c => {
