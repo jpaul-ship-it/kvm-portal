@@ -4397,6 +4397,13 @@ async function quotesSave() {
     } else {
       const r = await api('POST', '/api/quotes', payload);
       quotesCurrentId = r.id;
+      // Phase 1A.1.1 fix — reflect server-allocated quote_number back into the UI
+      if (r.quote_number && $('q-num')) {
+        $('q-num').value = r.quote_number;
+        // Field is now locked (saved state)
+        if (typeof quotesResetNumEditState === 'function') quotesResetNumEditState();
+        const hint = $('q-num-hint'); if (hint) hint.textContent = 'assigned';
+      }
     }
     if (statusEl) statusEl.textContent = '✓ Saved ' + new Date().toLocaleTimeString();
     showToast('Quote saved!', 'success');
