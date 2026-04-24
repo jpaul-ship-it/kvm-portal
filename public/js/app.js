@@ -3441,6 +3441,10 @@ async function renderProjectTab() {
         </div>` : ''}
       </div>`;
 
+  } else if (projectTabActive === 'workflow') {
+    // Phase 1A.5 — Kanban-style workflow tasks grouped by section
+    el.innerHTML = await renderWorkflowKanban(p);
+
   } else if (projectTabActive === 'phases') {
     const phases = p.phases || [];
     el.innerHTML = `
@@ -4299,9 +4303,19 @@ function quotesRenderList() {
   }
   const statusColors = { draft:'#888', sent:'#2980b9', accepted:'#27ae60', declined:'#e74c3c' };
   body.innerHTML = `<div class="table-wrap"><table class="data-table">
-    <thead><tr><th>Quote #</th><th>Client</th><th>Project</th><th>Rep</th><th>Total</th><th>Status</th><th>Date</th><th></th></tr></thead>
+    <thead><tr><th>Quote #</th><th>Client</th><th>Project</th><th>Rep</th><th>Total</th><th>Status</th><th>Date</th><th style="min-width:200px">Actions</th></tr></thead>
     <tbody>${filtered.map(q => {
       const sc = statusColors[q.status] || '#888';
+      // Phase 1A.5 bonus — inline status buttons per row, contextual by status
+      let actionBtns = '';
+      if (q.status === 'draft') {
+        actionBtns = `<button class="btn btn-ghost btn-sm" title="Mark Sent" onclick="event.stopPropagation();quotesSetStatus(${q.id},'sent')">✉ Sent</button>`;
+      } else if (q.status === 'sent') {
+        actionBtns = `<button class="btn btn-sm" style="background:#27ae60;color:#fff;border-color:#27ae60" title="Mark Accepted" onclick="event.stopPropagation();quotesSetStatus(${q.id},'accepted')">✓ Accept</button>
+          <button class="btn btn-danger btn-sm" title="Mark Lost" onclick="event.stopPropagation();quotesSetStatus(${q.id},'declined')">✗ Lost</button>`;
+      } else if (q.status === 'accepted') {
+        actionBtns = `<button class="btn btn-sm" style="background:var(--amber);color:#000;border-color:var(--amber)" title="Create Project/Quick Job" onclick="event.stopPropagation();quotesInlineCreateProject(${q.id})">→ Create Job</button>`;
+      }
       return `<tr style="cursor:pointer" onclick="quotesOpenEdit(${q.id})">
         <td style="font-family:monospace;font-size:12px;color:var(--amber)">${q.quote_number||'—'}</td>
         <td><strong>${q.client_name||'—'}</strong></td>
@@ -4310,7 +4324,8 @@ function quotesRenderList() {
         <td style="font-weight:600">${q.total ? '$'+q.total : '—'}</td>
         <td><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;text-transform:uppercase;background:${sc}22;color:${sc};border:1px solid ${sc}44">${q.status||'draft'}</span></td>
         <td style="font-size:12px;color:var(--text-muted)">${q.updated_at ? fmtDate(q.updated_at.split(' ')[0]) : '—'}</td>
-        <td style="display:flex;gap:4px">
+        <td style="display:flex;gap:4px;flex-wrap:wrap">
+          ${actionBtns}
           <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();quotesOpenEdit(${q.id})">Edit</button>
           <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();quotesDelete(${q.id})">✕</button>
         </td>
@@ -4708,6 +4723,7 @@ function setSettingsTab(tab, el) {
   if (tab === 'gl')     loadGlDefaults();
   if (tab === 'coa')    loadCoaAdmin();
   if (tab === 'backup') refreshTestDataStatus();
+  if (tab === 'workflow') loadWfSettings();
 }
 
 // ─── Skills checkboxes (used on employee + project modals) ───────────────────
@@ -6392,4 +6408,454 @@ function clockJobClear() {
     });
     console.log('[KVM] Phase 1A.2b functions exposed');
   } catch(e) { console.error('[KVM] Phase 1A.2b exposure failed:', e); }
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PHASE 1A.5 — PROJECT WORKFLOW TAB + TEMPLATE EDITOR + QUOTE INLINE BTNS ══
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const WF_SECTIONS_ORDER = [
+  'Front End / General Conditions',
+  'Mobilize on site',
+  'Electrical',
+  'Punchlist',
+  'Closing Documents',
+  'Schedule',
+  'Pictures',
+  'Equipment'
+];
+
+const WF_STATUS_MAP = {
+  pending:     { icon:'⚪', label:'Pending',     color:'#888' },
+  in_progress: { icon:'🟡', label:'In Progress', color:'var(--amber)' },
+  done:        { icon:'✅', label:'Done',        color:'var(--green)' },
+  'n/a':       { icon:'⛔', label:'N/A',         color:'var(--text-faint)' }
+};
+
+// Render the Kanban-style Workflow tab for a project
+async function renderWorkflowKanban(p) {
+  const tasks = p.workflow_tasks || [];
+  if (!tasks.length) {
+    return `<div class="empty-state" style="padding:40px;text-align:center">
+      <p style="font-size:14px;color:var(--text-muted);margin-bottom:1rem">No workflow tasks on this project yet.</p>
+      <p style="font-size:12px;color:var(--text-faint);margin-bottom:1rem">This project was likely created before the Workflow feature was added. You can seed the default tasks now.</p>
+      <button class="btn btn-primary" onclick="seedWorkflowTasksNow()">📋 Seed Default Workflow Tasks</button>
+    </div>`;
+  }
+
+  // Group by section
+  const bySection = {};
+  tasks.forEach(t => {
+    const s = t.section || 'General';
+    if (!bySection[s]) bySection[s] = [];
+    bySection[s].push(t);
+  });
+
+  // Count stats
+  const totalTasks = tasks.length;
+  const doneTasks = tasks.filter(t => t.status === 'done').length;
+  const openTasks = tasks.filter(t => t.status === 'pending' || t.status === 'in_progress').length;
+  const overdue = tasks.filter(t => {
+    if (t.status === 'done' || t.status === 'n/a') return false;
+    if (!t.due_date) return false;
+    const today = new Date().toISOString().split('T')[0];
+    return t.due_date < today;
+  }).length;
+  const pct = totalTasks ? Math.round((doneTasks / totalTasks) * 100) : 0;
+
+  // Ordered sections: known sections in order, then any extras alphabetically
+  const knownSections = WF_SECTIONS_ORDER.filter(s => bySection[s]);
+  const extraSections = Object.keys(bySection).filter(s => !WF_SECTIONS_ORDER.includes(s)).sort();
+  const orderedSections = [...knownSections, ...extraSections];
+
+  let html = `
+    <!-- Progress banner -->
+    <div class="card" style="margin-bottom:1rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Workflow Progress</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1;height:10px;background:var(--bg-surface);border-radius:5px;overflow:hidden">
+            <div style="height:100%;background:var(--green);width:${pct}%;transition:width .25s ease-out"></div>
+          </div>
+          <span style="font-weight:700;font-size:14px;color:var(--green)">${pct}%</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:1rem;font-size:12px">
+        <div><strong style="color:var(--green);font-size:16px">${doneTasks}</strong> <span style="color:var(--text-muted)">done</span></div>
+        <div><strong style="color:var(--amber);font-size:16px">${openTasks}</strong> <span style="color:var(--text-muted)">open</span></div>
+        ${overdue ? `<div><strong style="color:var(--danger);font-size:16px">${overdue}</strong> <span style="color:var(--text-muted)">overdue</span></div>` : ''}
+        <div><strong style="font-size:16px">${totalTasks}</strong> <span style="color:var(--text-muted)">total</span></div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="openAddWorkflowTask()">+ Add Task</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">
+  `;
+
+  orderedSections.forEach(section => {
+    const sectionTasks = bySection[section] || [];
+    sectionTasks.sort((a,b) => (a.sort_order||0) - (b.sort_order||0));
+    html += `<div class="card" style="padding:0;min-height:100px">
+      <div style="padding:10px 12px;background:var(--bg-surface);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+        <div style="font-family:Oswald,sans-serif;font-size:12px;font-weight:600;color:var(--amber);letter-spacing:.05em;text-transform:uppercase">${escapeHtml(section)}</div>
+        <div style="font-size:10px;color:var(--text-muted)">${sectionTasks.filter(t => t.status === 'done').length}/${sectionTasks.length}</div>
+      </div>
+      <div style="padding:8px;display:flex;flex-direction:column;gap:6px">
+        ${sectionTasks.map(t => renderWfCard(t)).join('')}
+      </div>
+    </div>`;
+  });
+
+  html += `</div>`;
+  return html;
+}
+
+function renderWfCard(t) {
+  const stat = WF_STATUS_MAP[t.status] || WF_STATUS_MAP.pending;
+  const todayStr = new Date().toISOString().split('T')[0];
+  const isOverdue = t.due_date && t.status !== 'done' && t.status !== 'n/a' && t.due_date < todayStr;
+  const dueBadge = t.due_date ?
+    `<span style="font-size:10px;color:${isOverdue?'var(--danger)':'var(--text-muted)'};${isOverdue?'font-weight:700':''}">${isOverdue?'⚠ ':''}Due ${fmtDate(t.due_date)}</span>`
+    : '';
+  const assigneeBit = t.assigned_user_name ?
+    `<span style="font-size:10px;color:var(--text-muted);display:inline-flex;align-items:center;gap:3px">
+      <span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:${avatarBg(t.assigned_user_name)};color:#fff;font-size:8px;font-weight:700;text-align:center;line-height:14px">${(t.assigned_user_name||'?').substring(0,1).toUpperCase()}</span>
+      ${escapeHtml(t.assigned_user_name)}
+    </span>`
+    : `<span style="font-size:10px;color:var(--text-faint)">unassigned</span>`;
+  // Show role hint if set and no specific user was resolved
+  const roleBit = (!t.assigned_user_id && t.default_role) ? `<span style="font-size:9px;color:var(--text-faint);margin-left:4px">(role: ${escapeHtml(t.default_role)})</span>` : '';
+  const dimStyle = t.status === 'done' || t.status === 'n/a' ? 'opacity:.55' : '';
+  return `<div onclick="openEditWorkflowTask(${t.id})" style="background:var(--bg-card);border:1px solid var(--border);border-left:3px solid ${stat.color};border-radius:var(--radius-sm);padding:8px 10px;cursor:pointer;${dimStyle}" 
+    onmouseover="this.style.background='var(--bg-surface)'" onmouseout="this.style.background='var(--bg-card)'">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px">
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:500;line-height:1.3;${t.status==='done'?'text-decoration:line-through':''}">${escapeHtml(t.task_name)}</div>
+        ${t.description ? `<div style="font-size:10px;color:var(--text-faint);margin-top:3px;line-height:1.3">${escapeHtml(t.description).substring(0,80)}</div>` : ''}
+      </div>
+      <span title="${stat.label}" style="font-size:14px;flex-shrink:0">${stat.icon}</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;gap:6px;flex-wrap:wrap">
+      ${assigneeBit}${roleBit}
+      ${dueBadge}
+    </div>
+  </div>`;
+}
+
+async function seedWorkflowTasksNow() {
+  if (!currentProjectData) return;
+  if (!confirm('Seed the default workflow template onto this project? This adds all default tasks.')) return;
+  try {
+    await api('POST', '/api/projects/' + currentProjectData.id + '/workflow-tasks/seed', {});
+    showToast('Workflow tasks created.', 'success');
+    await loadProjectDetail(currentProjectData.id);
+    setProjectTab('workflow', null);
+    // Re-highlight the Workflow tab
+    document.querySelectorAll('#projTabBar .tab-btn').forEach(b => {
+      if ((b.textContent||'').indexOf('Workflow') > -1) b.classList.add('active');
+    });
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ─── WORKFLOW TASK — ADD / EDIT MODAL ────────────────────────────────────────
+
+async function openAddWorkflowTask() {
+  if (!currentProjectData) return;
+  $('wfTaskModalTitle').textContent = 'Add Workflow Task';
+  $('wf-task-id').value = 0;
+  $('wf-task-name').value = '';
+  $('wf-task-desc').value = '';
+  $('wf-task-notes').value = '';
+  $('wf-task-status').value = 'pending';
+  $('wf-task-due').value = '';
+  $('wf-task-delete-btn').style.display = 'none';
+  await populateWfTaskSectionSelect();
+  await populateWfTaskAssigneeSelect(0);
+  openModal('wfTaskModal');
+}
+
+async function openEditWorkflowTask(taskId) {
+  if (!currentProjectData) return;
+  const t = (currentProjectData.workflow_tasks||[]).find(x => x.id === taskId);
+  if (!t) return;
+  $('wfTaskModalTitle').textContent = 'Edit: ' + (t.task_name||'Task');
+  $('wf-task-id').value = t.id;
+  $('wf-task-name').value = t.task_name || '';
+  $('wf-task-desc').value = t.description || '';
+  $('wf-task-notes').value = t.notes || '';
+  $('wf-task-status').value = t.status || 'pending';
+  $('wf-task-due').value = t.due_date || '';
+  $('wf-task-delete-btn').style.display = 'inline-block';
+  await populateWfTaskSectionSelect(t.section);
+  await populateWfTaskAssigneeSelect(t.assigned_user_id);
+  openModal('wfTaskModal');
+}
+
+async function populateWfTaskSectionSelect(current) {
+  const sel = $('wf-task-section');
+  if (!sel) return;
+  sel.innerHTML = WF_SECTIONS_ORDER.map(s => `<option value="${escapeHtml(s)}" ${s===current?'selected':''}>${escapeHtml(s)}</option>`).join('') +
+    `<option value="General" ${(current==='General'||!current)?'':''}>General (other)</option>`;
+  if (current && !WF_SECTIONS_ORDER.includes(current) && current !== 'General') {
+    sel.innerHTML += `<option value="${escapeHtml(current)}" selected>${escapeHtml(current)}</option>`;
+  }
+}
+
+async function populateWfTaskAssigneeSelect(current) {
+  const sel = $('wf-task-assignee');
+  if (!sel) return;
+  try {
+    if (!allUsers || !allUsers.length) {
+      allUsers = await api('GET', '/api/users');
+    }
+    const active = (allUsers||[]).filter(u => u.is_active !== 0);
+    sel.innerHTML = '<option value="0">— unassigned —</option>' +
+      active.map(u => `<option value="${u.id}" ${u.id===current?'selected':''}>${escapeHtml(((u.first_name||'')+' '+(u.last_name||'')).trim())}</option>`).join('');
+  } catch(e) {}
+}
+
+async function saveWorkflowTask() {
+  if (!currentProjectData) return;
+  const taskId = parseInt($('wf-task-id').value) || 0;
+  const payload = {
+    section: $('wf-task-section').value,
+    task_name: $('wf-task-name').value.trim(),
+    description: $('wf-task-desc').value.trim(),
+    assigned_user_id: parseInt($('wf-task-assignee').value) || 0,
+    status: $('wf-task-status').value,
+    due_date: $('wf-task-due').value || '',
+    notes: $('wf-task-notes').value.trim()
+  };
+  if (!payload.task_name) { showToast('Task name required.','error'); return; }
+  try {
+    if (taskId) {
+      await api('PUT', '/api/projects/' + currentProjectData.id + '/workflow-tasks/' + taskId, payload);
+    } else {
+      await api('POST', '/api/projects/' + currentProjectData.id + '/workflow-tasks', payload);
+    }
+    closeModal('wfTaskModal');
+    showToast('Task saved.', 'success');
+    await loadProjectDetail(currentProjectData.id);
+    setProjectTab('workflow', null);
+    document.querySelectorAll('#projTabBar .tab-btn').forEach(b => {
+      if ((b.textContent||'').indexOf('Workflow') > -1) b.classList.add('active');
+    });
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteWorkflowTask() {
+  if (!currentProjectData) return;
+  const taskId = parseInt($('wf-task-id').value) || 0;
+  if (!taskId) return;
+  if (!confirm('Delete this task?')) return;
+  try {
+    await api('DELETE', '/api/projects/' + currentProjectData.id + '/workflow-tasks/' + taskId);
+    closeModal('wfTaskModal');
+    showToast('Deleted.', 'success');
+    await loadProjectDetail(currentProjectData.id);
+    setProjectTab('workflow', null);
+    document.querySelectorAll('#projTabBar .tab-btn').forEach(b => {
+      if ((b.textContent||'').indexOf('Workflow') > -1) b.classList.add('active');
+    });
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ─── SETTINGS — WORKFLOW TEMPLATE EDITOR ─────────────────────────────────────
+
+let _wfTemplateData = null;
+
+async function loadWfSettings() {
+  // Load the default template + the users workflow roles
+  try {
+    const templates = await api('GET', '/api/workflow-templates');
+    _wfTemplateData = (templates||[]).find(t => t.is_default) || templates[0];
+    renderWfTemplateEditor();
+  } catch(e) {
+    $('wfTemplateContainer').innerHTML = '<div style="color:var(--danger)">Error loading template: ' + escapeHtml(e.message) + '</div>';
+  }
+  try {
+    const users = await api('GET', '/api/users/workflow-roles');
+    renderWfRolesEditor(users);
+  } catch(e) {
+    $('wfRolesContainer').innerHTML = '<div style="color:var(--danger)">Error loading roles: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function renderWfTemplateEditor() {
+  const el = $('wfTemplateContainer');
+  if (!el) return;
+  if (!_wfTemplateData) { el.innerHTML = '<em>No default template found.</em>'; return; }
+  const tasks = _wfTemplateData.tasks || [];
+  // Group by section
+  const bySection = {};
+  tasks.forEach(t => { if (!bySection[t.section]) bySection[t.section] = []; bySection[t.section].push(t); });
+  const knownSections = WF_SECTIONS_ORDER.filter(s => bySection[s]);
+  const extraSections = Object.keys(bySection).filter(s => !WF_SECTIONS_ORDER.includes(s)).sort();
+  const orderedSections = [...knownSections, ...extraSections];
+
+  if (!orderedSections.length) { el.innerHTML = '<em>No tasks in this template.</em>'; return; }
+
+  el.innerHTML = orderedSections.map(section => `
+    <div style="margin-bottom:1.25rem">
+      <div style="font-family:Oswald,sans-serif;font-size:13px;font-weight:600;color:var(--amber);text-transform:uppercase;letter-spacing:.05em;padding:6px 10px;background:var(--bg-surface);border-radius:var(--radius-sm);margin-bottom:6px">${escapeHtml(section)}</div>
+      <div style="display:grid;grid-template-columns:1fr;gap:4px">
+        ${bySection[section].map(t => `
+          <div onclick="openEditWfTemplateTask(${t.id})" style="cursor:pointer;padding:8px 12px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:space-between;gap:10px"
+            onmouseover="this.style.background='var(--bg-surface)'" onmouseout="this.style.background='var(--bg-card)'">
+            <div style="flex:1">
+              <div style="font-size:13px;font-weight:500">${escapeHtml(t.task_name)}</div>
+              ${t.description ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escapeHtml(t.description)}</div>` : ''}
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-shrink:0">
+              ${t.default_role ? `<span style="font-size:10px;padding:2px 6px;background:var(--amber)22;color:var(--amber);border-radius:3px">${escapeHtml(t.default_role)}</span>` : ''}
+              ${t.default_days_after_start ? `<span style="font-size:10px;color:var(--text-muted)">+${t.default_days_after_start}d</span>` : ''}
+              <span style="font-size:10px;color:var(--text-faint)">sort: ${t.sort_order}</span>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+function openWfTemplateAddTask() {
+  if (!_wfTemplateData) { showToast('Template not loaded.','error'); return; }
+  $('wfTemplateTaskModalTitle').textContent = 'Add Template Task';
+  $('wf-tpl-task-id').value = 0;
+  $('wf-tpl-task-section').value = '';
+  $('wf-tpl-task-name').value = '';
+  $('wf-tpl-task-desc').value = '';
+  $('wf-tpl-task-role').value = '';
+  $('wf-tpl-task-days').value = 0;
+  $('wf-tpl-task-sort').value = 99;
+  $('wf-tpl-task-delete-btn').style.display = 'none';
+  openModal('wfTemplateTaskModal');
+}
+
+function openEditWfTemplateTask(taskId) {
+  if (!_wfTemplateData) return;
+  const t = (_wfTemplateData.tasks||[]).find(x => x.id === taskId);
+  if (!t) return;
+  $('wfTemplateTaskModalTitle').textContent = 'Edit: ' + (t.task_name||'Task');
+  $('wf-tpl-task-id').value = t.id;
+  $('wf-tpl-task-section').value = t.section || '';
+  $('wf-tpl-task-name').value = t.task_name || '';
+  $('wf-tpl-task-desc').value = t.description || '';
+  $('wf-tpl-task-role').value = t.default_role || '';
+  $('wf-tpl-task-days').value = t.default_days_after_start || 0;
+  $('wf-tpl-task-sort').value = t.sort_order || 10;
+  $('wf-tpl-task-delete-btn').style.display = 'inline-block';
+  openModal('wfTemplateTaskModal');
+}
+
+async function saveWfTemplateTask() {
+  if (!_wfTemplateData) return;
+  const id = parseInt($('wf-tpl-task-id').value) || 0;
+  const payload = {
+    section: $('wf-tpl-task-section').value.trim() || 'General',
+    task_name: $('wf-tpl-task-name').value.trim(),
+    description: $('wf-tpl-task-desc').value.trim(),
+    default_role: $('wf-tpl-task-role').value,
+    default_days_after_start: parseInt($('wf-tpl-task-days').value) || 0,
+    sort_order: parseInt($('wf-tpl-task-sort').value) || 99
+  };
+  if (!payload.task_name) { showToast('Task name required.','error'); return; }
+  try {
+    if (id) {
+      await api('PUT', '/api/workflow-templates/' + _wfTemplateData.id + '/tasks/' + id, payload);
+    } else {
+      await api('POST', '/api/workflow-templates/' + _wfTemplateData.id + '/tasks', payload);
+    }
+    closeModal('wfTemplateTaskModal');
+    showToast('Template task saved.','success');
+    loadWfSettings();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteWfTemplateTask() {
+  const id = parseInt($('wf-tpl-task-id').value) || 0;
+  if (!id || !_wfTemplateData) return;
+  if (!confirm('Delete this template task? (Existing projects with this task keep their copies.)')) return;
+  try {
+    await api('DELETE', '/api/workflow-templates/' + _wfTemplateData.id + '/tasks/' + id);
+    closeModal('wfTemplateTaskModal');
+    showToast('Deleted.','success');
+    loadWfSettings();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ─── SETTINGS — WORKFLOW ROLE ASSIGNMENTS ────────────────────────────────────
+
+function renderWfRolesEditor(users) {
+  const el = $('wfRolesContainer');
+  if (!el) return;
+  if (!users || !users.length) { el.innerHTML = '<em>No users found.</em>'; return; }
+  el.innerHTML = `
+    <table class="data-table">
+      <thead><tr><th>User</th><th>Role</th><th style="text-align:center">Office Manager</th><th style="text-align:center">Project Manager</th></tr></thead>
+      <tbody>${users.map(u => `
+        <tr>
+          <td><strong>${escapeHtml(((u.first_name||'')+' '+(u.last_name||'')).trim())}</strong><br><span style="font-size:11px;color:var(--text-muted)">${escapeHtml(u.username||'')}</span></td>
+          <td style="font-size:12px;color:var(--text-muted)">${escapeHtml(u.role_type||'—')}</td>
+          <td style="text-align:center"><input type="checkbox" ${(u.workflow_roles||[]).includes('office_manager')?'checked':''} onchange="toggleWfRole(${u.id},'office_manager',this.checked)" /></td>
+          <td style="text-align:center"><input type="checkbox" ${(u.workflow_roles||[]).includes('project_manager')?'checked':''} onchange="toggleWfRole(${u.id},'project_manager',this.checked)" /></td>
+        </tr>
+      `).join('')}</tbody>
+    </table>
+  `;
+}
+
+async function toggleWfRole(userId, role, checked) {
+  try {
+    // Fetch current to avoid wiping other roles
+    const users = await api('GET', '/api/users/workflow-roles');
+    const u = users.find(x => x.id === userId);
+    if (!u) return;
+    let roles = u.workflow_roles || [];
+    if (checked) {
+      if (!roles.includes(role)) roles.push(role);
+    } else {
+      roles = roles.filter(r => r !== role);
+    }
+    await api('PUT', '/api/users/' + userId + '/workflow-roles', { workflow_roles: roles });
+    showToast('Role updated.','success');
+  } catch(e) { showToast('Error: ' + e.message, 'error'); loadWfSettings(); }
+}
+
+// ─── QUOTES LIST — INLINE STATUS BUTTONS ──────────────────────────────────────
+
+async function quotesSetStatus(quoteId, newStatus) {
+  const labels = { sent:'mark this quote Sent?', accepted:'mark this quote Accepted?', declined:'mark this quote Lost (Declined)?', draft:'return to draft?' };
+  if (!confirm('Are you sure you want to ' + (labels[newStatus] || ('change status to '+newStatus)) + '?')) return;
+  try {
+    await api('PATCH', '/api/quotes/' + quoteId + '/status', { status: newStatus });
+    showToast('Status updated.', 'success');
+    // Refresh the list
+    if (typeof quotesShowList === 'function') quotesShowList();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function quotesInlineCreateProject(quoteId) {
+  // Open the quote in edit view so the chooser modal can fire from there
+  if (typeof quotesOpenEdit === 'function') {
+    await quotesOpenEdit(quoteId);
+    setTimeout(() => {
+      if (typeof cfqOpen === 'function') cfqOpen();
+    }, 250);
+  }
+}
+
+// Expose Phase 1A.5 functions on window
+(function() {
+  try {
+    ['renderWorkflowKanban','renderWfCard','seedWorkflowTasksNow',
+     'openAddWorkflowTask','openEditWorkflowTask','populateWfTaskSectionSelect','populateWfTaskAssigneeSelect',
+     'saveWorkflowTask','deleteWorkflowTask',
+     'loadWfSettings','renderWfTemplateEditor','openWfTemplateAddTask','openEditWfTemplateTask',
+     'saveWfTemplateTask','deleteWfTemplateTask','renderWfRolesEditor','toggleWfRole',
+     'quotesSetStatus','quotesInlineCreateProject'
+    ].forEach(function(name){
+      try { if (typeof eval(name) === 'function') window[name] = eval(name); } catch(e) {}
+    });
+    console.log('[KVM] Phase 1A.5 functions exposed');
+  } catch(e) { console.error('[KVM] Phase 1A.5 exposure failed:', e); }
 })();
