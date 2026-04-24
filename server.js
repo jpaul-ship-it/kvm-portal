@@ -462,6 +462,55 @@ async function initDb() {
   // Phase 1A.2b — site linkage on quotes (for Kroger #56 style quotes)
   try { db.run(`ALTER TABLE quotes ADD COLUMN site_id INTEGER DEFAULT 0`); saveDb(); } catch(e){}
 
+  // Phase 1A.5 — Workflow tasks on projects (admin task kanban like MS Planner)
+  // Template tables (library of sections + tasks copied onto each new project)
+  db.run(`CREATE TABLE IF NOT EXISTS workflow_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL DEFAULT 'Default Project Workflow',
+    description TEXT DEFAULT '',
+    is_default INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  saveDb();
+  db.run(`CREATE TABLE IF NOT EXISTS workflow_template_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    template_id INTEGER NOT NULL,
+    section TEXT NOT NULL DEFAULT '',
+    task_name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    default_role TEXT DEFAULT '',
+    default_days_after_start INTEGER DEFAULT 0,
+    sort_order INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1
+  )`);
+  saveDb();
+  // Per-project task instances (cloned from template on project creation)
+  db.run(`CREATE TABLE IF NOT EXISTS project_workflow_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    section TEXT NOT NULL DEFAULT '',
+    task_name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    assigned_user_id INTEGER DEFAULT 0,
+    assigned_user_name TEXT DEFAULT '',
+    default_role TEXT DEFAULT '',
+    status TEXT DEFAULT 'pending',
+    due_date TEXT DEFAULT '',
+    completed_date TEXT DEFAULT '',
+    completed_by_user_id INTEGER DEFAULT 0,
+    notes TEXT DEFAULT '',
+    sort_order INTEGER DEFAULT 0,
+    is_test_data INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`);
+  saveDb();
+
+  // Workflow role on users (so office_manager / project_manager / foreman roles can be resolved)
+  try { db.run(`ALTER TABLE users ADD COLUMN workflow_roles TEXT DEFAULT '[]'`); saveDb(); } catch(e){}
+
   // Phase 1A.2a — Quick Job / Project fork
   // material_status: 'from_stock' | 'ordered' | 'partial' | 'received'
   try { db.run(`ALTER TABLE projects ADD COLUMN material_status TEXT DEFAULT 'ordered'`); saveDb(); } catch(e){}
@@ -633,6 +682,62 @@ async function initDb() {
     });
     saveDb();
     console.log('  ✓ Phase 1A: Seeded ' + SEED_SKILLS.length + ' skills');
+  }
+
+  // Phase 1A.5 — Seed default workflow template on first run
+  const wfTemplateCount = get('SELECT COUNT(*) AS c FROM workflow_templates');
+  if (!wfTemplateCount || wfTemplateCount.c === 0) {
+    const tplId = runGetId(`INSERT INTO workflow_templates (name, description, is_default, is_active)
+      VALUES ('Default Project Workflow','Administrative task workflow for typical door install project. Edit or duplicate in Settings.',1,1)`);
+    // Default tasks — based on user's existing Microsoft Planner board + door-industry standards
+    const SEED_WF_TASKS = [
+      // section, task_name, description, default_role, default_days_after_start, sort_order
+      // ─── FRONT END / GENERAL CONDITIONS ─────────────────────────
+      ['Front End / General Conditions', 'KVM Safety Manual',              'Submit or confirm receipt of KVM safety manual to GC', 'office_manager', 0, 10],
+      ['Front End / General Conditions', 'Submit Insurance Documents',     'Send current COI to GC / property owner', 'office_manager', 0, 20],
+      ['Front End / General Conditions', 'Permit / License Check',         'Verify any permits or jurisdictional licensing needed', 'project_manager', 2, 30],
+      ['Front End / General Conditions', 'Kickoff Meeting',                'Internal kickoff: foreman, PM, sales rep align on scope', 'project_manager', 3, 40],
+      // ─── MOBILIZE ON SITE ───────────────────────────────────────
+      ['Mobilize on site', 'Field Measure Confirmed',      'Lead tech confirms measurements match shop drawings', 'foreman', 7, 10],
+      ['Mobilize on site', 'Opening Built & Ready',        'Confirm GC has opening prepped for install', 'project_manager', 10, 20],
+      ['Mobilize on site', 'Site Access Confirmed',        'Confirm hours, lock box, site contact, parking', 'foreman', 5, 30],
+      ['Mobilize on site', 'Start Installation',           'Installation kicks off on site', 'foreman', 14, 40],
+      // ─── ELECTRICAL ─────────────────────────────────────────────
+      ['Electrical', 'Low Voltage Wiring Run',              'Low-voltage conduit/wire runs for operators, sensors', 'foreman', 0, 10],
+      ['Electrical', 'Power Supplied to Equipment',         'Confirm GC has 120V/240V power at openings', 'project_manager', 0, 20],
+      ['Electrical', 'Install & Terminate Electrical Devices', 'Terminate operators, safety edges, photo eyes, controls', 'foreman', 0, 30],
+      // ─── PUNCHLIST ──────────────────────────────────────────────
+      ['Punchlist', 'Punchlist Items Scheduled',            'Any deficiencies scheduled for return visit', 'project_manager', 0, 10],
+      ['Punchlist', 'Contractor Punchlist Received',        'Formal punchlist received from GC', 'project_manager', 0, 20],
+      ['Punchlist', 'Punchlist Completed',                  'All items resolved, customer signed off', 'foreman', 0, 30],
+      // ─── CLOSING DOCUMENTS ──────────────────────────────────────
+      ['Closing Documents', 'KVM Labor Warranty',           'Deliver KVM labor warranty letter', 'sales_rep', 0, 10],
+      ['Closing Documents', 'Product Warranty Delivered',   'Manufacturer product warranties collected and sent to customer', 'sales_rep', 0, 20],
+      ['Closing Documents', 'O&M Manuals',                  'Operation & Maintenance manuals delivered', 'project_manager', 0, 30],
+      ['Closing Documents', 'Closeout Package Delivered',   'Final closeout package (warranty, O&M, pictures, invoice) sent to GC/owner', 'sales_rep', 0, 40],
+      // ─── SCHEDULE ───────────────────────────────────────────────
+      ['Schedule', 'Anticipated Duration Confirmed',        'Confirm schedule matches contract expectation', 'project_manager', 3, 10],
+      ['Schedule', 'Week of Final Scheduling',              'Schedule final install week once materials arrive', 'project_manager', 0, 20],
+      ['Schedule', 'KVM Look-Ahead Schedule Sent',          'Send 2-week look-ahead to GC', 'project_manager', 0, 30],
+      ['Schedule', 'Contractor Anticipated Schedule Confirmed','Confirm GC schedule vs. our schedule', 'project_manager', 0, 40],
+      // ─── PICTURES ───────────────────────────────────────────────
+      ['Pictures', 'Completion Pictures',                   'Final-install photos of each opening', 'foreman', 0, 10],
+      ['Pictures', 'Site Access Pictures',                  'Photos of staging/delivery access for future reference', 'foreman', 0, 20],
+      ['Pictures', 'Opening Pictures',                      'Pre-install photos of openings', 'foreman', 0, 30],
+      // ─── EQUIPMENT ──────────────────────────────────────────────
+      ['Equipment', 'Equipment Quoted',                     'Rental equipment quoted (lift, forklift, etc.)', 'project_manager', 0, 10],
+      ['Equipment', 'Order Equipment',                      'Place equipment rental PO', 'project_manager', 7, 20],
+      ['Equipment', 'Equipment Provider Confirmed',         'Confirmation from rental vendor with delivery date', 'project_manager', 0, 30],
+    ];
+    SEED_WF_TASKS.forEach(t => {
+      try {
+        db.run(`INSERT INTO workflow_template_tasks
+          (template_id, section, task_name, description, default_role, default_days_after_start, sort_order, is_active)
+          VALUES (?, ?, ?, ?, ?, ?, ?, 1)`, [tplId, t[0], t[1], t[2], t[3], t[4], t[5]]);
+      } catch(e){}
+    });
+    saveDb();
+    console.log('  ✓ Phase 1A.5: Seeded Default Workflow Template with ' + SEED_WF_TASKS.length + ' tasks across 8 sections');
   }
 
   // Default GL account map for bill categories (editable later via settings)
@@ -1676,8 +1781,77 @@ app.post('/api/quotes/:id/create-project', requireAuth, (req, res) => {
     [q.quote_number||'', projectName, customerId, customerName, siteId, location, q.id, q.quote_number||'',
      contractVal, billingType, scopeBrief, initialStatus, materialStatus, 'not_ready', '', '', 0, '',
      '[]', notes, req.session.userId, '[]', '[]', revenueDept, jobType]);
+
+  // Phase 1A.5 — Clone default workflow template tasks into the new project (projects only, not quick_jobs)
+  if (jobType === 'project') {
+    try { seedWorkflowTasksForProject(projectId, q.rep_id || req.session.userId); } catch(e) { console.error('Workflow seed error:', e); }
+  }
+
   res.json({ ok: true, project_id: projectId, job_type: jobType });
 });
+
+// ═══ PHASE 1A.5 — Workflow task helper: clone default template onto a project ═══
+// Resolves role-based default assignees to concrete user IDs.
+function seedWorkflowTasksForProject(projectId, salesRepId) {
+  const proj = get('SELECT foreman_id, start_date FROM projects WHERE id=?', [projectId]);
+  if (!proj) return;
+
+  // Find default template
+  const tpl = get('SELECT id FROM workflow_templates WHERE is_default=1 AND is_active=1 LIMIT 1');
+  if (!tpl) return;
+
+  const tasks = all('SELECT * FROM workflow_template_tasks WHERE template_id=? AND is_active=1 ORDER BY section, sort_order', [tpl.id]);
+  if (!tasks.length) return;
+
+  // Build role→user_id map
+  const roleMap = {};
+
+  // sales_rep → the rep who won the quote (salesRepId passed in)
+  if (salesRepId) {
+    const srUser = get('SELECT id, first_name, last_name FROM users WHERE id=?', [salesRepId]);
+    if (srUser) roleMap.sales_rep = { id: srUser.id, name: ((srUser.first_name||'') + ' ' + (srUser.last_name||'')).trim() };
+  }
+
+  // foreman → projects.foreman_id
+  if (proj.foreman_id) {
+    const fm = get('SELECT id, first_name, last_name FROM users WHERE id=?', [proj.foreman_id]);
+    if (fm) roleMap.foreman = { id: fm.id, name: ((fm.first_name||'') + ' ' + (fm.last_name||'')).trim() };
+  }
+
+  // office_manager / project_manager → look up users flagged with workflow_roles JSON containing the role
+  ['office_manager','project_manager'].forEach(role => {
+    // Naive JSON search: find any user where workflow_roles includes this role string
+    const candidate = get(
+      `SELECT id, first_name, last_name FROM users WHERE workflow_roles LIKE ? AND (is_active=1 OR is_active IS NULL) LIMIT 1`,
+      [`%"${role}"%`]
+    );
+    if (candidate) roleMap[role] = { id: candidate.id, name: ((candidate.first_name||'') + ' ' + (candidate.last_name||'')).trim() };
+  });
+
+  // Compute a due date from start_date + days_after_start
+  function addDays(dateStr, days) {
+    if (!dateStr || !days) return '';
+    try {
+      const d = new Date(dateStr + 'T00:00:00');
+      if (isNaN(d.getTime())) return '';
+      d.setDate(d.getDate() + parseInt(days, 10));
+      return d.toISOString().split('T')[0];
+    } catch(e) { return ''; }
+  }
+
+  tasks.forEach(t => {
+    const resolved = roleMap[t.default_role] || null;
+    const dueDate = addDays(proj.start_date, t.default_days_after_start);
+    try {
+      db.run(`INSERT INTO project_workflow_tasks
+        (project_id, section, task_name, description, assigned_user_id, assigned_user_name, default_role, status, due_date, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+        [projectId, t.section, t.task_name, t.description || '', resolved ? resolved.id : 0,
+         resolved ? resolved.name : '', t.default_role || '', dueDate, t.sort_order || 0]);
+    } catch(e) { console.error('Task insert error:', e); }
+  });
+  saveDb();
+}
 
 app.delete('/api/quotes/:id', requireAdmin, (req, res) => {
   run('DELETE FROM quotes WHERE id=?', [req.params.id]);
@@ -1730,6 +1904,8 @@ app.get('/api/projects/:id', requireAuth, (req, res) => {
     WHERE ph.project_id=? ORDER BY ph.work_date DESC, ph.created_at DESC`, [p.id]);
   p.notes = all('SELECT * FROM project_notes WHERE project_id=? ORDER BY created_at DESC', [p.id]);
   p.costs = all('SELECT * FROM project_costs WHERE project_id=? ORDER BY invoice_date DESC, created_at DESC', [p.id]);
+  // Phase 1A.5 — include workflow tasks
+  p.workflow_tasks = all('SELECT * FROM project_workflow_tasks WHERE project_id=? ORDER BY section, sort_order, id', [p.id]);
   p.total_hours = p.hours.reduce((s,h) => s + (h.hours||0), 0);
   res.json(p);
 });
@@ -1738,17 +1914,23 @@ app.get('/api/projects/:id', requireAuth, (req, res) => {
 app.post('/api/projects', requireAuth, (req, res) => {
   const { job_number, project_name, customer_id, customer_name, site_id, location, quote_id, quote_number,
     contract_value, billing_type, scope_brief, status, start_date, target_end_date, foreman_id, foreman_name,
-    assigned_techs, notes } = req.body;
+    assigned_techs, notes, job_type } = req.body;
   if (!project_name) return res.status(400).json({error:'Project name required'});
+  const jt = job_type === 'quick_job' ? 'quick_job' : (job_type === 'service' ? 'service' : 'project');
   const id = runGetId(`INSERT INTO projects 
     (job_number,project_name,customer_id,customer_name,site_id,location,quote_id,quote_number,
      contract_value,billing_type,scope_brief,status,start_date,target_end_date,foreman_id,foreman_name,
-     assigned_techs,notes,created_by)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     assigned_techs,notes,created_by,job_type)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [job_number||'', project_name, customer_id||0, customer_name||'', site_id||0, location||'',
      quote_id||0, quote_number||'', contract_value||'', billing_type||'aftermarket', scope_brief||'',
      status||'awarded', start_date||'', target_end_date||'', foreman_id||0, foreman_name||'',
-     JSON.stringify(assigned_techs||[]), notes||'', req.session.userId]);
+     JSON.stringify(assigned_techs||[]), notes||'', req.session.userId, jt]);
+
+  // Phase 1A.5 — Clone workflow template onto the new project (projects only)
+  if (jt === 'project') {
+    try { seedWorkflowTasksForProject(id, req.session.userId); } catch(e) { console.error('Workflow seed error:', e); }
+  }
   res.json({id});
 });
 
@@ -2887,6 +3069,187 @@ app.get('/api/job-log', requireAuth, (req, res) => {
   rows.sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
 
   res.json({ count: rows.length, rows });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PHASE 1A.5 — WORKFLOW TASKS (kanban on project detail) ═══════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// List workflow tasks for a project
+app.get('/api/projects/:id/workflow-tasks', requireAuth, (req, res) => {
+  const tasks = all('SELECT * FROM project_workflow_tasks WHERE project_id=? ORDER BY section, sort_order, id', [req.params.id]);
+  res.json(tasks);
+});
+
+// Create a single ad-hoc task on a project
+app.post('/api/projects/:id/workflow-tasks', requireAuth, (req, res) => {
+  const proj = get('SELECT id FROM projects WHERE id=?', [req.params.id]);
+  if (!proj) return res.status(404).json({ error: 'Project not found' });
+  const { section, task_name, description, assigned_user_id, due_date, sort_order } = req.body;
+  if (!task_name) return res.status(400).json({ error: 'Task name required' });
+  let aName = '';
+  if (assigned_user_id) {
+    const u = get('SELECT first_name,last_name FROM users WHERE id=?', [assigned_user_id]);
+    if (u) aName = ((u.first_name||'') + ' ' + (u.last_name||'')).trim();
+  }
+  const id = runGetId(`INSERT INTO project_workflow_tasks
+    (project_id, section, task_name, description, assigned_user_id, assigned_user_name, status, due_date, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+    [req.params.id, section || 'General', task_name, description || '',
+     parseInt(assigned_user_id) || 0, aName, due_date || '', parseInt(sort_order) || 999]);
+  res.json({ ok: true, id });
+});
+
+// Update a task (status, assignee, due date, notes, or name/description)
+app.put('/api/projects/:id/workflow-tasks/:tid', requireAuth, (req, res) => {
+  const task = get('SELECT id FROM project_workflow_tasks WHERE id=? AND project_id=?', [req.params.tid, req.params.id]);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  const { section, task_name, description, assigned_user_id, status, due_date, notes } = req.body;
+
+  // If assigning a user, resolve the name
+  let aName = null;
+  if (assigned_user_id !== undefined) {
+    if (parseInt(assigned_user_id) > 0) {
+      const u = get('SELECT first_name,last_name FROM users WHERE id=?', [assigned_user_id]);
+      aName = u ? ((u.first_name||'') + ' ' + (u.last_name||'')).trim() : '';
+    } else {
+      aName = '';
+    }
+  }
+
+  // If marking done, record completed_date + completed_by
+  let completedDate = null, completedBy = null;
+  if (status === 'done') {
+    const existing = get('SELECT status FROM project_workflow_tasks WHERE id=?', [req.params.tid]);
+    if (existing && existing.status !== 'done') {
+      completedDate = new Date().toISOString().split('T')[0];
+      completedBy = req.session.userId;
+    }
+  } else if (status && status !== 'done') {
+    // Reopening — clear completed fields
+    completedDate = '';
+    completedBy = 0;
+  }
+
+  const sets = [];
+  const params = [];
+  if (section !== undefined)          { sets.push('section=?');            params.push(section); }
+  if (task_name !== undefined)        { sets.push('task_name=?');          params.push(task_name); }
+  if (description !== undefined)      { sets.push('description=?');        params.push(description); }
+  if (assigned_user_id !== undefined) { sets.push('assigned_user_id=?');   params.push(parseInt(assigned_user_id)||0); sets.push('assigned_user_name=?'); params.push(aName); }
+  if (status !== undefined)           { sets.push('status=?');             params.push(status); }
+  if (due_date !== undefined)         { sets.push('due_date=?');           params.push(due_date); }
+  if (notes !== undefined)            { sets.push('notes=?');              params.push(notes); }
+  if (completedDate !== null)         { sets.push('completed_date=?');     params.push(completedDate); }
+  if (completedBy !== null)           { sets.push('completed_by_user_id=?');params.push(completedBy); }
+
+  if (!sets.length) return res.json({ ok: true, updated: 0 });
+  sets.push("updated_at=datetime('now')");
+  params.push(req.params.tid);
+  run(`UPDATE project_workflow_tasks SET ${sets.join(',')} WHERE id=?`, params);
+  res.json({ ok: true });
+});
+
+// Delete a task
+app.delete('/api/projects/:id/workflow-tasks/:tid', requireAuth, (req, res) => {
+  run('DELETE FROM project_workflow_tasks WHERE id=? AND project_id=?', [req.params.tid, req.params.id]);
+  res.json({ ok: true });
+});
+
+// Manually seed workflow tasks for an existing project (e.g. older projects created before 1A.5)
+app.post('/api/projects/:id/workflow-tasks/seed', requireAuth, (req, res) => {
+  const proj = get('SELECT id, created_by FROM projects WHERE id=?', [req.params.id]);
+  if (!proj) return res.status(404).json({ error: 'Project not found' });
+  const existing = get('SELECT COUNT(*) AS c FROM project_workflow_tasks WHERE project_id=?', [req.params.id]);
+  if (existing && existing.c > 0) return res.status(400).json({ error: 'Project already has workflow tasks. Delete them first if you want to re-seed.' });
+  try {
+    seedWorkflowTasksForProject(req.params.id, proj.created_by);
+    const count = get('SELECT COUNT(*) AS c FROM project_workflow_tasks WHERE project_id=?', [req.params.id]);
+    res.json({ ok: true, count: count ? count.c : 0 });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Workflow Templates (Settings management) ────────────────────────────────
+
+app.get('/api/workflow-templates', requireAuth, (req, res) => {
+  const templates = all('SELECT * FROM workflow_templates WHERE is_active=1 ORDER BY is_default DESC, name');
+  templates.forEach(t => {
+    t.tasks = all('SELECT * FROM workflow_template_tasks WHERE template_id=? AND is_active=1 ORDER BY section, sort_order, id', [t.id]);
+  });
+  res.json(templates);
+});
+
+app.post('/api/workflow-templates/:id/tasks', requireAdmin, (req, res) => {
+  const tpl = get('SELECT id FROM workflow_templates WHERE id=?', [req.params.id]);
+  if (!tpl) return res.status(404).json({ error: 'Template not found' });
+  const { section, task_name, description, default_role, default_days_after_start, sort_order } = req.body;
+  if (!task_name) return res.status(400).json({ error: 'Task name required' });
+  const id = runGetId(`INSERT INTO workflow_template_tasks
+    (template_id, section, task_name, description, default_role, default_days_after_start, sort_order, is_active)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+    [req.params.id, section || 'General', task_name, description || '',
+     default_role || '', parseInt(default_days_after_start) || 0, parseInt(sort_order) || 999]);
+  res.json({ ok: true, id });
+});
+
+app.put('/api/workflow-templates/:id/tasks/:tid', requireAdmin, (req, res) => {
+  const t = get('SELECT id FROM workflow_template_tasks WHERE id=? AND template_id=?', [req.params.tid, req.params.id]);
+  if (!t) return res.status(404).json({ error: 'Task not found' });
+  const { section, task_name, description, default_role, default_days_after_start, sort_order, is_active } = req.body;
+  const sets = [];
+  const params = [];
+  if (section !== undefined)              { sets.push('section=?');                 params.push(section); }
+  if (task_name !== undefined)            { sets.push('task_name=?');               params.push(task_name); }
+  if (description !== undefined)          { sets.push('description=?');             params.push(description); }
+  if (default_role !== undefined)         { sets.push('default_role=?');            params.push(default_role); }
+  if (default_days_after_start !== undefined) { sets.push('default_days_after_start=?'); params.push(parseInt(default_days_after_start)||0); }
+  if (sort_order !== undefined)           { sets.push('sort_order=?');              params.push(parseInt(sort_order)||0); }
+  if (is_active !== undefined)            { sets.push('is_active=?');               params.push(is_active ? 1 : 0); }
+  if (!sets.length) return res.json({ ok: true, updated: 0 });
+  params.push(req.params.tid);
+  run(`UPDATE workflow_template_tasks SET ${sets.join(',')} WHERE id=?`, params);
+  res.json({ ok: true });
+});
+
+app.delete('/api/workflow-templates/:id/tasks/:tid', requireAdmin, (req, res) => {
+  run('DELETE FROM workflow_template_tasks WHERE id=? AND template_id=?', [req.params.tid, req.params.id]);
+  res.json({ ok: true });
+});
+
+// ─── Users: get/set workflow_roles for admin UI ──────────────────────────────
+
+app.get('/api/users/workflow-roles', requireAuth, (req, res) => {
+  // Returns users with their workflow_roles array
+  const users = all(`SELECT id, username, first_name, last_name, role_type, workflow_roles, is_active
+    FROM users WHERE is_active=1 ORDER BY first_name, last_name`);
+  users.forEach(u => {
+    try { u.workflow_roles = JSON.parse(u.workflow_roles || '[]'); if (!Array.isArray(u.workflow_roles)) u.workflow_roles = []; }
+    catch(e) { u.workflow_roles = []; }
+  });
+  res.json(users);
+});
+
+app.put('/api/users/:id/workflow-roles', requireAdmin, (req, res) => {
+  const u = get('SELECT id FROM users WHERE id=?', [req.params.id]);
+  if (!u) return res.status(404).json({ error: 'User not found' });
+  const roles = Array.isArray(req.body.workflow_roles) ? req.body.workflow_roles : [];
+  const validRoles = ['office_manager','project_manager'];
+  const clean = roles.filter(r => validRoles.includes(r));
+  run('UPDATE users SET workflow_roles=? WHERE id=?', [JSON.stringify(clean), req.params.id]);
+  res.json({ ok: true, workflow_roles: clean });
+});
+
+// ═══ PHASE 1A.5 bonus — Quote inline status PATCH (for list page buttons) ═══
+app.patch('/api/quotes/:id/status', requireAuth, (req, res) => {
+  const q = get('SELECT rep_id FROM quotes WHERE id=?', [req.params.id]);
+  if (!q) return res.status(404).json({ error: 'Not found' });
+  const role = getUserRole(req.session.userId);
+  if (!ADMIN_ROLES.includes(role) && q.rep_id !== req.session.userId) return res.status(403).json({ error: 'Access denied' });
+  const { status } = req.body;
+  const allowed = ['draft','sent','accepted','declined'];
+  if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  run("UPDATE quotes SET status=?, updated_at=datetime('now') WHERE id=?", [status, req.params.id]);
+  res.json({ ok: true, status });
 });
 
 // ─── CATCH-ALL ────────────────────────────────────────────────────────────────
