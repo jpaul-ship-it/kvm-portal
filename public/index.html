@@ -442,6 +442,7 @@
           <div class="tab active" data-settings-tab="general"  onclick="setSettingsTab('general',this)">General</div>
           <div class="tab"        data-settings-tab="skills"   onclick="setSettingsTab('skills',this)">Skills</div>
           <div class="tab"        data-settings-tab="trucks"   onclick="setSettingsTab('trucks',this)">Trucks / Crews</div>
+          <div class="tab"        data-settings-tab="workflow" onclick="setSettingsTab('workflow',this)">Workflow Template</div>
           <div class="tab"        data-settings-tab="gl"       onclick="setSettingsTab('gl',this)">GL Defaults</div>
           <div class="tab"        data-settings-tab="coa"      onclick="setSettingsTab('coa',this)">Chart of Accounts</div>
           <div class="tab"        data-settings-tab="backup"   onclick="setSettingsTab('backup',this)">Backup</div>
@@ -533,6 +534,40 @@
             <div id="trucksAdminList"></div>
           </div>
         </div>
+
+        <!-- ── WORKFLOW TEMPLATE TAB (Phase 1A.5) ── -->
+        <div class="settings-subpage" id="settings-sub-workflow" style="display:none">
+          <div class="card" style="margin-bottom:1rem">
+            <div class="card-header"><span class="card-title">📋 Project Workflow Template</span></div>
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">
+              These tasks auto-populate on every new <strong>Project</strong> (not Quick Jobs or Service Calls) when it's created.
+              Edit or add tasks here to tune the template for how KVM actually runs projects. Tasks are grouped by section
+              and can have a default role-based assignee.
+            </p>
+            <div style="font-size:12px;color:var(--text-muted);background:var(--bg-surface);padding:10px 12px;border-radius:var(--radius-sm);margin-bottom:1rem">
+              <strong>Role-based assignees:</strong>
+              <ul style="margin:6px 0 0 20px;padding:0">
+                <li><strong>sales_rep</strong> — the rep who won this specific quote (auto-resolves to <code>created_by</code>)</li>
+                <li><strong>foreman</strong> — the lead tech assigned to the project (auto-resolves to <code>foreman_id</code>)</li>
+                <li><strong>office_manager</strong> — the user flagged with this role in Manage Employees</li>
+                <li><strong>project_manager</strong> — the user flagged with this role in Manage Employees</li>
+              </ul>
+            </div>
+            <div id="wfTemplateContainer">Loading...</div>
+            <button class="btn btn-primary" onclick="openWfTemplateAddTask()" style="margin-top:1rem">+ Add Task</button>
+          </div>
+
+          <div class="card">
+            <div class="card-header"><span class="card-title">👥 Workflow Role Assignments</span></div>
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">
+              Flag which users hold which workflow roles. When a new project is created, any task marked with
+              a matching role default will auto-assign to these people.
+            </p>
+            <div id="wfRolesContainer">Loading...</div>
+          </div>
+        </div>
+
+        <!-- Template-task add/edit modal (inside Workflow tab context) -->
 
         <!-- ── GL DEFAULTS TAB ── -->
         <div class="settings-subpage" id="settings-sub-gl" style="display:none">
@@ -1024,6 +1059,7 @@
   </div>
   <div id="projTabBar" style="display:flex;gap:4px;margin-bottom:1rem;border-bottom:1px solid var(--border);padding-bottom:.5rem;flex-wrap:wrap">
     <button class="tab-btn active" onclick="setProjectTab('overview',this)">Overview</button>
+    <button class="tab-btn" onclick="setProjectTab('workflow',this)">📋 Workflow</button>
     <button class="tab-btn" onclick="setProjectTab('phases',this)">Phases</button>
     <button class="tab-btn" onclick="setProjectTab('hours',this)">Hours</button>
     <button class="tab-btn" onclick="setProjectTab('costs',this)">💰 Job Costing</button>
@@ -1325,6 +1361,97 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('qjHoursModal')">Cancel</button>
       <button class="btn btn-primary" onclick="saveQuickJobHours()">Log Hours</button>
+    </div>
+  </div>
+</div>
+
+<!-- Phase 1A.5 — Project Workflow Task edit/add modal -->
+<div class="modal-overlay" id="wfTaskModal" onclick="closeOnOverlay(event,'wfTaskModal')">
+  <div class="modal" style="max-width:580px">
+    <div class="modal-header">
+      <span class="modal-title" id="wfTaskModalTitle">Workflow Task</span>
+      <button class="modal-close" onclick="closeModal('wfTaskModal')">✕</button>
+    </div>
+    <input type="hidden" id="wf-task-id" value="0" />
+    <div class="form-row">
+      <div class="form-group"><label>Section</label>
+        <select id="wf-task-section"></select>
+      </div>
+      <div class="form-group"><label>Status</label>
+        <select id="wf-task-status">
+          <option value="pending">⚪ Pending</option>
+          <option value="in_progress">🟡 In Progress</option>
+          <option value="done">✅ Done</option>
+          <option value="n/a">⛔ N/A</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group"><label>Task Name</label><input type="text" id="wf-task-name" /></div>
+    <div class="form-group"><label>Description (optional)</label><textarea id="wf-task-desc" rows="2"></textarea></div>
+    <div class="form-row">
+      <div class="form-group"><label>Assigned To</label>
+        <select id="wf-task-assignee"><option value="0">— unassigned —</option></select>
+      </div>
+      <div class="form-group"><label>Due Date</label><input type="date" id="wf-task-due" /></div>
+    </div>
+    <div class="form-group"><label>Notes</label><textarea id="wf-task-notes" rows="2"></textarea></div>
+    <div class="modal-footer" style="justify-content:space-between">
+      <button class="btn btn-danger btn-sm" id="wf-task-delete-btn" onclick="deleteWorkflowTask()" style="display:none">🗑 Delete</button>
+      <div style="display:flex;gap:8px;margin-left:auto">
+        <button class="btn btn-ghost" onclick="closeModal('wfTaskModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveWorkflowTask()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Phase 1A.5 — Workflow TEMPLATE task edit/add modal (Settings > Workflow tab) -->
+<div class="modal-overlay" id="wfTemplateTaskModal" onclick="closeOnOverlay(event,'wfTemplateTaskModal')">
+  <div class="modal" style="max-width:540px">
+    <div class="modal-header">
+      <span class="modal-title" id="wfTemplateTaskModalTitle">Template Task</span>
+      <button class="modal-close" onclick="closeModal('wfTemplateTaskModal')">✕</button>
+    </div>
+    <input type="hidden" id="wf-tpl-task-id" value="0" />
+    <div class="form-row">
+      <div class="form-group"><label>Section</label>
+        <input type="text" id="wf-tpl-task-section" placeholder="e.g. Closing Documents" list="wf-tpl-section-list" />
+        <datalist id="wf-tpl-section-list">
+          <option value="Front End / General Conditions"></option>
+          <option value="Mobilize on site"></option>
+          <option value="Electrical"></option>
+          <option value="Punchlist"></option>
+          <option value="Closing Documents"></option>
+          <option value="Schedule"></option>
+          <option value="Pictures"></option>
+          <option value="Equipment"></option>
+        </datalist>
+      </div>
+      <div class="form-group"><label>Sort Order</label><input type="number" id="wf-tpl-task-sort" value="10" /></div>
+    </div>
+    <div class="form-group"><label>Task Name</label><input type="text" id="wf-tpl-task-name" /></div>
+    <div class="form-group"><label>Description (optional)</label><textarea id="wf-tpl-task-desc" rows="2"></textarea></div>
+    <div class="form-row">
+      <div class="form-group"><label>Default Assignee Role</label>
+        <select id="wf-tpl-task-role">
+          <option value="">— none —</option>
+          <option value="sales_rep">Sales Rep (who sold it)</option>
+          <option value="foreman">Foreman (lead tech)</option>
+          <option value="office_manager">Office Manager</option>
+          <option value="project_manager">Project Manager</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Days After Project Start</label>
+        <input type="number" id="wf-tpl-task-days" value="0" />
+        <span style="font-size:10px;color:var(--text-faint)">Auto-sets due date this many days after the project's start_date</span>
+      </div>
+    </div>
+    <div class="modal-footer" style="justify-content:space-between">
+      <button class="btn btn-danger btn-sm" id="wf-tpl-task-delete-btn" onclick="deleteWfTemplateTask()" style="display:none">🗑 Delete</button>
+      <div style="display:flex;gap:8px;margin-left:auto">
+        <button class="btn btn-ghost" onclick="closeModal('wfTemplateTaskModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveWfTemplateTask()">Save</button>
+      </div>
     </div>
   </div>
 </div>
