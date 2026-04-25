@@ -515,6 +515,9 @@ async function initDb() {
   // material_status: 'from_stock' | 'ordered' | 'partial' | 'received'
   try { db.run(`ALTER TABLE projects ADD COLUMN material_status TEXT DEFAULT 'ordered'`); saveDb(); } catch(e){}
   try { db.run(`ALTER TABLE projects ADD COLUMN material_notes TEXT DEFAULT ''`); saveDb(); } catch(e){}
+  // Phase 1A.5 fix — material lead time + expected date
+  try { db.run(`ALTER TABLE projects ADD COLUMN material_lead_time TEXT DEFAULT ''`); saveDb(); } catch(e){}
+  try { db.run(`ALTER TABLE projects ADD COLUMN material_expected_date TEXT DEFAULT ''`); saveDb(); } catch(e){}
   // bill_status: 'not_ready' | 'ready_to_bill' | 'billed' | 'paid' (simpler than a full AR state machine)
   try { db.run(`ALTER TABLE projects ADD COLUMN bill_status TEXT DEFAULT 'not_ready'`); saveDb(); } catch(e){}
   try { db.run(`ALTER TABLE projects ADD COLUMN bill_notes TEXT DEFAULT ''`); saveDb(); } catch(e){}
@@ -1738,9 +1741,25 @@ app.post('/api/quotes/:id/create-project', requireAuth, (req, res) => {
   if (!q) return res.status(404).json({ error: 'Quote not found' });
   // Phase 1A.2a — accept job_type ('project' | 'quick_job') and material_status from body
   const jobType = (req.body && req.body.job_type === 'quick_job') ? 'quick_job' : 'project';
-  const materialStatus = (req.body && ['from_stock','ordered','partial','received'].includes(req.body.material_status))
+  const materialStatus = (req.body && ['from_stock','need_to_order','ordered','partial','received'].includes(req.body.material_status))
                         ? req.body.material_status
-                        : (jobType === 'quick_job' ? 'from_stock' : 'ordered');
+                        : (jobType === 'quick_job' ? 'from_stock' : 'need_to_order');
+  // Phase 1A.5 fix — accept material lead time
+  const validLeadTimes = ['', 'from_stock','1_2_weeks','2_4_weeks','4_8_weeks','8_10_weeks','10_plus_weeks','custom'];
+  const materialLeadTime = (req.body && validLeadTimes.includes(req.body.material_lead_time || ''))
+                          ? (req.body.material_lead_time || '')
+                          : '';
+  // Auto-compute expected date from lead time if not provided
+  let materialExpectedDate = (req.body && req.body.material_expected_date) || '';
+  if (!materialExpectedDate && materialLeadTime) {
+    const d = new Date();
+    if      (materialLeadTime === 'from_stock')     { d.setDate(d.getDate() + 0);  materialExpectedDate = d.toISOString().split('T')[0]; }
+    else if (materialLeadTime === '1_2_weeks')      { d.setDate(d.getDate() + 11); materialExpectedDate = d.toISOString().split('T')[0]; }
+    else if (materialLeadTime === '2_4_weeks')      { d.setDate(d.getDate() + 21); materialExpectedDate = d.toISOString().split('T')[0]; }
+    else if (materialLeadTime === '4_8_weeks')      { d.setDate(d.getDate() + 42); materialExpectedDate = d.toISOString().split('T')[0]; }
+    else if (materialLeadTime === '8_10_weeks')     { d.setDate(d.getDate() + 63); materialExpectedDate = d.toISOString().split('T')[0]; }
+    // 10_plus_weeks and custom intentionally leave date blank — user fills in when known
+  }
   // Extract contract value from total field (may have $ or commas)
   const rawTotal = (q.total||'').toString().replace(/[^0-9.-]/g,'');
   const contractVal = rawTotal ? parseFloat(rawTotal).toFixed(2) : '';
@@ -1775,11 +1794,11 @@ app.post('/api/quotes/:id/create-project', requireAuth, (req, res) => {
   const initialStatus = 'awarded';
   const projectId = runGetId(`INSERT INTO projects
     (job_number,project_name,customer_id,customer_name,site_id,location,quote_id,quote_number,
-     contract_value,billing_type,scope_brief,status,material_status,bill_status,start_date,target_end_date,foreman_id,foreman_name,
+     contract_value,billing_type,scope_brief,status,material_status,material_lead_time,material_expected_date,bill_status,start_date,target_end_date,foreman_id,foreman_name,
      assigned_techs,notes,created_by,work_types,required_skills,revenue_department,job_type)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [q.quote_number||'', projectName, customerId, customerName, siteId, location, q.id, q.quote_number||'',
-     contractVal, billingType, scopeBrief, initialStatus, materialStatus, 'not_ready', '', '', 0, '',
+     contractVal, billingType, scopeBrief, initialStatus, materialStatus, materialLeadTime, materialExpectedDate, 'not_ready', '', '', 0, '',
      '[]', notes, req.session.userId, '[]', '[]', revenueDept, jobType]);
 
   // Phase 1A.5 — Clone default workflow template tasks into the new project (projects only, not quick_jobs)
@@ -1822,7 +1841,7 @@ function seedWorkflowTasksForProject(projectId, salesRepId) {
   ['office_manager','project_manager'].forEach(role => {
     // Naive JSON search: find any user where workflow_roles includes this role string
     const candidate = get(
-      `SELECT id, first_name, last_name FROM users WHERE workflow_roles LIKE ? AND (is_active=1 OR is_active IS NULL) LIMIT 1`,
+      `SELECT id, first_name, last_name FROM users WHERE workflow_roles LIKE ? LIMIT 1`,
       [`%"${role}"%`]
     );
     if (candidate) roleMap[role] = { id: candidate.id, name: ((candidate.first_name||'') + ' ' + (candidate.last_name||'')).trim() };
@@ -1969,11 +1988,13 @@ app.delete('/api/projects/:id', requireAdmin, (req, res) => {
 app.patch('/api/projects/:id/status', requireAuth, (req, res) => {
   const p = get('SELECT id FROM projects WHERE id=?', [req.params.id]);
   if (!p) return res.status(404).json({error:'Not found'});
-  const { material_status, material_notes, bill_status, bill_notes, invoice_number, status } = req.body;
+  const { material_status, material_notes, material_lead_time, material_expected_date, bill_status, bill_notes, invoice_number, status } = req.body;
   const sets = [];
   const params = [];
   if (material_status !== undefined) { sets.push('material_status=?'); params.push(material_status); }
   if (material_notes !== undefined)  { sets.push('material_notes=?');  params.push(material_notes); }
+  if (material_lead_time !== undefined) { sets.push('material_lead_time=?'); params.push(material_lead_time); }
+  if (material_expected_date !== undefined) { sets.push('material_expected_date=?'); params.push(material_expected_date); }
   if (bill_status !== undefined)     { sets.push('bill_status=?');     params.push(bill_status); }
   if (bill_notes !== undefined)      { sets.push('bill_notes=?');      params.push(bill_notes); }
   if (invoice_number !== undefined)  { sets.push('invoice_number=?');  params.push(invoice_number); }
@@ -3220,8 +3241,8 @@ app.delete('/api/workflow-templates/:id/tasks/:tid', requireAdmin, (req, res) =>
 
 app.get('/api/users/workflow-roles', requireAuth, (req, res) => {
   // Returns users with their workflow_roles array
-  const users = all(`SELECT id, username, first_name, last_name, role_type, workflow_roles, is_active
-    FROM users WHERE is_active=1 ORDER BY first_name, last_name`);
+  const users = all(`SELECT id, username, first_name, last_name, role_type, workflow_roles
+    FROM users ORDER BY first_name, last_name`);
   users.forEach(u => {
     try { u.workflow_roles = JSON.parse(u.workflow_roles || '[]'); if (!Array.isArray(u.workflow_roles)) u.workflow_roles = []; }
     catch(e) { u.workflow_roles = []; }
