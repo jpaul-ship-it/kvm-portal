@@ -5549,25 +5549,91 @@ function cfqPick(type) {
       el.style.opacity = '0.6';
     }
   });
-  // Show material status row for quick jobs (more relevant for quick scheduling)
+  // Show material section for both types
   const matRow = $('cfq-materials-row');
   if (matRow) matRow.style.display = 'block';
   const matSel = $('cfq-material-status');
-  if (matSel) matSel.value = (type === 'quick_job' ? 'from_stock' : 'ordered');
+  if (matSel) {
+    // Default: quick_jobs assume from_stock; projects assume need_to_order (most new projects need parts ordered)
+    matSel.value = (type === 'quick_job' ? 'from_stock' : 'need_to_order');
+  }
+  // Default lead time based on picked type
+  const leadSel = $('cfq-material-lead');
+  if (leadSel) leadSel.value = (type === 'quick_job' ? '' : '2_4_weeks');
+  if (typeof cfqMatStatusChanged === 'function') cfqMatStatusChanged();
   const btn = $('cfq-confirm-btn');
   if (btn) { btn.disabled = false; btn.textContent = 'Create ' + (type === 'quick_job' ? 'Quick Job' : 'Project'); }
+}
+
+// Phase 1A.5 fix — gate lead-time visibility on material_status
+// Show lead time only when materials haven't arrived yet (need_to_order / ordered / partial)
+function cfqMatStatusChanged() {
+  const statusEl = $('cfq-material-status');
+  const wrap = $('cfq-lead-wrap');
+  const label = $('cfq-lead-label');
+  if (!statusEl || !wrap) return;
+  const status = statusEl.value;
+  if (status === 'from_stock' || status === 'received') {
+    // Materials already here — no lead time needed
+    wrap.style.display = 'none';
+    const leadSel = $('cfq-material-lead');
+    if (leadSel) leadSel.value = (status === 'from_stock') ? 'from_stock' : '';
+    const expWrap = $('cfq-material-expected-wrap');
+    if (expWrap) expWrap.style.display = 'none';
+  } else {
+    wrap.style.display = 'block';
+    // Label tweak: "Estimated Lead Time" for need_to_order, "Expected Arrival" for ordered/partial
+    if (label) {
+      label.textContent = (status === 'need_to_order') ? 'Estimated Lead Time' : 'Expected Arrival';
+    }
+    // Trigger date calc based on current lead time selection
+    if (typeof cfqLeadChanged === 'function') cfqLeadChanged();
+  }
+}
+
+// Phase 1A.5 fix — react to lead time change: show/hide custom-date input, auto-compute expected date
+function cfqLeadChanged() {
+  const lead = $('cfq-material-lead') ? $('cfq-material-lead').value : '';
+  const wrap = $('cfq-material-expected-wrap');
+  const dateEl = $('cfq-material-expected');
+  if (!wrap || !dateEl) return;
+  if (lead === 'custom') {
+    wrap.style.display = 'block';
+    if (!dateEl.value) dateEl.value = new Date().toISOString().split('T')[0];
+  } else if (lead === '10_plus_weeks') {
+    // 10+ weeks is rare and unpredictable — leave blank, let user fill in when known
+    wrap.style.display = 'block';
+    dateEl.value = '';
+  } else if (lead && lead !== '') {
+    // Auto-compute midpoint date of the range
+    const d = new Date();
+    if      (lead === 'from_stock')   d.setDate(d.getDate() + 0);
+    else if (lead === '1_2_weeks')    d.setDate(d.getDate() + 11);  // midpoint of 7-14
+    else if (lead === '2_4_weeks')    d.setDate(d.getDate() + 21);  // midpoint of 14-28
+    else if (lead === '4_8_weeks')    d.setDate(d.getDate() + 42);  // midpoint of 28-56
+    else if (lead === '8_10_weeks')   d.setDate(d.getDate() + 63);  // 9-week midpoint
+    dateEl.value = d.toISOString().split('T')[0];
+    wrap.style.display = 'block';
+  } else {
+    wrap.style.display = 'none';
+    dateEl.value = '';
+  }
 }
 
 async function cfqConfirm() {
   if (!_cfqJobType) { showToast('Pick Project or Quick Job first.','error'); return; }
   if (!quotesCurrentId) { showToast('Quote not loaded.','error'); closeModal('createFromQuoteModal'); return; }
   const matStatus = ($('cfq-material-status') && $('cfq-material-status').value) || 'ordered';
+  const matLead = ($('cfq-material-lead') && $('cfq-material-lead').value) || '';
+  const matExpected = ($('cfq-material-expected') && $('cfq-material-expected').value) || '';
   const btn = $('cfq-confirm-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Creating...'; }
   try {
     const res = await api('POST', '/api/quotes/' + quotesCurrentId + '/create-project', {
       job_type: _cfqJobType,
-      material_status: matStatus
+      material_status: matStatus,
+      material_lead_time: matLead,
+      material_expected_date: matExpected
     });
     closeModal('createFromQuoteModal');
     showToast((_cfqJobType === 'quick_job' ? 'Quick Job' : 'Project') + ' created!', 'success');
@@ -5809,11 +5875,12 @@ function qjRenderDetail(q) {
     <!-- MATERIAL + BILL STATUS TOGGLES -->
     <div class="card" style="margin-bottom:1rem">
       <div class="card-header"><span class="card-title">Status Controls</span></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem">
         <div>
           <label class="ql">Material Status</label>
-          <select id="qj-quick-mat" onchange="qjQuickPatch('material_status',this.value)">
+          <select id="qj-quick-mat" onchange="qjQuickMatStatusChanged(this.value)">
             <option value="from_stock" ${q.material_status==='from_stock'?'selected':''}>🟢 From Stock</option>
+            <option value="need_to_order" ${q.material_status==='need_to_order'?'selected':''}>🔴 Need to Order</option>
             <option value="ordered" ${q.material_status==='ordered'?'selected':''}>🟡 Ordered</option>
             <option value="partial" ${q.material_status==='partial'?'selected':''}>🟡 Partial</option>
             <option value="received" ${q.material_status==='received'?'selected':''}>🟢 Received</option>
@@ -5827,6 +5894,25 @@ function qjRenderDetail(q) {
             <option value="billed" ${q.bill_status==='billed'?'selected':''}>Billed</option>
             <option value="paid" ${q.bill_status==='paid'?'selected':''}>Paid</option>
           </select>
+        </div>
+      </div>
+      <div id="qj-lead-wrap" style="display:${(q.material_status==='from_stock'||q.material_status==='received')?'none':'grid'};grid-template-columns:1fr 1fr;gap:1rem">
+        <div>
+          <label class="ql" id="qj-lead-label">${q.material_status==='need_to_order'?'Estimated Lead Time':'Expected Arrival'}</label>
+          <select id="qj-quick-lead" onchange="qjQuickLeadChanged(this.value)">
+            <option value="" ${!q.material_lead_time?'selected':''}>— not set —</option>
+            <option value="from_stock" ${q.material_lead_time==='from_stock'?'selected':''}>From Stock (immediate)</option>
+            <option value="1_2_weeks" ${q.material_lead_time==='1_2_weeks'?'selected':''}>1–2 weeks</option>
+            <option value="2_4_weeks" ${q.material_lead_time==='2_4_weeks'?'selected':''}>2–4 weeks</option>
+            <option value="4_8_weeks" ${q.material_lead_time==='4_8_weeks'?'selected':''}>4–8 weeks</option>
+            <option value="8_10_weeks" ${q.material_lead_time==='8_10_weeks'?'selected':''}>8–10 weeks</option>
+            <option value="10_plus_weeks" ${q.material_lead_time==='10_plus_weeks'?'selected':''}>10+ weeks</option>
+            <option value="custom" ${q.material_lead_time==='custom'?'selected':''}>Custom date</option>
+          </select>
+        </div>
+        <div>
+          <label class="ql">Expected Arrival Date</label>
+          <input type="date" id="qj-quick-expected" value="${q.material_expected_date||''}" onchange="qjQuickPatch('material_expected_date',this.value)" />
         </div>
       </div>
     </div>
@@ -5844,6 +5930,49 @@ async function qjQuickPatch(field, value) {
     const body = {}; body[field] = value;
     await api('PATCH', '/api/projects/' + _qjCurrent.id + '/status', body);
     showToast('Updated.', 'success');
+    loadQuickJobDetail(_qjCurrent.id);
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// Phase 1A.5 fix — Quick Job material status changed: update status AND toggle lead-time visibility
+async function qjQuickMatStatusChanged(newStatus) {
+  // Show/hide the lead time row based on new status
+  const wrap = $('qj-lead-wrap');
+  const label = $('qj-lead-label');
+  if (wrap) {
+    if (newStatus === 'from_stock' || newStatus === 'received') {
+      wrap.style.display = 'none';
+    } else {
+      wrap.style.display = 'grid';
+      if (label) {
+        label.textContent = (newStatus === 'need_to_order') ? 'Estimated Lead Time' : 'Expected Arrival';
+      }
+    }
+  }
+  // Patch the material status to the server
+  await qjQuickPatch('material_status', newStatus);
+}
+
+// Phase 1A.5 fix — Quick Job lead time changed: update lead time AND auto-compute expected date
+async function qjQuickLeadChanged(newLead) {
+  if (!_qjCurrent || !_qjCurrent.id) return;
+  // Auto-compute expected date based on the new lead time
+  let expected = '';
+  if (newLead && newLead !== 'custom' && newLead !== '10_plus_weeks' && newLead !== '') {
+    const d = new Date();
+    if      (newLead === 'from_stock')   d.setDate(d.getDate() + 0);
+    else if (newLead === '1_2_weeks')    d.setDate(d.getDate() + 11);
+    else if (newLead === '2_4_weeks')    d.setDate(d.getDate() + 21);
+    else if (newLead === '4_8_weeks')    d.setDate(d.getDate() + 42);
+    else if (newLead === '8_10_weeks')   d.setDate(d.getDate() + 63);
+    expected = d.toISOString().split('T')[0];
+  }
+  // For 10_plus_weeks and custom, leave the existing expected date alone (user enters manually)
+  try {
+    const body = { material_lead_time: newLead };
+    if (expected) body.material_expected_date = expected;
+    await api('PATCH', '/api/projects/' + _qjCurrent.id + '/status', body);
+    showToast('Lead time updated.', 'success');
     loadQuickJobDetail(_qjCurrent.id);
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
@@ -6024,9 +6153,9 @@ async function deleteQuickJobHours(hId) {
 // Expose Phase 1A.2a functions on window
 (function() {
   try {
-    ['cfqOpen','cfqPick','cfqConfirm',
+    ['cfqOpen','cfqPick','cfqConfirm','cfqLeadChanged','cfqMatStatusChanged',
      'loadQuickJobs','qjFilter','qjRenderList','openQuickJobDetail','loadQuickJobDetail','qjRenderDetail',
-     'openQuoteFromQJ','qjQuickPatch',
+     'openQuoteFromQJ','qjQuickPatch','qjQuickMatStatusChanged','qjQuickLeadChanged',
      'openEditQuickJob','saveQuickJob','deleteQuickJob',
      'openAddQuickJobCost','qjCostCalc','saveQuickJobCost','deleteQuickJobCost',
      'openAddQuickJobHours','saveQuickJobHours','deleteQuickJobHours'
@@ -6824,12 +6953,31 @@ async function toggleWfRole(userId, role, checked) {
 // ─── QUOTES LIST — INLINE STATUS BUTTONS ──────────────────────────────────────
 
 async function quotesSetStatus(quoteId, newStatus) {
-  const labels = { sent:'mark this quote Sent?', accepted:'mark this quote Accepted?', declined:'mark this quote Lost (Declined)?', draft:'return to draft?' };
+  // Phase 1A.5 fix — single-click Accept chains into Create Job chooser
+  if (newStatus === 'accepted') {
+    if (!confirm('Mark this quote Accepted and create a Project / Quick Job?')) return;
+    try {
+      // 1. Set status to accepted
+      await api('PATCH', '/api/quotes/' + quoteId + '/status', { status: 'accepted' });
+      // 2. Open the quote in edit mode (loads it into quotesCurrentId + DOM fields)
+      await quotesOpenEdit(quoteId);
+      // 3. Open the Create-from-Quote chooser modal immediately
+      setTimeout(() => {
+        if (typeof cfqOpen === 'function') cfqOpen();
+      }, 200);
+      showToast('Accepted — pick Project or Quick Job.', 'success');
+    } catch(e) {
+      showToast('Error: ' + e.message, 'error');
+    }
+    return;
+  }
+
+  // Default path — just status change with confirm
+  const labels = { sent:'mark this quote Sent?', declined:'mark this quote Lost (Declined)?', draft:'return to draft?' };
   if (!confirm('Are you sure you want to ' + (labels[newStatus] || ('change status to '+newStatus)) + '?')) return;
   try {
     await api('PATCH', '/api/quotes/' + quoteId + '/status', { status: newStatus });
     showToast('Status updated.', 'success');
-    // Refresh the list
     if (typeof quotesShowList === 'function') quotesShowList();
   } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
