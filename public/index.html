@@ -1232,15 +1232,33 @@
     </div>
     <div id="cfq-materials-row" style="display:none;padding:12px;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:1rem">
       <label class="ql" style="display:block;margin-bottom:6px">Material Status (for scheduling)</label>
-      <select id="cfq-material-status" class="qi qi-select" style="width:100%">
+      <select id="cfq-material-status" class="qi qi-select" style="width:100%;margin-bottom:10px" onchange="cfqMatStatusChanged()">
         <option value="from_stock">🟢 From Stock&nbsp;&mdash; schedule now</option>
+        <option value="need_to_order">🔴 Need to Order&nbsp;&mdash; not yet purchased</option>
         <option value="ordered" selected>🟡 Ordered&nbsp;&mdash; waiting for parts</option>
         <option value="partial">🟡 Partial&nbsp;&mdash; some received</option>
         <option value="received">🟢 Received&nbsp;&mdash; ready</option>
       </select>
-      <p style="font-size:11px;color:var(--text-faint);margin-top:6px">
-        This determines if the job can appear on the Schedule queue immediately. You can change it later.
-      </p>
+      <div id="cfq-lead-wrap" style="display:none">
+        <label class="ql" id="cfq-lead-label" style="display:block;margin-bottom:6px">Estimated Lead Time</label>
+        <select id="cfq-material-lead" class="qi qi-select" style="width:100%" onchange="cfqLeadChanged()">
+          <option value="">— not set —</option>
+          <option value="from_stock">From Stock (immediate)</option>
+          <option value="1_2_weeks">1–2 weeks</option>
+          <option value="2_4_weeks">2–4 weeks</option>
+          <option value="4_8_weeks">4–8 weeks</option>
+          <option value="8_10_weeks">8–10 weeks</option>
+          <option value="10_plus_weeks">10+ weeks</option>
+          <option value="custom">Custom date</option>
+        </select>
+        <div id="cfq-material-expected-wrap" style="margin-top:8px;display:none">
+          <label class="ql" style="display:block;margin-bottom:4px">Expected Arrival Date</label>
+          <input type="date" id="cfq-material-expected" class="qi" style="width:100%" />
+        </div>
+        <p style="font-size:11px;color:var(--text-faint);margin-top:8px">
+          Lead time presets auto-set the expected date using the midpoint of each range. Pick "Custom" to set a specific date. Can be changed later.
+        </p>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('createFromQuoteModal')">Cancel</button>
