@@ -956,6 +956,53 @@ function seedDatabase() {
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 app.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+
+// ═══ CACHE-BUST PATCH ═══════════════════════════════════════════════════════
+// APP_VERSION is generated once at server boot and included in HTML and sw.js
+// so every redeploy automatically invalidates browser caches without manual work.
+const APP_VERSION = (() => {
+  const d = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
+})();
+console.log('[KVM] APP_VERSION:', APP_VERSION);
+
+// Expose version to clients (so app.js can poll for updates without reloading)
+app.get('/api/app-version', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ version: APP_VERSION });
+});
+
+// Serve index.html with version stamps injected. Replaces tokens like __APP_VERSION__
+// in <script src="/js/app.js?v=__APP_VERSION__"> and similar.
+app.get('/', (req, res, next) => {
+  try {
+    const htmlPath = path.join(__dirname, 'public', 'index.html');
+    if (!fs.existsSync(htmlPath)) return next();
+    let html = fs.readFileSync(htmlPath, 'utf8');
+    html = html.replace(/__APP_VERSION__/g, APP_VERSION);
+    res.set('Cache-Control', 'no-store');
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+  } catch (e) { next(e); }
+});
+
+// Serve sw.js with version stamped in (so the worker file content changes per deploy,
+// which is what triggers the browser to install the new worker)
+app.get('/sw.js', (req, res, next) => {
+  try {
+    const swPath = path.join(__dirname, 'public', 'sw.js');
+    if (!fs.existsSync(swPath)) return next();
+    let js = fs.readFileSync(swPath, 'utf8');
+    js = js.replace(/__APP_VERSION__/g, APP_VERSION);
+    // Service worker should not be cached by HTTP layer (browser caches it differently)
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.set('Content-Type', 'application/javascript; charset=utf-8');
+    res.send(js);
+  } catch (e) { next(e); }
+});
+// ═══ END CACHE-BUST PATCH ═══════════════════════════════════════════════════
+
 app.use(express.static(path.join(__dirname,'public')));
 app.use(cors({origin:['http://kvmdoor.com','https://kvmdoor.com','http://www.kvmdoor.com','https://www.kvmdoor.com'],credentials:true}));
 const SESSION_DIR = path.join(DATA_DIR, 'sessions');
@@ -2049,6 +2096,30 @@ app.get('/api/projects', requireAuth, (req, res) => {
   if (search) { sql += ' AND (p.project_name LIKE ? OR p.customer_name LIKE ? OR p.job_number LIKE ?)'; const s='%'+search+'%'; params.push(s,s,s); }
   sql += ' ORDER BY p.updated_at DESC';
   res.json(all(sql, params));
+});
+
+// Phase 1A.4a — Project Search (for Invoice Entry job picker)
+// MUST be defined BEFORE /api/projects/:id so Express doesn't match "search" as an :id
+app.get('/api/projects/search', requireAuth, (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (!q || q.length < 2) return res.json([]);
+  const ql = '%' + q.toLowerCase() + '%';
+  const rows = all(`
+    SELECT id, job_number, project_name, customer_name, status, job_type,
+           billing_model, total_billed_to_date, contract_value
+      FROM projects
+     WHERE (LOWER(job_number) LIKE ?
+            OR LOWER(project_name) LIKE ?
+            OR LOWER(customer_name) LIKE ?)
+       AND status != 'cancelled'
+     ORDER BY
+       CASE WHEN LOWER(job_number) = LOWER(?) THEN 0
+            WHEN LOWER(job_number) LIKE ? THEN 1
+            ELSE 2 END,
+       updated_at DESC
+     LIMIT 30
+  `, [ql, ql, ql, q, q.toLowerCase() + '%']);
+  res.json(rows);
 });
 
 // Get single project with phases, hours, notes
@@ -4232,30 +4303,6 @@ app.post('/api/bill-vendors/import-csv', requireBilling, (req, res) => {
   saveDb();
   if (dry_run) stats.sample = sample;
   res.json(stats);
-});
-
-// ─── Project Search (for Invoice Entry job picker) ───────────────────────────
-// Searches by job number, customer, project name. Used in the always-focused search box.
-app.get('/api/projects/search', requireAuth, (req, res) => {
-  const q = (req.query.q || '').trim();
-  if (!q || q.length < 2) return res.json([]);
-  const ql = '%' + q.toLowerCase() + '%';
-  const rows = all(`
-    SELECT id, job_number, project_name, customer_name, status, job_type,
-           billing_model, total_billed_to_date, contract_value
-      FROM projects
-     WHERE (LOWER(job_number) LIKE ?
-            OR LOWER(project_name) LIKE ?
-            OR LOWER(customer_name) LIKE ?)
-       AND status != 'cancelled'
-     ORDER BY
-       CASE WHEN LOWER(job_number) = LOWER(?) THEN 0
-            WHEN LOWER(job_number) LIKE ? THEN 1
-            ELSE 2 END,
-       updated_at DESC
-     LIMIT 30
-  `, [ql, ql, ql, q, q.toLowerCase() + '%']);
-  res.json(rows);
 });
 
 // ─── Billing Dashboard data ──────────────────────────────────────────────────
