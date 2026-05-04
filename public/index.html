@@ -156,6 +156,27 @@
       </div>
     </div>
     <div class="topbar-right">
+      <!-- Phase 1.6 — notifications bell -->
+      <div id="notifBellWrap" style="position:relative;margin-right:.75rem">
+        <button id="notifBell" onclick="toggleNotifDropdown(event)" title="Notifications" style="background:transparent;border:none;color:#fff;cursor:pointer;padding:6px 8px;border-radius:6px;display:flex;align-items:center;font-size:18px;transition:.15s" onmouseover="this.style.background='rgba(255,255,255,.1)'" onmouseout="this.style.background='transparent'">
+          🔔
+          <span id="notifBellBadge" style="display:none;position:absolute;top:0;right:0;background:var(--danger);color:#fff;font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px;min-width:16px;text-align:center;line-height:1.4">0</span>
+        </button>
+        <div id="notifDropdown" style="display:none;position:absolute;top:calc(100% + 6px);right:0;width:380px;max-height:480px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-md);box-shadow:0 8px 24px rgba(0,0,0,.5);z-index:100;overflow:hidden">
+          <div style="padding:10px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+            <div style="font-family:Oswald,sans-serif;font-size:12px;font-weight:700;color:var(--amber);letter-spacing:.05em;text-transform:uppercase">Notifications</div>
+            <div style="display:flex;gap:6px">
+              <button class="btn btn-ghost btn-sm" onclick="notifMarkAllRead()" title="Mark all read" style="padding:3px 8px;font-size:10px">✓ Read all</button>
+            </div>
+          </div>
+          <div id="notifDropdownBody" style="overflow-y:auto;max-height:380px;min-height:80px">
+            <div style="padding:30px;text-align:center;color:var(--text-faint);font-size:12px">Loading...</div>
+          </div>
+          <div style="padding:8px 12px;border-top:1px solid var(--border);text-align:center">
+            <a href="#" onclick="event.preventDefault();showPage('notifications',document.getElementById('nav-notifications'));toggleNotifDropdown();" style="font-size:12px;color:var(--amber);text-decoration:none">View all notifications →</a>
+          </div>
+        </div>
+      </div>
       <div class="user-chip">
         <div class="avatar" id="topAvatar">?</div>
         <span id="topName">User</span>
@@ -199,6 +220,11 @@
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clip-rule="evenodd"/></svg>
         Quotes
       </div>
+      <!-- ─── MY SALES (Phase 1.6) ─── -->
+      <div class="nav-item" data-page="salesDashboard" onclick="showPage('salesDashboard',this)" id="nav-salesDashboard">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 3a1 1 0 011 1v12h12a1 1 0 110 2H3a1 1 0 01-1-1V4a1 1 0 011-1zm14.293 4.293a1 1 0 011.414 1.414l-4 4a1 1 0 01-1.414 0L11 10.414l-2.293 2.293a1 1 0 11-1.414-1.414l3-3a1 1 0 011.414 0L13 10.586l3.293-3.293z" clip-rule="evenodd"/></svg>
+        📊 My Sales
+      </div>
       <!-- ─── QUICK JOBS NAV ITEM (Phase 1A.2a) ─── -->
       <div class="nav-item" data-page="quickJobs" onclick="showPage('quickJobs',this)" id="nav-quickJobs">
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z"/></svg>
@@ -213,6 +239,17 @@
       <div class="nav-item" data-page="projects" onclick="showPage('projects',this)" id="nav-projects">
         <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 6a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1v-2zm0 6a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1v-2z" clip-rule="evenodd"/></svg>
         Projects
+      </div>
+
+      <!-- ─── BILLING NAV GROUP (Phase 1A.4a) — visible only to billing/admin/global_admin ─── -->
+      <div class="nav-group-label" id="nav-group-billing" style="display:none">💼 Billing</div>
+      <div class="nav-item" data-page="billingDashboard" onclick="showPage('billingDashboard',this)" id="nav-billingDashboard" style="display:none">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 4a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/></svg>
+        Billing Dashboard
+      </div>
+      <div class="nav-item" data-page="invoiceEntry" onclick="showPage('invoiceEntry',this)" id="nav-invoiceEntry" style="display:none">
+        <svg class="nav-icon" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V4a2 2 0 00-2-2H4zm3 2h6v4H7V4zm6 6H7v2h6v-2zm-6 4h6v2H7v-2z" clip-rule="evenodd"/></svg>
+        ⌨️ Invoice Entry
       </div>
 
       <div class="nav-group-label">Team</div>
@@ -443,6 +480,8 @@
           <div class="tab"        data-settings-tab="skills"   onclick="setSettingsTab('skills',this)">Skills</div>
           <div class="tab"        data-settings-tab="trucks"   onclick="setSettingsTab('trucks',this)">Trucks / Crews</div>
           <div class="tab"        data-settings-tab="workflow" onclick="setSettingsTab('workflow',this)">Workflow Template</div>
+          <div class="tab"        data-settings-tab="equipment" onclick="setSettingsTab('equipment',this)">Equipment Catalog</div>
+          <div class="tab"        data-settings-tab="billVendors" onclick="setSettingsTab('billVendors',this)">Bill Vendors</div>
           <div class="tab"        data-settings-tab="gl"       onclick="setSettingsTab('gl',this)">GL Defaults</div>
           <div class="tab"        data-settings-tab="coa"      onclick="setSettingsTab('coa',this)">Chart of Accounts</div>
           <div class="tab"        data-settings-tab="backup"   onclick="setSettingsTab('backup',this)">Backup</div>
@@ -568,6 +607,69 @@
         </div>
 
         <!-- Template-task add/edit modal (inside Workflow tab context) -->
+
+        <!-- ── EQUIPMENT CATALOG TAB (Phase 1A.6) ── -->
+        <div class="settings-subpage" id="settings-sub-equipment" style="display:none">
+          <div class="card" style="margin-bottom:1rem">
+            <div class="card-header">
+              <span class="card-title">🚜 Rental Equipment Vendors</span>
+              <button class="btn btn-primary btn-sm" onclick="openAddEquipmentVendor()">+ Add Vendor</button>
+            </div>
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:.75rem">
+              United Rentals, Sunbelt, Herc, etc. These vendors will appear in the Equipment PO builder dropdown.
+            </p>
+            <div id="equipVendorsContainer">Loading...</div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">📦 Equipment Catalog</span>
+              <button class="btn btn-primary btn-sm" onclick="openAddEquipmentItem()">+ Add Equipment</button>
+            </div>
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:.75rem">
+              Reusable list of rental equipment with rates. Type-ahead picker uses this list when building Equipment POs.
+            </p>
+            <div id="equipCatalogContainer">Loading...</div>
+          </div>
+        </div>
+
+        <!-- ── BILL VENDORS TAB (Phase 1A.4a) ── -->
+        <div class="settings-subpage" id="settings-sub-billVendors" style="display:none">
+          <div class="card" style="margin-bottom:1rem">
+            <div class="card-header">
+              <span class="card-title">📋 Vendor List Import (from QuickBooks)</span>
+            </div>
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:.75rem">
+              Import your QuickBooks vendor list as a CSV. Run once for initial setup; vendor names will match QB exactly so future cost-export reconciles cleanly.
+            </p>
+            <div style="background:var(--bg-surface);padding:12px;border-radius:var(--radius-sm);margin-bottom:.75rem;font-size:12px;color:var(--text-muted);line-height:1.5">
+              <strong>How to export from QuickBooks Desktop:</strong><br>
+              1. Reports → Vendors &amp; Payables → Vendor Contact List<br>
+              2. Click <strong>Excel</strong> → Create New Worksheet<br>
+              3. In Excel: File → Save As → CSV (Comma delimited)<br>
+              4. Upload the .csv file below.<br><br>
+              <strong>Required column:</strong> "Company" or "Vendor" or "Name"<br>
+              <strong>Optional columns:</strong> Contact, Email, Phone, Address, Account No, Terms<br>
+              <em>Existing vendors with the same name will have empty fields filled in — they won't be overwritten.</em>
+            </div>
+            <input type="file" id="bv-csv-file" accept=".csv" onchange="bvHandleCsvFile()" style="margin-bottom:8px" />
+            <div id="bv-import-result" style="display:none;margin-top:10px"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">📒 Bill Vendors</span>
+              <div style="display:flex;gap:8px;align-items:center">
+                <input type="text" id="bv-search" placeholder="Search..." oninput="loadBillVendors()" style="width:180px;padding:5px 10px;font-size:12px" />
+                <button class="btn btn-primary btn-sm" onclick="openAddBillVendor()">+ Add Vendor</button>
+              </div>
+            </div>
+            <p style="font-size:12px;color:var(--text-muted);margin-bottom:.75rem">
+              These vendors appear in the type-ahead picker on Invoice Entry. Most-recently-used vendors are surfaced first.
+            </p>
+            <div id="bv-list-container" style="min-height:80px">Loading...</div>
+          </div>
+        </div>
 
         <!-- ── GL DEFAULTS TAB ── -->
         <div class="settings-subpage" id="settings-sub-gl" style="display:none">
@@ -1188,6 +1290,165 @@
   </div>
 </div>
 
+<!-- ═══ NOTIFICATIONS PAGE (Phase 1.6) ═══ -->
+<div id="page-notifications" class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">🔔 Notifications</h1>
+      <p class="page-sub">Project updates, task assignments, quote follow-ups, and approvals.</p>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost btn-sm" onclick="notifMarkAllRead()">✓ Mark all read</button>
+      <button class="btn btn-ghost btn-sm" onclick="notifClearAll()">🗑 Clear read</button>
+    </div>
+  </div>
+  <div style="display:flex;gap:4px;margin-bottom:1rem;border-bottom:1px solid var(--border)">
+    <button class="tab-btn active" id="notif-tab-unread" onclick="notifSetTab('unread',this)">Unread <span id="notif-unread-count" style="opacity:.7">(0)</span></button>
+    <button class="tab-btn" id="notif-tab-past_due" onclick="notifSetTab('past_due',this)">⚠ Past Due <span id="notif-pastdue-count" style="opacity:.7">(0)</span></button>
+    <button class="tab-btn" id="notif-tab-cleared" onclick="notifSetTab('cleared',this)">Cleared</button>
+    <button class="tab-btn" id="notif-tab-all" onclick="notifSetTab('all',this)">All</button>
+  </div>
+  <div id="notif-page-body" class="card" style="padding:0;min-height:200px">
+    <div style="padding:40px;text-align:center;color:var(--text-faint)">Loading...</div>
+  </div>
+</div>
+
+<!-- ═══ SALES DASHBOARD PAGE (Phase 1.6) ═══ -->
+<div id="page-salesDashboard" class="page">
+  <div class="page-header" style="flex-wrap:wrap;gap:.5rem">
+    <div>
+      <h1 class="page-title" id="sd-title">📊 My Sales</h1>
+      <p class="page-sub" id="sd-subtitle">Personal pipeline, follow-up queue, and monthly KPIs.</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-left:auto">
+      <select id="sd-rep-filter" onchange="loadSalesDashboard()" style="display:none;width:auto;padding:6px 10px;font-size:13px">
+        <option value="">— My Pipeline —</option>
+        <option value="all">All Reps (Roll-up)</option>
+      </select>
+      <input type="month" id="sd-month" onchange="loadSalesDashboard()" style="width:auto;padding:6px 10px;font-size:13px" />
+    </div>
+  </div>
+  <div id="sd-content">
+    <div style="padding:40px;text-align:center;color:var(--text-faint)">Loading...</div>
+  </div>
+</div>
+
+<!-- ═══ BILLING DASHBOARD (Phase 1A.4a) — Erin's command center ═══ -->
+<div id="page-billingDashboard" class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">💼 Billing Dashboard</h1>
+      <p class="page-sub">What needs to be billed, what's overdue, and what was entered today.</p>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary" onclick="showPage('invoiceEntry',document.getElementById('nav-invoiceEntry'))">⌨️ Enter Invoice</button>
+    </div>
+  </div>
+  <div id="billing-dashboard-body">
+    <div style="padding:40px;text-align:center;color:var(--text-faint)">Loading...</div>
+  </div>
+</div>
+
+<!-- ═══ INVOICE ENTRY (Phase 1A.4a) — keyboard-driven cost entry ═══ -->
+<div id="page-invoiceEntry" class="page">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">⌨️ Invoice Entry</h1>
+      <p class="page-sub">Type a job # or customer name, hit <kbd>Enter</kbd>, fill the form, hit Save & Next.</p>
+    </div>
+    <div id="ie-today-stats" style="font-size:13px;color:var(--text-muted);text-align:right">
+      <div>Today: <span id="ie-today-count" style="font-weight:700;color:var(--amber)">0</span> entries</div>
+      <div style="font-size:11px">$<span id="ie-today-total">0.00</span> total</div>
+    </div>
+  </div>
+
+  <!-- Job picker -->
+  <div class="card" style="margin-bottom:1rem">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="flex:1;position:relative">
+        <input type="text" id="ie-job-search" placeholder='Type job # ("0426-23"), customer ("Kroger"), or project name...'
+               autocomplete="off"
+               oninput="ieJobSearch()" onkeydown="ieJobSearchKeydown(event)"
+               style="width:100%;padding:12px;font-size:16px;font-family:'Oswald',sans-serif" />
+        <div id="ie-job-results" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--bg-card);border:1px solid var(--border);border-radius:0 0 var(--radius-sm) var(--radius-sm);max-height:320px;overflow-y:auto;z-index:50;box-shadow:0 8px 24px rgba(0,0,0,.5)"></div>
+      </div>
+      <button class="btn btn-ghost" onclick="ieClearJob()" id="ie-clear-btn" style="display:none">✕ Clear job</button>
+    </div>
+    <div id="ie-current-job" style="display:none;margin-top:10px;padding:10px;background:var(--bg-surface);border-radius:var(--radius-sm);border-left:3px solid var(--amber)">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-family:monospace;font-size:13px;color:var(--amber);font-weight:700" id="ie-cj-jobnum">—</div>
+          <div style="font-size:14px;font-weight:600;margin-top:2px" id="ie-cj-customer">—</div>
+          <div style="font-size:12px;color:var(--text-muted)" id="ie-cj-project">—</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:var(--text-muted)">Status</div>
+          <div style="font-size:13px;font-weight:600" id="ie-cj-status">—</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:var(--text-muted)">Contract</div>
+          <div style="font-size:13px;font-weight:600;color:var(--amber)" id="ie-cj-contract">—</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Entry form (visible only after job picked) -->
+  <div class="card" id="ie-form-card" style="display:none">
+    <div class="card-header">
+      <span class="card-title">Add Cost Line Item</span>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:2;position:relative">
+        <label>Vendor</label>
+        <input type="text" id="ie-vendor" autocomplete="off" oninput="ieVendorSearch()" onkeydown="ieVendorKeydown(event)" placeholder="Type vendor name..." />
+        <div id="ie-vendor-results" style="display:none;position:absolute;top:calc(100% - 4px);left:0;right:0;background:var(--bg-card);border:1px solid var(--border);border-radius:0 0 var(--radius-sm) var(--radius-sm);max-height:240px;overflow-y:auto;z-index:30;box-shadow:0 8px 16px rgba(0,0,0,.4)"></div>
+      </div>
+      <div class="form-group">
+        <label>Category</label>
+        <select id="ie-category">
+          <option value="materials">Materials</option>
+          <option value="equipment">Equipment</option>
+          <option value="labor">Labor</option>
+          <option value="subcontractor">Subcontractor</option>
+          <option value="freight">Freight / Shipping</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Invoice #</label><input type="text" id="ie-invoice-num" /></div>
+      <div class="form-group"><label>Invoice Date</label><input type="date" id="ie-invoice-date" /></div>
+      <div class="form-group"><label>Total Cost ($)</label><input type="number" step="0.01" id="ie-total" placeholder="0.00" onchange="ieRecalc()" /></div>
+    </div>
+    <div class="form-group"><label>Description / Line items</label><textarea id="ie-description" rows="2" placeholder="What did you buy on this invoice? (e.g., 'Spring kit, 2 strut bearings, weatherseal 12'')"></textarea></div>
+    <div class="form-row">
+      <div class="form-group"><label>Quantity</label><input type="number" step="0.01" id="ie-qty" value="1" onchange="ieRecalc()" /></div>
+      <div class="form-group"><label>Unit Cost ($)</label><input type="number" step="0.01" id="ie-unit" placeholder="0.00" onchange="ieRecalc()" /></div>
+      <div class="form-group"><label>Notes (internal)</label><input type="text" id="ie-notes" /></div>
+    </div>
+
+    <div class="modal-footer" style="margin-top:1rem;justify-content:space-between">
+      <div style="font-size:11px;color:var(--text-faint)">
+        <kbd>Tab</kbd> through fields · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> = Save & Next · <kbd>Esc</kbd> = Clear job
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="ieClearForm()">Clear Form</button>
+        <button class="btn btn-primary" onclick="ieSaveAndNext()" id="ie-save-btn">Save & Next ↵</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Today's recent entries -->
+  <div class="card" style="margin-top:1rem">
+    <div class="card-header">
+      <span class="card-title">Recent Entries</span>
+      <span style="font-size:11px;color:var(--text-muted)" id="ie-recent-count"></span>
+    </div>
+    <div id="ie-recent-list" style="min-height:80px"><div style="padding:20px;text-align:center;color:var(--text-faint);font-size:13px">No entries yet today.</div></div>
+  </div>
+</div>
+
     </main>
   </div>
 </div>
@@ -1423,6 +1684,193 @@
   </div>
 </div>
 
+<!-- ═══ BILL VENDOR MODAL (Phase 1A.4a) ═══ -->
+<div class="modal-overlay" id="billVendorModal" onclick="closeOnOverlay(event,'billVendorModal')">
+  <div class="modal" style="max-width:600px">
+    <div class="modal-header">
+      <span class="modal-title" id="billVendorModalTitle">Bill Vendor</span>
+      <button class="modal-close" onclick="closeModal('billVendorModal')">✕</button>
+    </div>
+    <input type="hidden" id="bv-id" value="0" />
+    <div class="form-group"><label>Vendor Name * (must match QuickBooks exactly)</label>
+      <input type="text" id="bv-name" placeholder="e.g. Overhead Door Corporation" />
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Contact Name</label><input type="text" id="bv-contact" /></div>
+      <div class="form-group"><label>Account #</label><input type="text" id="bv-account" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Email</label><input type="email" id="bv-email" /></div>
+      <div class="form-group"><label>Phone</label><input type="text" id="bv-phone" /></div>
+    </div>
+    <div class="form-group"><label>Address</label><input type="text" id="bv-address" /></div>
+    <div class="form-row">
+      <div class="form-group"><label>Payment Terms</label><input type="text" id="bv-terms" placeholder="Net 30, COD, etc." /></div>
+      <div class="form-group"><label>Default GL Account</label><input type="text" id="bv-gl" placeholder="e.g. 5100 · COGS — Materials" /></div>
+    </div>
+    <div class="form-group"><label>Notes</label><textarea id="bv-notes" rows="2"></textarea></div>
+    <div class="modal-footer" style="justify-content:space-between">
+      <button class="btn btn-danger btn-sm" id="bv-delete-btn" onclick="deleteBillVendor()" style="display:none">🗑 Delete</button>
+      <div style="display:flex;gap:8px;margin-left:auto">
+        <button class="btn btn-ghost" onclick="closeModal('billVendorModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveBillVendor()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ EQUIPMENT MODALS (Phase 1A.6) ═══ -->
+
+<!-- Equipment Vendor edit -->
+<div class="modal-overlay" id="equipVendorModal" onclick="closeOnOverlay(event,'equipVendorModal')">
+  <div class="modal" style="max-width:600px">
+    <div class="modal-header">
+      <span class="modal-title" id="equipVendorModalTitle">Equipment Vendor</span>
+      <button class="modal-close" onclick="closeModal('equipVendorModal')">✕</button>
+    </div>
+    <input type="hidden" id="ev-id" value="0" />
+    <div class="form-group"><label>Company Name *</label><input type="text" id="ev-company" placeholder="e.g. United Rentals" /></div>
+    <div class="form-row">
+      <div class="form-group"><label>Main Phone</label><input type="text" id="ev-main-phone" /></div>
+      <div class="form-group"><label>Main Email</label><input type="email" id="ev-main-email" /></div>
+    </div>
+    <div class="form-group"><label>Address</label><input type="text" id="ev-address" /></div>
+    <div class="form-group"><label>KVM Account #</label><input type="text" id="ev-account" placeholder="Your account number with this vendor" /></div>
+    <div class="form-row">
+      <div class="form-group"><label>Preferred Contact</label><input type="text" id="ev-contact-name" /></div>
+      <div class="form-group"><label>Contact Email</label><input type="email" id="ev-contact-email" /></div>
+      <div class="form-group"><label>Contact Phone</label><input type="text" id="ev-contact-phone" /></div>
+    </div>
+    <div class="form-group"><label>Notes</label><textarea id="ev-notes" rows="2"></textarea></div>
+    <div class="modal-footer" style="justify-content:space-between">
+      <button class="btn btn-danger btn-sm" id="ev-delete-btn" onclick="deleteEquipmentVendor()" style="display:none">🗑 Delete</button>
+      <div style="display:flex;gap:8px;margin-left:auto">
+        <button class="btn btn-ghost" onclick="closeModal('equipVendorModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveEquipmentVendor()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Equipment Catalog Item edit -->
+<div class="modal-overlay" id="equipCatalogModal" onclick="closeOnOverlay(event,'equipCatalogModal')">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-header">
+      <span class="modal-title" id="equipCatalogModalTitle">Equipment</span>
+      <button class="modal-close" onclick="closeModal('equipCatalogModal')">✕</button>
+    </div>
+    <input type="hidden" id="ec-id" value="0" />
+    <div class="form-row">
+      <div class="form-group"><label>Equipment Name *</label><input type="text" id="ec-name" placeholder="e.g. 19' Scissor Lift" /></div>
+      <div class="form-group"><label>Category</label>
+        <select id="ec-category">
+          <option value="aerial">Aerial / Lift</option>
+          <option value="forklift">Forklift</option>
+          <option value="crane">Crane</option>
+          <option value="generator">Generator / Power</option>
+          <option value="trailer">Trailer / Hauling</option>
+          <option value="hand_tool">Specialty Tool</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group"><label>Default Vendor</label>
+      <select id="ec-vendor"><option value="0">— none —</option></select>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Daily Rate ($)</label><input type="number" step="0.01" id="ec-daily" /></div>
+      <div class="form-group"><label>Weekly Rate ($)</label><input type="number" step="0.01" id="ec-weekly" /></div>
+      <div class="form-group"><label>Monthly Rate ($)</label><input type="number" step="0.01" id="ec-monthly" /></div>
+    </div>
+    <div class="form-group"><label>Notes</label><textarea id="ec-notes" rows="2" placeholder="Certifications required, capacity limits, special handling..."></textarea></div>
+    <div class="modal-footer" style="justify-content:space-between">
+      <button class="btn btn-danger btn-sm" id="ec-delete-btn" onclick="deleteEquipmentItem()" style="display:none">🗑 Delete</button>
+      <div style="display:flex;gap:8px;margin-left:auto">
+        <button class="btn btn-ghost" onclick="closeModal('equipCatalogModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveEquipmentItem()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Equipment PO Builder (per-project) -->
+<div class="modal-overlay" id="equipPOModal" onclick="closeOnOverlay(event,'equipPOModal')">
+  <div class="modal" style="max-width:820px">
+    <div class="modal-header">
+      <span class="modal-title" id="equipPOModalTitle">Equipment PO</span>
+      <button class="modal-close" onclick="closeModal('equipPOModal')">✕</button>
+    </div>
+    <input type="hidden" id="epo-id" value="0" />
+    <input type="hidden" id="epo-project-id" value="0" />
+
+    <!-- PO header info -->
+    <div class="form-row">
+      <div class="form-group"><label>PO #</label><input type="text" id="epo-number" readonly style="background:var(--bg-surface);font-family:monospace" /></div>
+      <div class="form-group"><label>Status</label><input type="text" id="epo-status" readonly style="background:var(--bg-surface)" /></div>
+    </div>
+
+    <div class="form-group"><label>Job Name</label><input type="text" id="epo-job-name" readonly style="background:var(--bg-surface)" /></div>
+
+    <div class="form-group"><label>Job Site Address</label><textarea id="epo-job-address" rows="2"></textarea></div>
+
+    <div class="form-row">
+      <div class="form-group"><label>Vendor *</label>
+        <select id="epo-vendor"><option value="0">— pick vendor —</option></select>
+      </div>
+      <div class="form-group"><label>Delivery Date</label><input type="date" id="epo-delivery-date" /></div>
+      <div class="form-group"><label>Delivery Time Window</label><input type="text" id="epo-delivery-window" placeholder="e.g. 7-9 AM" /></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Estimated Return Date</label><input type="date" id="epo-return-date" /></div>
+    </div>
+    <div class="form-group"><label>Delivery Notes</label><textarea id="epo-delivery-notes" rows="2" placeholder="Site contact instructions, gate codes, where to drop, etc."></textarea></div>
+
+    <!-- Site contact (lead tech) and office contact (sales rep) -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;background:var(--bg-surface);padding:10px;border-radius:var(--radius-sm);margin-bottom:1rem">
+      <div>
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Site Contact (Lead Tech)</div>
+        <div class="form-group" style="margin-bottom:6px"><label style="font-size:11px">Name</label><input type="text" id="epo-lead-name" /></div>
+        <div class="form-group" style="margin-bottom:0"><label style="font-size:11px">Phone</label><input type="text" id="epo-lead-phone" /></div>
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Office Contact (Sales Rep)</div>
+        <div class="form-group" style="margin-bottom:6px"><label style="font-size:11px">Name</label><input type="text" id="epo-sales-name" /></div>
+        <div class="form-group" style="margin-bottom:6px"><label style="font-size:11px">Phone</label><input type="text" id="epo-sales-phone" /></div>
+        <div class="form-group" style="margin-bottom:0"><label style="font-size:11px">Email</label><input type="email" id="epo-sales-email" /></div>
+      </div>
+    </div>
+
+    <!-- Items table -->
+    <div style="margin-bottom:1rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <label class="ql">Equipment Items</label>
+        <div style="display:flex;gap:6px">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="epoAddCatalogItem()">+ From Catalog</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="epoAddBlankItem()">+ Manual Add</button>
+        </div>
+      </div>
+      <div id="epo-items-list" style="border:1px solid var(--border);border-radius:var(--radius-sm);min-height:60px"></div>
+      <div style="text-align:right;margin-top:6px;font-size:13px;color:var(--text-muted)">Total Estimated: <span id="epo-total" style="font-weight:700;color:var(--amber)">$0.00</span></div>
+    </div>
+
+    <div class="form-group"><label>Internal Notes (not on PDF)</label><textarea id="epo-notes" rows="2"></textarea></div>
+
+    <div class="modal-footer" style="justify-content:space-between">
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-danger btn-sm" id="epo-delete-btn" onclick="deleteEquipmentPO()" style="display:none">🗑 Delete</button>
+        <button class="btn btn-ghost btn-sm" id="epo-cancel-btn" onclick="cancelEquipmentPO()" style="display:none">Cancel PO</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-left:auto">
+        <button class="btn btn-ghost" onclick="closeModal('equipPOModal')">Close</button>
+        <button class="btn btn-ghost" id="epo-print-btn" onclick="printEquipmentPO()">🖨 Preview / Print</button>
+        <button class="btn btn-primary" id="epo-save-btn" onclick="saveEquipmentPO()">Save Draft</button>
+        <button class="btn btn-primary" id="epo-send-btn" onclick="sendEquipmentPO()" style="background:var(--green);border-color:var(--green);display:none">📧 Mark Sent</button>
+        <button class="btn btn-primary" id="epo-confirm-btn" onclick="confirmEquipmentPO()" style="display:none">✓ Mark Confirmed</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Phase 1A.5 — Workflow TEMPLATE task edit/add modal (Settings > Workflow tab) -->
 <div class="modal-overlay" id="wfTemplateTaskModal" onclick="closeOnOverlay(event,'wfTemplateTaskModal')">
   <div class="modal" style="max-width:540px">
@@ -1470,6 +1918,21 @@
         <button class="btn btn-ghost" onclick="closeModal('wfTemplateTaskModal')">Cancel</button>
         <button class="btn btn-primary" onclick="saveWfTemplateTask()">Save</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Reusable confirm dialog (replaces native browser confirm()) -->
+<div class="modal-overlay" id="confirmModalEl" style="display:none">
+  <div class="modal" style="max-width:480px">
+    <div class="modal-header">
+      <span class="modal-title" id="confirmModalTitle">Confirm</span>
+      <button class="modal-close" onclick="confirmModalDismiss(false)">✕</button>
+    </div>
+    <div id="confirmModalBody" style="padding:8px 4px;font-size:14px;line-height:1.5;color:var(--text);white-space:pre-wrap"></div>
+    <div class="modal-footer" style="margin-top:1rem">
+      <button class="btn btn-ghost" id="confirmModalCancelBtn" onclick="confirmModalDismiss(false)">Cancel</button>
+      <button class="btn btn-primary" id="confirmModalOkBtn" onclick="confirmModalDismiss(true)">OK</button>
     </div>
   </div>
 </div>
