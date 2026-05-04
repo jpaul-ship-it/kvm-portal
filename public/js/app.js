@@ -8906,3 +8906,123 @@ document.addEventListener('click', function(e) {
   });
   console.log('[KVM] Phase 1A.4a functions exposed');
 })();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ CACHE-BUST PATCH — Service worker registration + auto-update on nav ═════
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// How this works:
+// 1. On page load, register /sw.js (server stamps it with APP_VERSION at request time)
+// 2. Every 60 seconds, poll /api/app-version and compare to the version we booted with
+// 3. If a new version is detected, set a flag "_kvmUpdatePending = true"
+// 4. When the user navigates (showPage / hash change / link click) AND the flag is
+//    set, reload the page silently. This is option C: reload-on-next-nav.
+//
+// This means:
+//   - User can finish their current task without disruption
+//   - The next click of any nav item triggers a reload that picks up new HTML/JS/CSS
+//   - Service worker installs new version on next page load
+//   - No manual hard-refresh ever needed
+//
+// Field offline behavior is preserved by the service worker (cache-first for static
+// assets, network-first with cache fallback for HTML).
+
+(function() {
+  if (!('serviceWorker' in navigator)) {
+    console.log('[KVM] Service workers not supported, cache-bust will rely on HTTP only');
+    return;
+  }
+  // Defer registration slightly so it doesn't block initial render
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').then(reg => {
+      console.log('[KVM] SW registered, scope:', reg.scope, 'app version:', window.APP_VERSION);
+      // If a waiting worker is found right after register, the user already has
+      // a newer version downloaded — flag for next-nav reload.
+      if (reg.waiting) {
+        window._kvmUpdatePending = true;
+        console.log('[KVM] Waiting worker found at register, update pending');
+      }
+      // Listen for new workers becoming "installed" (i.e., a new version downloaded)
+      reg.addEventListener('updatefound', () => {
+        const newWorker = reg.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            // A new SW has been installed and there's an existing controller — meaning
+            // this is a real update (not the first install). Flag for next-nav reload.
+            window._kvmUpdatePending = true;
+            console.log('[KVM] New SW installed, update pending — will reload on next nav');
+          }
+        });
+      });
+      // When the controller actually changes (after we send SKIP_WAITING and the
+      // worker activates), reload the page to use the new assets.
+      let _reloading = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (_reloading) return;
+        _reloading = true;
+        console.log('[KVM] SW controller changed, reloading');
+        window.location.reload();
+      });
+    }).catch(err => {
+      console.warn('[KVM] SW registration failed:', err);
+    });
+  });
+
+  // Poll the server for version changes every 60 seconds.
+  // This catches the case where the user keeps the tab open across a deploy
+  // and never closes it — the SW updatefound event also fires, but polling is a
+  // belt-and-suspenders backstop.
+  async function pollAppVersion() {
+    try {
+      const res = await fetch('/api/app-version', { cache: 'no-store', credentials: 'include' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.version && window.APP_VERSION && data.version !== window.APP_VERSION) {
+        if (!window._kvmUpdatePending) {
+          window._kvmUpdatePending = true;
+          console.log('[KVM] Server reports new version', data.version, '(we have', window.APP_VERSION + ') — update pending');
+        }
+        // Ask SW to update so the new version downloads
+        if (navigator.serviceWorker && navigator.serviceWorker.getRegistration) {
+          const reg = await navigator.serviceWorker.getRegistration();
+          if (reg) reg.update().catch(() => {});
+        }
+      }
+    } catch (e) { /* offline — ignore */ }
+  }
+  setInterval(pollAppVersion, 60 * 1000);
+  // Also poll on tab focus (catches user switching tabs and coming back)
+  window.addEventListener('focus', pollAppVersion);
+
+  // Wrap showPage to trigger reload on next navigation if update is pending.
+  // This is the heart of "option C — reload-on-next-nav."
+  if (typeof window.showPage === 'function') {
+    const _origShowPage = window.showPage;
+    window.showPage = function(name, navEl) {
+      if (window._kvmUpdatePending) {
+        // Tell the waiting SW to take over, then reload. The controllerchange
+        // listener above will handle the actual reload.
+        try {
+          if (navigator.serviceWorker && navigator.serviceWorker.getRegistration) {
+            navigator.serviceWorker.getRegistration().then(reg => {
+              if (reg && reg.waiting) {
+                reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+              } else {
+                // No waiting worker — just reload directly
+                window.location.reload();
+              }
+            }).catch(() => window.location.reload());
+          } else {
+            window.location.reload();
+          }
+        } catch (e) {
+          window.location.reload();
+        }
+        return;  // Don't run the original showPage — we're reloading
+      }
+      return _origShowPage.apply(this, arguments);
+    };
+    console.log('[KVM] showPage wrapped for reload-on-next-nav');
+  }
+})();
