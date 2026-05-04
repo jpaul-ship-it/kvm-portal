@@ -47,6 +47,60 @@ function closeModal(id) { $(id).classList.remove('open'); }
 function closeOnOverlay(e, id) { if(e.target===$(id)) closeModal(id); }
 function toggleSidebar() { $('sidebar').classList.toggle('open'); }
 
+// ─── confirmModal — reusable styled replacement for native confirm() ─────────
+// Returns a Promise<boolean>. Use:  if (!await confirmModal('Delete?')) return;
+// Options: { title, okLabel, cancelLabel, danger (boolean: red OK button), preLine (text shown above body) }
+let _confirmModalResolver = null;
+function confirmModal(message, opts) {
+  opts = opts || {};
+  const overlay = $('confirmModalEl');
+  if (!overlay) {
+    // Fallback to native if utility wasn't injected for some reason
+    return Promise.resolve(window.confirm(message));
+  }
+  $('confirmModalTitle').textContent = opts.title || 'Confirm';
+  $('confirmModalBody').textContent = message || '';
+  const okBtn = $('confirmModalOkBtn');
+  const cancelBtn = $('confirmModalCancelBtn');
+  okBtn.textContent = opts.okLabel || 'OK';
+  cancelBtn.textContent = opts.cancelLabel || 'Cancel';
+  // Style: danger -> red OK button (for destructive actions)
+  if (opts.danger) {
+    okBtn.className = 'btn btn-danger';
+  } else {
+    okBtn.className = 'btn btn-primary';
+  }
+  // Show
+  overlay.style.display = 'flex';
+  overlay.classList.add('open');
+  // Focus the OK button for keyboard users; Esc dismisses
+  setTimeout(() => { try { okBtn.focus(); } catch(e){} }, 50);
+  return new Promise(resolve => { _confirmModalResolver = resolve; });
+}
+function confirmModalDismiss(answer) {
+  const overlay = $('confirmModalEl');
+  if (overlay) {
+    overlay.classList.remove('open');
+    overlay.style.display = 'none';
+  }
+  if (_confirmModalResolver) {
+    const r = _confirmModalResolver;
+    _confirmModalResolver = null;
+    r(answer);
+  }
+}
+// Esc key dismisses
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape' && _confirmModalResolver) {
+    confirmModalDismiss(false);
+  } else if (e.key === 'Enter' && _confirmModalResolver) {
+    confirmModalDismiss(true);
+  }
+});
+// Expose
+window.confirmModal = confirmModal;
+window.confirmModalDismiss = confirmModalDismiss;
+
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
 async function doLogin() {
   const username=$('loginUser').value.trim(), password=$('loginPass').value;
@@ -92,6 +146,22 @@ function setupUI() {
   // All employees see customers
   document.querySelectorAll('.nav-item[data-page="customers"]').forEach(el => el.style.display='flex');
 
+  // Phase 1A.4a — Billing section visible only to billing role + admins
+  const isBilling = ['global_admin','admin','billing'].includes(role);
+  const billingNav = $('nav-group-billing');
+  const billingDashNav = $('nav-billingDashboard');
+  const invoiceEntryNav = $('nav-invoiceEntry');
+  if (billingNav)       billingNav.style.display       = isBilling ? 'block' : 'none';
+  if (billingDashNav)   billingDashNav.style.display   = isBilling ? 'flex'  : 'none';
+  if (invoiceEntryNav)  invoiceEntryNav.style.display  = isBilling ? 'flex'  : 'none';
+  // Auto-redirect billing role to their dashboard if they land on the standard one
+  if (role === 'billing' && (location.hash === '' || location.hash === '#dashboard') && !window._billingAutoRouted) {
+    window._billingAutoRouted = true;
+    setTimeout(() => {
+      try { showPage('billingDashboard', billingDashNav); } catch(e){}
+    }, 100);
+  }
+
   // Time Off Calendar — managers and above only (it's in admin section but double-check)
   // Admin section already handles this since ptoCalendar is inside adminSection
 
@@ -115,7 +185,7 @@ function showPage(name, el) {
   if(pg) pg.classList.add('active');
   if(el) el.classList.add('active');
   $('sidebar').classList.remove('open');
-  const map={dashboard:renderDashboard,customers:loadCustomers,customerDetail:loadCustomerDetail,projects:loadProjects,projectDetail:loadProjectDetail,quickJobs:loadQuickJobs,quickJobDetail:loadQuickJobDetail,jobLog:loadJobLog,sales:quotesShowList,myTimecards:renderMyTimecards,announcements:renderAnnouncements,news:renderNews,oncall:renderOncall,directory:renderDirectory,pto:renderPto,ptoCalendar:renderPtoCalendar,myDocs:renderMyDocs,policies:renderPolicies,timeclock:initTimeclock,adminTimeclock:loadAdminTimecards,adminAlerts:renderAlerts,adminAttendance:initAdminAttendance,adminUsers:renderAdminUsers,adminPto:renderAdminPto,adminBlackout:renderBlackouts,adminRotation:renderRotation,adminSettings:loadSettings};
+  const map={dashboard:renderDashboard,customers:loadCustomers,customerDetail:loadCustomerDetail,projects:loadProjects,projectDetail:loadProjectDetail,quickJobs:loadQuickJobs,quickJobDetail:loadQuickJobDetail,jobLog:loadJobLog,sales:quotesShowList,salesDashboard:loadSalesDashboard,billingDashboard:loadBillingDashboard,invoiceEntry:loadInvoiceEntryPage,notifications:loadNotificationsPage,myTimecards:renderMyTimecards,announcements:renderAnnouncements,news:renderNews,oncall:renderOncall,directory:renderDirectory,pto:renderPto,ptoCalendar:renderPtoCalendar,myDocs:renderMyDocs,policies:renderPolicies,timeclock:initTimeclock,adminTimeclock:loadAdminTimecards,adminAlerts:renderAlerts,adminAttendance:initAdminAttendance,adminUsers:renderAdminUsers,adminPto:renderAdminPto,adminBlackout:renderBlackouts,adminRotation:renderRotation,adminSettings:loadSettings};
   if(map[name]) map[name]();
 }
 
@@ -178,7 +248,7 @@ async function saveAnnouncement() {
   if(!title||!body) return showToast('Fill in all fields.','error');
   try { await api('POST','/api/announcements',{title,body,priority:$('annPriority').value}); closeModal('annModal'); $('annTitle').value=''; $('annBody').value=''; showToast('Announcement posted!','success'); renderAnnouncements(); } catch(e){showToast(e.message,'error');}
 }
-async function deleteAnnouncement(id) { if(!confirm('Delete?'))return; await api('DELETE','/api/announcements/'+id); renderAnnouncements(); }
+async function deleteAnnouncement(id) { if (!await confirmModal('Delete?'))return; await api('DELETE','/api/announcements/'+id); renderAnnouncements(); }
 
 // ─── NEWS ─────────────────────────────────────────────────────────────────────
 const catIcons={'Project Update':'📋','Safety':'⛑️','HR':'👔','Recognition':'🏆','General':'📰'};
@@ -193,7 +263,7 @@ async function saveNews() {
   if(!title||!body) return showToast('Fill in all fields.','error');
   try { await api('POST','/api/news',{title,body,category:$('newsCat').value}); closeModal('newsModal'); $('newsTitle').value=''; $('newsBody').value=''; showToast('News published!','success'); renderNews(); } catch(e){showToast(e.message,'error');}
 }
-async function deleteNews(id) { if(!confirm('Delete?'))return; await api('DELETE','/api/news/'+id); renderNews(); }
+async function deleteNews(id) { if (!await confirmModal('Delete?'))return; await api('DELETE','/api/news/'+id); renderNews(); }
 
 // ─── ON-CALL ──────────────────────────────────────────────────────────────────
 function setOncallFilter(f,el) {
@@ -328,7 +398,7 @@ async function saveOncall() {
   } catch(e) { showToast(e.message, 'error'); }
 }
 
-async function deleteOncall(id) { if(!confirm('Remove this entry?'))return; await api('DELETE','/api/oncall/'+id); renderOncall(); }
+async function deleteOncall(id) { if (!await confirmModal('Remove this entry?'))return; await api('DELETE','/api/oncall/'+id); renderOncall(); }
 
 // SWAP FUNCTIONALITY
 async function openSwapOncall(id, currentName, dept) {
@@ -363,7 +433,7 @@ async function saveOncallSwap() {
 // Legacy populateOncallEmployees kept for compatibility
 async function populateOncallEmployees() { await openOncallModal(); }
 
-async function deleteOncall(id) { if(!confirm('Remove?'))return; await api('DELETE','/api/oncall/'+id); renderOncall(); }
+async function deleteOncall(id) { if (!await confirmModal('Remove?'))return; await api('DELETE','/api/oncall/'+id); renderOncall(); }
 
 // ─── AUTO-SCHEDULE ────────────────────────────────────────────────────────────
 async function openAutoScheduleModal() {
@@ -497,7 +567,7 @@ async function applyAutoSchedule() {
   if(!start) return showToast('Select a start date.','error');
   if(!ohOrder.length&&!auOrder.length) return showToast('No employees in rotation.','error');
   const totalSlots=Math.ceil(weeks/freq);
-  if(!confirm(`Create ${totalSlots} weeks of on-call entries?`)) return;
+  if (!await confirmModal(`Create ${totalSlots} weeks of on-call entries?`)) return;
 
   const ohStart=parseInt($('ohStartIdx').value)||0;
   const auStart=parseInt($('auStartIdx').value)||0;
@@ -612,7 +682,7 @@ async function saveBlackout() {
   if(!label||!start||!end) return showToast('Fill in all fields.','error');
   try { await api('POST','/api/blackouts',{label,start_date:start,end_date:end}); closeModal('blackoutModal'); $('boLabel').value=''; $('boStart').value=''; $('boEnd').value=''; showToast('Blackout saved!','success'); renderBlackouts(); } catch(e){showToast(e.message,'error');}
 }
-async function deleteBlackout(id) { if(!confirm('Remove?'))return; await api('DELETE','/api/blackouts/'+id); renderBlackouts(); }
+async function deleteBlackout(id) { if (!await confirmModal('Remove?'))return; await api('DELETE','/api/blackouts/'+id); renderBlackouts(); }
 function checkBlackout(s,e) { return allBlackouts.find(b=>s<=b.end_date&&e>=b.start_date)||null; }
 
 // ─── PTO ─────────────────────────────────────────────────────────────────────
@@ -701,7 +771,7 @@ async function saveUser() {
     allUsers=[]; showToast('Employee added!','success'); renderAdminUsers();
   } catch(e){ showToast(e.message,'error'); }
 }
-async function deleteUser(id) { if(!confirm('Remove this employee?'))return; try { await api('DELETE','/api/users/'+id); allUsers=[]; showToast('Removed.'); renderAdminUsers(); } catch(e){showToast(e.message,'error');} }
+async function deleteUser(id) { if (!await confirmModal('Remove this employee?'))return; try { await api('DELETE','/api/users/'+id); allUsers=[]; showToast('Removed.'); renderAdminUsers(); } catch(e){showToast(e.message,'error');} }
 
 // ─── ADMIN: PTO APPROVAL ──────────────────────────────────────────────────────
 function setAdminPtoFilter(f,el) {
@@ -1148,7 +1218,7 @@ openPtoReqModal = async function() {
 
 // ─── LOAD KVM PAPER SCHEDULE ──────────────────────────────────────────────────
 async function loadKVMSchedule() {
-  if (!confirm('This will load your paper on-call schedule (3/21 through 6/19) into the system, replacing any existing future entries. Continue?')) return;
+  if (!await confirmModal('This will load your paper on-call schedule (3/21 through 6/19) into the system, replacing any existing future entries. Continue?')) return;
   try {
     const result = await api('POST', '/api/oncall/seed-schedule', {});
     showToast(`Schedule loaded! ${result.created} entries created.`, 'success');
@@ -1505,7 +1575,7 @@ async function uploadDocument() {
 }
 
 async function deleteDoc(id) {
-  if (!confirm('Delete this document?')) return;
+  if (!await confirmModal('Delete this document?')) return;
   await api('DELETE', '/api/docs/' + id);
   showToast('Document deleted.');
   renderMyDocs();
@@ -1583,7 +1653,7 @@ async function uploadPolicy() {
 }
 
 async function deletePolicy(id) {
-  if (!confirm('Delete this policy document?')) return;
+  if (!await confirmModal('Delete this policy document?')) return;
   await api('DELETE', '/api/policies/' + id);
   showToast('Document deleted.');
   renderPolicies();
@@ -1857,19 +1927,18 @@ function startGeofenceMonitor() {
   geofenceInterval = setInterval(check, 60000); // check every minute
 }
 
-function showGeofenceAlert(type) {
-  if (type === 'entered') {
-    // Try push notification first (works in background on Android)
+async function showGeofenceAlert(type) {
+  if (type === 'arrived') {
     if (window.showLocalNotification) {
       window.showLocalNotification(
-        '⏱️ KVM — Don\'t forget to clock in!',
+        '📍 KVM — Time to clock in!',
         'You have been at the KVM shop. Tap to clock in now.',
         '/?page=timeclock'
       );
     }
     // Also show in-app prompt if app is visible
     if (document.visibilityState === 'visible') {
-      if (confirm('⚠️ You have been at the KVM shop for 5 minutes but are not clocked in. Clock in now?')) {
+      if (await confirmModal('You have been at the KVM shop for 5 minutes but are not clocked in. Clock in now?', { title: '⚠️ Geofence Alert', okLabel: 'Clock In' })) {
         showPage('timeclock', document.querySelector('.nav-item[data-page="timeclock"]'));
       }
     }
@@ -1882,7 +1951,7 @@ function showGeofenceAlert(type) {
       );
     }
     if (document.visibilityState === 'visible') {
-      if (confirm('⚠️ You have left the KVM shop but are still clocked in. Clock out now?')) {
+      if (await confirmModal('You have left the KVM shop but are still clocked in. Clock out now?', { title: '⚠️ Geofence Alert', okLabel: 'Clock Out' })) {
         doClockout();
       }
     }
@@ -2042,7 +2111,7 @@ async function sendTimecardEmails() {
   const weekStart = new Date(jan4.getTime() + (parseInt(wk)-1) * 7 * 86400000);
   weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
   const ws = weekStart.toISOString().split('T')[0];
-  if (!confirm(`Send timecard emails for week of ${ws} to all employees with time entries?`)) return;
+  if (!await confirmModal(`Send timecard emails for week of ${ws} to all employees with time entries?`)) return;
   try {
     const r = await api('POST', '/api/timeclock/send-timecards', { week: ws });
     showToast(`Sent ${r.sent} of ${r.total} timecard emails!`, 'success');
@@ -2061,7 +2130,7 @@ function openEditTimeEntry(id, clockIn, clockOut, jobName) {
 }
 
 async function deleteTimeEntry(id) {
-  if (!confirm('Delete this time entry?')) return;
+  if (!await confirmModal('Delete this time entry?')) return;
   await api('DELETE', '/api/timeclock/' + id);
   showToast('Entry deleted.');
   loadAdminTimecards();
@@ -2234,13 +2303,13 @@ async function saveAttendanceEvent() {
 }
 
 async function deleteCallin(id) {
-  if (!confirm('Delete this call-in record?')) return;
+  if (!await confirmModal('Delete this call-in record?')) return;
   await api('DELETE', '/api/attendance/callin/' + id);
   loadAttendanceContent();
 }
 
 async function deleteAttEvent(id) {
-  if (!confirm('Delete this attendance event?')) return;
+  if (!await confirmModal('Delete this attendance event?')) return;
   await api('DELETE', '/api/attendance/' + id);
   loadAttendanceContent();
 }
@@ -2482,7 +2551,7 @@ async function submitSelfCallin() {
   if (!call_in_date) return showToast('Select a date.', 'error');
 
   // Confirm — this notifies manager
-  if (!confirm(`Submit a ${call_in_type} call-in for ${fmtDate(call_in_date)}? Your manager will be notified immediately.`)) return;
+  if (!await confirmModal(`Submit a ${call_in_type} call-in for ${fmtDate(call_in_date)}? Your manager will be notified immediately.`)) return;
 
   try {
     const r = await api('POST', '/api/attendance/my-callin', { call_in_date, call_in_type, notes });
@@ -2928,7 +2997,7 @@ async function saveSite() {
 }
 
 async function deleteSite(id) {
-  if (!confirm('Remove this site?')) return;
+  if (!await confirmModal('Remove this site?')) return;
   await api('DELETE', '/api/customers/' + currentCustomerId + '/sites/' + id);
   currentCustomerData = null;
   await loadCustomerDetail();
@@ -2973,7 +3042,7 @@ async function saveContact() {
 }
 
 async function deleteContact(id) {
-  if (!confirm('Remove this contact?')) return;
+  if (!await confirmModal('Remove this contact?')) return;
   await api('DELETE', '/api/customers/' + currentCustomerId + '/contacts/' + id);
   currentCustomerData = null;
   await loadCustomerDetail();
@@ -3017,7 +3086,7 @@ async function saveEquipment() {
 }
 
 async function deleteEquipment(id) {
-  if (!confirm('Remove this equipment record?')) return;
+  if (!await confirmModal('Remove this equipment record?')) return;
   await api('DELETE', '/api/customers/' + currentCustomerId + '/equipment/' + id);
   currentCustomerData = null;
   await loadCustomerDetail();
@@ -3048,7 +3117,7 @@ async function savePartnerDoc() {
 }
 
 async function deletePartnerDoc(id) {
-  if (!confirm('Delete this document?')) return;
+  if (!await confirmModal('Delete this document?')) return;
   await api('DELETE', '/api/customers/' + currentCustomerId + '/docs/' + id);
   currentCustomerData = null;
   await loadCustomerDetail();
@@ -3439,7 +3508,19 @@ async function renderProjectTab() {
           <div class="card-header"><span class="card-title">Internal Notes</span></div>
           <div style="font-size:13px;white-space:pre-line;color:var(--text-muted)">${p.notes}</div>
         </div>` : ''}
+      </div>
+      <!-- Phase 1A.6 — Equipment POs section -->
+      <div id="proj-equipment-section" style="margin-top:1rem">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">🚜 Equipment Rentals</span>
+            <button class="btn btn-primary btn-sm" onclick="openNewEquipmentPO(${p.id})">+ New Equipment PO</button>
+          </div>
+          <div id="proj-equipment-list" style="min-height:60px"><div style="padding:20px;text-align:center;color:var(--text-faint);font-size:13px">Loading...</div></div>
+        </div>
       </div>`;
+    // Lazy-load Equipment POs after Overview renders
+    setTimeout(() => { try { loadProjectEquipmentPOs(p.id); } catch(e){} }, 50);
 
   } else if (projectTabActive === 'workflow') {
     // Phase 1A.5 — Kanban-style workflow tasks grouped by section
@@ -3722,7 +3803,7 @@ async function saveProject() {
 
 async function deleteProject() {
   if (!currentProjectId) return;
-  if (!confirm('Delete this project? All phases, hours, and notes will be permanently removed.')) return;
+  if (!await confirmModal('Delete this project? All phases, hours, and notes will be permanently removed.')) return;
   try {
     await api('DELETE', '/api/projects/' + currentProjectId);
     showToast('Project deleted.', 'success');
@@ -3776,7 +3857,7 @@ async function savePhase() {
 }
 
 async function deletePhase(phaseId) {
-  if (!confirm('Delete this phase?')) return;
+  if (!await confirmModal('Delete this phase?')) return;
   try {
     await api('DELETE', '/api/projects/' + currentProjectId + '/phases/' + phaseId);
     showToast('Phase deleted.', 'success');
@@ -3831,7 +3912,7 @@ async function saveProjectHours() {
 }
 
 async function deleteProjectHours(hid) {
-  if (!confirm('Remove this hours entry?')) return;
+  if (!await confirmModal('Remove this hours entry?')) return;
   try {
     await api('DELETE', '/api/projects/' + currentProjectId + '/hours/' + hid);
     showToast('Entry removed.', 'success');
@@ -3854,7 +3935,7 @@ async function saveProjectNote() {
 }
 
 async function deleteProjectNote(nid) {
-  if (!confirm('Delete this note?')) return;
+  if (!await confirmModal('Delete this note?')) return;
   try {
     await api('DELETE', '/api/projects/' + currentProjectId + '/notes/' + nid);
     showToast('Note deleted.', 'success');
@@ -4098,7 +4179,7 @@ async function saveCost() {
 }
 
 async function deleteCost(costId) {
-  if (!confirm('Delete this cost entry?')) return;
+  if (!await confirmModal('Delete this cost entry?')) return;
   try {
     await api('DELETE', '/api/projects/' + currentProjectId + '/costs/' + costId);
     showToast('Cost deleted.', 'success');
@@ -4429,7 +4510,7 @@ async function quotesSave() {
 }
 
 async function quotesDelete(id) {
-  if (!confirm('Delete this quote?')) return;
+  if (!await confirmModal('Delete this quote?')) return;
   try { await api('DELETE', '/api/quotes/' + id); showToast('Quote deleted.', 'success'); quotesLoadList(); } catch(e) { showToast(e.message, 'error'); }
 }
 
@@ -4724,6 +4805,8 @@ function setSettingsTab(tab, el) {
   if (tab === 'coa')    loadCoaAdmin();
   if (tab === 'backup') refreshTestDataStatus();
   if (tab === 'workflow') loadWfSettings();
+  if (tab === 'equipment') loadEquipmentSettings();
+  if (tab === 'billVendors') loadBillVendors();
 }
 
 // ─── Skills checkboxes (used on employee + project modals) ───────────────────
@@ -4912,7 +4995,7 @@ async function saveSkill() {
   } catch(e) { showToast(e.message,'error'); }
 }
 async function deleteSkill(id) {
-  if (!confirm('Remove this skill? It will be hidden from future use but preserved for historical records.')) return;
+  if (!await confirmModal('Remove this skill? It will be hidden from future use but preserved for historical records.')) return;
   try { await api('DELETE','/api/skills/'+id); _skillsCache = null; showToast('Skill removed.','success'); loadSkillsAdmin(); }
   catch(e) { showToast(e.message,'error'); }
 }
@@ -5013,7 +5096,7 @@ async function saveTruck() {
   } catch(e) { showToast(e.message,'error'); }
 }
 async function deleteTruck(id) {
-  if (!confirm('Remove this truck? It will be hidden but historical schedule data will be preserved.')) return;
+  if (!await confirmModal('Remove this truck? It will be hidden but historical schedule data will be preserved.')) return;
   try { await api('DELETE','/api/trucks/'+id); showToast('Truck removed.','success'); loadTrucksAdmin(); }
   catch(e) { showToast(e.message,'error'); }
 }
@@ -5085,7 +5168,7 @@ async function saveCoa() {
   } catch(e) { showToast(e.message,'error'); }
 }
 async function deleteCoa(id) {
-  if (!confirm('Remove this account?')) return;
+  if (!await confirmModal('Remove this account?')) return;
   try { await api('DELETE','/api/chart-of-accounts/'+id); showToast('Account removed.','success'); loadCoaAdmin(); }
   catch(e) { showToast(e.message,'error'); }
 }
@@ -5369,7 +5452,7 @@ async function quotesCreateProjectFromQuote() {
   if (!quotesCurrentId) { showToast('Save the quote first.','error'); return; }
   const status = $('q-status') ? $('q-status').value : '';
   if (status !== 'accepted') {
-    if (!confirm('Quote status is not "Accepted." Continue anyway?')) return;
+    if (!await confirmModal('Quote status is not "Accepted." Continue anyway?')) return;
   }
   // Phase 1A.2a — open chooser modal instead of direct create
   cfqOpen();
@@ -5470,7 +5553,7 @@ async function refreshTestDataStatus() {
 }
 
 async function seedTestData() {
-  if (!confirm('Seed realistic test customers, sites, contacts, quotes, and projects into the database?\n\nEvery seeded record is tagged so it can be cleanly removed later via "Purge All Test Data." All names are prefixed with "(TEST)" for easy identification.')) return;
+  if (!await confirmModal('Seed realistic test customers, sites, contacts, quotes, and projects into the database?\n\nEvery seeded record is tagged so it can be cleanly removed later via "Purge All Test Data." All names are prefixed with "(TEST)" for easy identification.')) return;
   const btn = $('btn-seed-test-data');
   if (btn) { btn.disabled = true; btn.textContent = 'Seeding...'; }
   try {
@@ -5487,8 +5570,8 @@ async function seedTestData() {
 }
 
 async function purgeTestData() {
-  if (!confirm('DELETE ALL TEST DATA from the database?\n\nThis will remove every record tagged as test data (prefixed with "(TEST)") — customers, sites, contacts, quotes, and projects. Real data is not affected.\n\nThis cannot be undone without restoring a backup.')) return;
-  if (!confirm('Really purge all test data? Type-sensitive check: click OK to confirm.')) return;
+  if (!await confirmModal('DELETE ALL TEST DATA from the database?\n\nThis will remove every record tagged as test data (prefixed with "(TEST)") — customers, sites, contacts, quotes, and projects. Real data is not affected.\n\nThis cannot be undone without restoring a backup.')) return;
+  if (!await confirmModal('Really purge all test data? Type-sensitive check: click OK to confirm.')) return;
   const btn = $('btn-purge-test-data');
   if (btn) { btn.disabled = true; btn.textContent = 'Purging...'; }
   try {
@@ -6036,7 +6119,7 @@ async function saveQuickJob() {
 
 async function deleteQuickJob() {
   if (!_qjCurrent) return;
-  if (!confirm('Delete this Quick Job? This cannot be undone — all costs, hours, and notes attached will also be removed.')) return;
+  if (!await confirmModal('Delete this Quick Job? This cannot be undone — all costs, hours, and notes attached will also be removed.')) return;
   try {
     await api('DELETE', '/api/projects/' + _qjCurrent.id);
     showToast('Deleted.', 'success');
@@ -6089,7 +6172,7 @@ async function saveQuickJobCost() {
 
 async function deleteQuickJobCost(costId) {
   if (!_qjCurrent) return;
-  if (!confirm('Delete this cost entry?')) return;
+  if (!await confirmModal('Delete this cost entry?')) return;
   try {
     await api('DELETE', '/api/projects/' + _qjCurrent.id + '/costs/' + costId);
     showToast('Deleted.', 'success');
@@ -6142,7 +6225,7 @@ async function saveQuickJobHours() {
 
 async function deleteQuickJobHours(hId) {
   if (!_qjCurrent) return;
-  if (!confirm('Delete this hours entry?')) return;
+  if (!await confirmModal('Delete this hours entry?')) return;
   try {
     await api('DELETE', '/api/projects/' + _qjCurrent.id + '/hours/' + hId);
     showToast('Deleted.', 'success');
@@ -6672,7 +6755,7 @@ function renderWfCard(t) {
 
 async function seedWorkflowTasksNow() {
   if (!currentProjectData) return;
-  if (!confirm('Seed the default workflow template onto this project? This adds all default tasks.')) return;
+  if (!await confirmModal('Seed the default workflow template onto this project? This adds all default tasks.')) return;
   try {
     await api('POST', '/api/projects/' + currentProjectData.id + '/workflow-tasks/seed', {});
     showToast('Workflow tasks created.', 'success');
@@ -6775,7 +6858,7 @@ async function deleteWorkflowTask() {
   if (!currentProjectData) return;
   const taskId = parseInt($('wf-task-id').value) || 0;
   if (!taskId) return;
-  if (!confirm('Delete this task?')) return;
+  if (!await confirmModal('Delete this task?')) return;
   try {
     await api('DELETE', '/api/projects/' + currentProjectData.id + '/workflow-tasks/' + taskId);
     closeModal('wfTaskModal');
@@ -6903,7 +6986,7 @@ async function saveWfTemplateTask() {
 async function deleteWfTemplateTask() {
   const id = parseInt($('wf-tpl-task-id').value) || 0;
   if (!id || !_wfTemplateData) return;
-  if (!confirm('Delete this template task? (Existing projects with this task keep their copies.)')) return;
+  if (!await confirmModal('Delete this template task? (Existing projects with this task keep their copies.)')) return;
   try {
     await api('DELETE', '/api/workflow-templates/' + _wfTemplateData.id + '/tasks/' + id);
     closeModal('wfTemplateTaskModal');
@@ -6955,7 +7038,7 @@ async function toggleWfRole(userId, role, checked) {
 async function quotesSetStatus(quoteId, newStatus) {
   // Phase 1A.5 fix — single-click Accept chains into Create Job chooser
   if (newStatus === 'accepted') {
-    if (!confirm('Mark this quote Accepted and create a Project / Quick Job?')) return;
+    if (!await confirmModal('Mark this quote Accepted and create a Project / Quick Job?')) return;
     try {
       // 1. Set status to accepted
       await api('PATCH', '/api/quotes/' + quoteId + '/status', { status: 'accepted' });
@@ -6974,7 +7057,7 @@ async function quotesSetStatus(quoteId, newStatus) {
 
   // Default path — just status change with confirm
   const labels = { sent:'mark this quote Sent?', declined:'mark this quote Lost (Declined)?', draft:'return to draft?' };
-  if (!confirm('Are you sure you want to ' + (labels[newStatus] || ('change status to '+newStatus)) + '?')) return;
+  if (!await confirmModal('Are you sure you want to ' + (labels[newStatus] || ('change status to '+newStatus)) + '?')) return;
   try {
     await api('PATCH', '/api/quotes/' + quoteId + '/status', { status: newStatus });
     showToast('Status updated.', 'success');
@@ -7006,4 +7089,1820 @@ async function quotesInlineCreateProject(quoteId) {
     });
     console.log('[KVM] Phase 1A.5 functions exposed');
   } catch(e) { console.error('[KVM] Phase 1A.5 exposure failed:', e); }
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PHASE 1.6 — NOTIFICATIONS BELL + PAGE + SALES DASHBOARD ═════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _notifPollTimer = null;
+let _notifTab = 'unread';
+
+// Start polling on login (kicked off by setupUI)
+function startNotifPolling() {
+  if (_notifPollTimer) clearInterval(_notifPollTimer);
+  // Initial fetch + every 90 seconds
+  refreshNotifBadge();
+  _notifPollTimer = setInterval(refreshNotifBadge, 90 * 1000);
+}
+
+async function refreshNotifBadge() {
+  try {
+    const r = await api('GET', '/api/notifications/count');
+    const badge = $('notifBellBadge');
+    if (!badge) return;
+    if (r.unread > 0) {
+      badge.style.display = 'inline-block';
+      badge.textContent = r.unread > 99 ? '99+' : r.unread;
+      badge.style.background = (r.past_due > 0) ? 'var(--danger)' : 'var(--amber)';
+      badge.style.color = (r.past_due > 0) ? '#fff' : '#000';
+    } else {
+      badge.style.display = 'none';
+    }
+  } catch(e) {}
+}
+
+async function toggleNotifDropdown(event) {
+  if (event) event.stopPropagation();
+  const dd = $('notifDropdown');
+  if (!dd) return;
+  if (dd.style.display === 'block') {
+    dd.style.display = 'none';
+    return;
+  }
+  dd.style.display = 'block';
+  await renderNotifDropdownContent();
+  // Click outside to close
+  setTimeout(() => {
+    document.addEventListener('click', _notifDocClickHandler, { once: true });
+  }, 50);
+}
+
+function _notifDocClickHandler(e) {
+  const dd = $('notifDropdown');
+  const wrap = $('notifBellWrap');
+  if (!dd || !wrap) return;
+  if (!wrap.contains(e.target)) {
+    dd.style.display = 'none';
+  } else {
+    // Re-attach for next outside click
+    document.addEventListener('click', _notifDocClickHandler, { once: true });
+  }
+}
+
+async function renderNotifDropdownContent() {
+  const body = $('notifDropdownBody');
+  if (!body) return;
+  try {
+    const r = await api('GET', '/api/notifications?tab=unread');
+    const rows = r.rows || [];
+    if (!rows.length) {
+      body.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-faint);font-size:12px">🎉 All caught up.<br>No unread notifications.</div>';
+      return;
+    }
+    body.innerHTML = rows.slice(0, 12).map(n => renderNotifRow(n, true)).join('');
+  } catch(e) {
+    body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--danger);font-size:12px">Error: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function notifIcon(eventType) {
+  const map = {
+    project_note_added: '📝',
+    task_assigned: '📋',
+    task_overdue: '⚠️',
+    quote_followup_due: '⏰',
+    quote_status_changed: '💰',
+    project_status_changed: '🏗',
+    pto_request_pending: '🌴',
+    attendance_flag_pending: '🚨'
+  };
+  return map[eventType] || '🔔';
+}
+
+function notifTimeAgo(ts) {
+  if (!ts) return '';
+  const d = new Date(ts.replace(' ','T') + 'Z');
+  if (isNaN(d.getTime())) return '';
+  const diff = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff/60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
+  if (diff < 86400*30) return Math.floor(diff/86400) + 'd ago';
+  return d.toLocaleDateString();
+}
+
+function renderNotifRow(n, compact) {
+  const isUnread = !n.read_at;
+  const icon = notifIcon(n.event_type);
+  const isPastDue = !n.cleared_at && n.created_at && (Date.now() - new Date(n.created_at.replace(' ','T') + 'Z').getTime() > 5 * 86400 * 1000);
+  const accent = isPastDue ? 'var(--danger)' : (n.priority === 'urgent' ? 'var(--danger)' : (isUnread ? 'var(--amber)' : 'var(--border)'));
+  const padding = compact ? '8px 12px' : '12px 14px';
+  const titleSize = compact ? '13px' : '14px';
+  const msgSize = compact ? '11px' : '12px';
+  return `<div onclick="notifClick(${n.id},'${n.source_type}',${n.source_id})" style="cursor:pointer;padding:${padding};border-bottom:1px solid var(--border);border-left:3px solid ${accent};background:${isUnread?'var(--bg-card)':'transparent'};display:flex;gap:10px;align-items:flex-start" onmouseover="this.style.background='var(--bg-surface)'" onmouseout="this.style.background='${isUnread?'var(--bg-card)':'transparent'}'">
+    <div style="font-size:18px;flex-shrink:0;line-height:1.2">${icon}</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:${titleSize};font-weight:${isUnread?'600':'400'};color:var(--text);line-height:1.3">${escapeHtml(n.title)}${isPastDue?' <span style="color:var(--danger);font-size:10px;font-weight:700">PAST DUE</span>':''}</div>
+      ${n.message ? `<div style="font-size:${msgSize};color:var(--text-muted);margin-top:2px;line-height:1.3">${escapeHtml(n.message).substring(0,140)}${n.message.length>140?'...':''}</div>` : ''}
+      <div style="font-size:10px;color:var(--text-faint);margin-top:4px">${notifTimeAgo(n.created_at)}</div>
+    </div>
+    ${!n.cleared_at ? `<button onclick="event.stopPropagation();notifClear(${n.id})" title="Clear" style="background:transparent;border:none;color:var(--text-faint);cursor:pointer;font-size:14px;padding:2px 6px;border-radius:3px" onmouseover="this.style.background='var(--bg-surface)';this.style.color='var(--text)'" onmouseout="this.style.background='transparent';this.style.color='var(--text-faint)'">✕</button>` : ''}
+  </div>`;
+}
+
+async function notifClick(notifId, sourceType, sourceId) {
+  // Mark as read, then navigate to source
+  try { await api('PATCH', '/api/notifications/' + notifId + '/read', {}); } catch(e){}
+  refreshNotifBadge();
+  toggleNotifDropdown();
+  if (sourceType === 'project' && sourceId) {
+    showPage('projects', document.getElementById('nav-projects'));
+    setTimeout(() => { if (typeof openProjectDetail === 'function') openProjectDetail(sourceId); }, 200);
+  } else if (sourceType === 'quote' && sourceId) {
+    showPage('sales', document.getElementById('nav-sales'));
+    setTimeout(() => { if (typeof quotesOpenEdit === 'function') quotesOpenEdit(sourceId); }, 200);
+  } else if (sourceType === 'workflow_task' && sourceId) {
+    // Need to find which project this task belongs to — simplest: refresh data so the user can use Notifications page
+    showPage('notifications', document.getElementById('nav-notifications'));
+  } else if (sourceType === 'pto_request') {
+    showPage('adminPto', document.getElementById('nav-adminPto'));
+  } else {
+    showPage('notifications', document.getElementById('nav-notifications'));
+  }
+}
+
+async function notifClear(id) {
+  try {
+    await api('PATCH', '/api/notifications/' + id + '/clear', {});
+    refreshNotifBadge();
+    // Re-render whichever view is active
+    if ($('notifDropdown') && $('notifDropdown').style.display === 'block') {
+      renderNotifDropdownContent();
+    }
+    if (document.querySelector('#page-notifications.active')) {
+      loadNotificationsPage();
+    }
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function notifMarkAllRead() {
+  try {
+    await api('PATCH', '/api/notifications/mark-all-read', {});
+    showToast('Marked all as read.', 'success');
+    refreshNotifBadge();
+    renderNotifDropdownContent();
+    if (document.querySelector('#page-notifications.active')) loadNotificationsPage();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function notifClearAll() {
+  if (!await confirmModal('Clear all read notifications?', { title: 'Clear Read', okLabel: 'Clear All' })) return;
+  try {
+    await api('PATCH', '/api/notifications/clear-all', {});
+    showToast('Cleared.', 'success');
+    refreshNotifBadge();
+    if (document.querySelector('#page-notifications.active')) loadNotificationsPage();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ─── NOTIFICATIONS PAGE ──────────────────────────────────────────────────────
+
+function notifSetTab(tab, btn) {
+  _notifTab = tab;
+  document.querySelectorAll('#page-notifications .tab-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  loadNotificationsPage();
+}
+
+async function loadNotificationsPage() {
+  const body = $('notif-page-body');
+  if (!body) return;
+  body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-faint)">Loading...</div>';
+  try {
+    // Update unread/past-due counts in tab labels
+    try {
+      const c = await api('GET', '/api/notifications/count');
+      if ($('notif-unread-count')) $('notif-unread-count').textContent = '(' + (c.unread || 0) + ')';
+      if ($('notif-pastdue-count')) $('notif-pastdue-count').textContent = '(' + (c.past_due || 0) + ')';
+    } catch(e){}
+    const r = await api('GET', '/api/notifications?tab=' + _notifTab);
+    const rows = r.rows || [];
+    if (!rows.length) {
+      const empty = {
+        unread: '🎉 All caught up. No unread notifications.',
+        past_due: '👍 No past-due items.',
+        cleared: 'Nothing in the cleared archive yet.',
+        all: 'No notifications yet.'
+      };
+      body.innerHTML = '<div style="padding:60px 20px;text-align:center;color:var(--text-faint);font-size:14px">' + (empty[_notifTab]||'No notifications.') + '</div>';
+      return;
+    }
+    body.innerHTML = rows.map(n => renderNotifRow(n, false)).join('');
+  } catch(e) {
+    body.innerHTML = '<div style="padding:30px;text-align:center;color:var(--danger)">Error: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+// Hook into existing setupUI to start polling on login
+const _origSetupUI = window.setupUI;
+window.setupUI = function() {
+  if (typeof _origSetupUI === 'function') _origSetupUI();
+  try { startNotifPolling(); } catch(e){}
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ SALES DASHBOARD ══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _sdRepsCache = null;
+
+function _sdCurrentMonthKey() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+}
+
+async function loadSalesDashboard() {
+  const monthEl = $('sd-month');
+  if (monthEl && !monthEl.value) monthEl.value = _sdCurrentMonthKey();
+
+  // Populate rep filter (managers/admins only)
+  const repFilter = $('sd-rep-filter');
+  if (repFilter && !_sdRepsCache && currentUser && (['manager','admin','global_admin'].includes(currentUser.role_type))) {
+    try {
+      const users = await api('GET', '/api/users');
+      _sdRepsCache = (users||[]).filter(u => ['sales','manager','admin','global_admin'].includes(u.role_type));
+      // Build rep options
+      const opts = ['<option value="">— My Pipeline —</option>',
+                    '<option value="all">All Reps (Roll-up)</option>'];
+      _sdRepsCache.forEach(u => {
+        opts.push(`<option value="${u.id}">${escapeHtml(((u.first_name||'')+' '+(u.last_name||'')).trim())}</option>`);
+      });
+      repFilter.innerHTML = opts.join('');
+      repFilter.style.display = 'inline-block';
+    } catch(e){}
+  }
+
+  const month = monthEl ? monthEl.value : _sdCurrentMonthKey();
+  const rep = repFilter ? repFilter.value : '';
+  const params = ['month=' + encodeURIComponent(month)];
+  if (rep) params.push('rep=' + encodeURIComponent(rep));
+
+  const content = $('sd-content');
+  content.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-faint)">Loading...</div>';
+  try {
+    const data = await api('GET', '/api/sales-dashboard?' + params.join('&'));
+    sdRender(data);
+  } catch(e) {
+    content.innerHTML = '<div style="padding:40px;text-align:center;color:var(--danger)">Error: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function sdRender(data) {
+  const content = $('sd-content');
+  const p = data.pipeline || {};
+  const fmt$ = (n) => '$' + (parseFloat(n)||0).toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0});
+
+  // Update title
+  const titleEl = $('sd-title');
+  const subEl = $('sd-subtitle');
+  if (titleEl) {
+    if (data.viewing_scope === 'all') {
+      titleEl.textContent = '📊 All Sales — Roll-up';
+      if (subEl) subEl.textContent = 'Aggregated pipeline across all reps.';
+    } else if (data.viewing_scope === 'specific') {
+      titleEl.textContent = '📊 Sales: ' + (data.viewing_rep_name || 'Rep');
+      if (subEl) subEl.textContent = `Reviewing pipeline for ${data.viewing_rep_name || 'rep'}.`;
+    } else {
+      titleEl.textContent = '📊 My Sales';
+      if (subEl) subEl.textContent = 'Personal pipeline, follow-up queue, and monthly KPIs.';
+    }
+  }
+
+  const fb = data.followups || {fresh:[],aging:[],urgent:[],stale:[]};
+  const totalFollowups = fb.fresh.length + fb.aging.length + fb.urgent.length + fb.stale.length;
+
+  content.innerHTML = `
+    <!-- KPI tiles -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:1.25rem">
+      <div class="card" style="padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">Drafts</div>
+        <div style="font-size:28px;font-weight:700;color:#888">${p.drafts}</div>
+      </div>
+      <div class="card" style="padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">Sent / Active</div>
+        <div style="font-size:28px;font-weight:700;color:#2980b9">${p.sent}</div>
+      </div>
+      <div class="card" style="padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">Awarded This Month</div>
+        <div style="font-size:28px;font-weight:700;color:var(--green)">${p.awarded_this_month_count}</div>
+        <div style="font-size:11px;color:var(--text-muted)">${fmt$(p.awarded_this_month_value)}</div>
+      </div>
+      <div class="card" style="padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">Lost This Month</div>
+        <div style="font-size:28px;font-weight:700;color:var(--danger)">${p.lost_this_month}</div>
+      </div>
+      <div class="card" style="padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">Win Rate</div>
+        <div style="font-size:28px;font-weight:700;color:var(--amber)">${p.win_rate_pct}%</div>
+        <div style="font-size:11px;color:var(--text-muted)">awarded / (awarded+lost)</div>
+      </div>
+      <div class="card" style="padding:14px;text-align:center">
+        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">Sent This Month</div>
+        <div style="font-size:28px;font-weight:700;color:var(--text)">${p.sent_this_month_count}</div>
+        <div style="font-size:11px;color:var(--text-muted)">${fmt$(p.sent_this_month_value)}</div>
+      </div>
+    </div>
+
+    <!-- Follow-up queue -->
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-header">
+        <span class="card-title">⏰ Follow-up Queue <span style="font-size:12px;color:var(--text-muted);font-weight:400">(${totalFollowups} sent quotes)</span></span>
+      </div>
+      ${totalFollowups === 0 ? '<div style="padding:20px;text-align:center;color:var(--text-faint);font-size:13px">No outstanding sent quotes — clean queue.</div>' :
+        sdRenderFollowupBuckets(fb)
+      }
+    </div>
+
+    <!-- Active pipeline -->
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-header">
+        <span class="card-title">🏗 Active Awarded Pipeline <span style="font-size:12px;color:var(--text-muted);font-weight:400">(${(data.active_pipeline||[]).length} jobs)</span></span>
+      </div>
+      ${sdRenderPipeline(data.active_pipeline || [])}
+    </div>
+
+    <!-- Quotes this month -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">📝 My Quotes This Month <span style="font-size:12px;color:var(--text-muted);font-weight:400">(${(data.my_quotes||[]).length})</span></span>
+      </div>
+      ${sdRenderQuoteList(data.my_quotes || [])}
+    </div>
+  `;
+}
+
+function sdRenderFollowupBuckets(fb) {
+  let html = '';
+  const buckets = [
+    { rows: fb.urgent.concat(fb.stale).filter(q => q.age_days >= 30), label: '⚠ 30+ days idle — likely lost', color: 'var(--danger)', highlight: true },
+    { rows: fb.urgent.filter(q => q.age_days >= 14 && q.age_days < 30), label: '🔴 14+ days idle — urgent', color: 'var(--danger)', highlight: false },
+    { rows: fb.urgent.filter(q => q.age_days >= 7 && q.age_days < 14), label: '🟡 7-14 days idle', color: 'var(--amber)', highlight: false },
+    { rows: fb.aging, label: '🟢 3-7 days idle', color: 'var(--green)', highlight: false },
+    { rows: fb.fresh, label: '🆕 Under 3 days', color: 'var(--text-muted)', highlight: false }
+  ];
+  buckets.forEach(b => {
+    if (!b.rows.length) return;
+    html += `<div style="margin-bottom:8px">
+      <div style="font-size:11px;color:${b.color};text-transform:uppercase;letter-spacing:.05em;font-weight:600;padding:6px 10px;border-bottom:1px solid var(--border)">${b.label} (${b.rows.length})</div>
+      <div>${b.rows.map(q => sdFollowupRow(q, b.highlight)).join('')}</div>
+    </div>`;
+  });
+  return html;
+}
+
+function sdFollowupRow(q, highlight) {
+  return `<div onclick="if(typeof quotesOpenEdit==='function'){showPage('sales',document.getElementById('nav-sales'));setTimeout(()=>quotesOpenEdit(${q.id}),200);}" style="display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border);${highlight?'background:rgba(231,76,60,.08)':''}" onmouseover="this.style.background='var(--bg-surface)'" onmouseout="this.style.background='${highlight?'rgba(231,76,60,.08)':'transparent'}'">
+    <span style="font-family:monospace;font-size:11px;color:var(--amber);min-width:60px">${escapeHtml(q.quote_number||'#'+q.id)}</span>
+    <span style="flex:1;font-size:13px"><strong>${escapeHtml(q.client_name||'—')}</strong>${q.project_name ? ` <span style="color:var(--text-muted);font-size:11px">· ${escapeHtml(q.project_name).substring(0,40)}</span>` : ''}</span>
+    <span style="font-size:12px;color:var(--text-muted)">${q.total ? '$'+q.total : '—'}</span>
+    <span style="font-size:11px;color:${q.age_days >= 14 ? 'var(--danger)' : q.age_days >= 7 ? 'var(--amber)' : 'var(--text-muted)'};min-width:60px;text-align:right">${q.age_days}d</span>
+    <button class="btn btn-sm" style="background:#27ae60;color:#fff;border-color:#27ae60;padding:3px 8px;font-size:10px" onclick="event.stopPropagation();sdQuickAccept(${q.id})">✓ Accept</button>
+    <button class="btn btn-danger btn-sm" style="padding:3px 8px;font-size:10px" onclick="event.stopPropagation();sdQuickLost(${q.id})">✗ Lost</button>
+  </div>`;
+}
+
+async function sdQuickAccept(quoteId) {
+  if (typeof quotesSetStatus === 'function') {
+    quotesSetStatus(quoteId, 'accepted');
+  }
+}
+
+async function sdQuickLost(quoteId) {
+  if (typeof quotesSetStatus === 'function') {
+    quotesSetStatus(quoteId, 'declined');
+  }
+  // Reload dashboard after a short delay so the row disappears
+  setTimeout(loadSalesDashboard, 1500);
+}
+
+function sdRenderPipeline(rows) {
+  if (!rows.length) return '<div style="padding:20px;text-align:center;color:var(--text-faint);font-size:13px">No active jobs in your pipeline.</div>';
+  const statusColors = {
+    awarded:'#2980b9', shop_drawings:'#8e44ad', scheduled:'#9b59b6', in_progress:'var(--amber)',
+    punch_list:'#e67e22', complete:'var(--green)'
+  };
+  return `<div class="table-wrap"><table class="data-table">
+    <thead><tr><th>Job #</th><th>Customer</th><th>Type</th><th>Status</th><th>Material</th><th style="text-align:right">Value</th></tr></thead>
+    <tbody>${rows.map(r => {
+      const sc = statusColors[r.status] || 'var(--text-muted)';
+      const typeIcon = r.job_type === 'quick_job' ? '⚡' : '📋';
+      return `<tr style="cursor:pointer" onclick="${r.job_type==='quick_job'?`showPage('quickJobs',document.getElementById('nav-quickJobs'));setTimeout(()=>openQuickJobDetail(${r.id}),200)`:`showPage('projects',document.getElementById('nav-projects'));setTimeout(()=>openProjectDetail(${r.id}),200)`}">
+        <td style="font-family:monospace;font-size:11px;color:var(--amber)">${escapeHtml(r.job_number||'—')}</td>
+        <td><strong>${escapeHtml(r.customer_name||'—')}</strong><br><span style="font-size:11px;color:var(--text-muted)">${escapeHtml(r.project_name||'')}</span></td>
+        <td>${typeIcon} ${r.job_type === 'quick_job' ? 'Quick' : 'Project'}</td>
+        <td><span style="font-size:10px;padding:2px 6px;border-radius:3px;background:${sc}22;color:${sc};border:1px solid ${sc}44;text-transform:uppercase">${escapeHtml(r.status||'—')}</span></td>
+        <td style="font-size:11px;color:var(--text-muted)">${escapeHtml(r.material_status||'—')}</td>
+        <td style="text-align:right;font-weight:600">${r.contract_value ? '$'+parseFloat(r.contract_value).toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0}) : '—'}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
+}
+
+function sdRenderQuoteList(rows) {
+  if (!rows.length) return '<div style="padding:20px;text-align:center;color:var(--text-faint);font-size:13px">No quotes for this rep/month.</div>';
+  const statusColors = {draft:'#888',sent:'#2980b9',accepted:'var(--green)',declined:'var(--danger)'};
+  return `<div class="table-wrap"><table class="data-table">
+    <thead><tr><th>Quote #</th><th>Client</th><th>Status</th><th>Date</th><th style="text-align:right">Total</th></tr></thead>
+    <tbody>${rows.map(q => {
+      const sc = statusColors[q.status] || '#888';
+      return `<tr style="cursor:pointer" onclick="showPage('sales',document.getElementById('nav-sales'));setTimeout(()=>quotesOpenEdit(${q.id}),200)">
+        <td style="font-family:monospace;font-size:11px;color:var(--amber)">${escapeHtml(q.quote_number||'#'+q.id)}</td>
+        <td><strong>${escapeHtml(q.client_name||'—')}</strong>${q.project_name ? `<br><span style="font-size:11px;color:var(--text-muted)">${escapeHtml(q.project_name).substring(0,60)}</span>` : ''}</td>
+        <td><span style="font-size:10px;padding:2px 6px;border-radius:3px;background:${sc}22;color:${sc};border:1px solid ${sc}44;text-transform:uppercase">${escapeHtml(q.status||'draft')}</span></td>
+        <td style="font-size:11px;color:var(--text-muted)">${q.updated_at ? fmtDate(q.updated_at.split(' ')[0]) : '—'}</td>
+        <td style="text-align:right;font-weight:600">${q.total ? '$'+q.total : '—'}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
+}
+
+// Expose Phase 1.6 functions
+(function() {
+  try {
+    ['startNotifPolling','refreshNotifBadge','toggleNotifDropdown',
+     'renderNotifDropdownContent','notifClick','notifClear','notifMarkAllRead','notifClearAll',
+     'notifSetTab','loadNotificationsPage','notifIcon','notifTimeAgo','renderNotifRow',
+     'loadSalesDashboard','sdRender','sdRenderFollowupBuckets','sdFollowupRow',
+     'sdQuickAccept','sdQuickLost','sdRenderPipeline','sdRenderQuoteList'
+    ].forEach(function(name){
+      try { if (typeof eval(name) === 'function') window[name] = eval(name); } catch(e) {}
+    });
+    console.log('[KVM] Phase 1.6 functions exposed');
+  } catch(e) { console.error('[KVM] Phase 1.6 exposure failed:', e); }
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PHASE 1A.6 — EQUIPMENT CATALOG + VENDORS + PO GENERATOR ══════════════════
+// ═══ PHASE 1A.5.1 — Material order date awareness ═════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _equipVendorsCache = [];
+let _equipCatalogCache = [];
+
+// ─── Settings: Equipment Catalog tab ─────────────────────────────────────────
+
+async function loadEquipmentSettings() {
+  try {
+    _equipVendorsCache = await api('GET', '/api/equipment-vendors');
+    renderEquipVendors();
+  } catch(e) {
+    $('equipVendorsContainer').innerHTML = '<div style="color:var(--danger)">Error loading vendors: ' + escapeHtml(e.message) + '</div>';
+  }
+  try {
+    _equipCatalogCache = await api('GET', '/api/equipment-catalog');
+    renderEquipCatalog();
+  } catch(e) {
+    $('equipCatalogContainer').innerHTML = '<div style="color:var(--danger)">Error loading catalog: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function renderEquipVendors() {
+  const el = $('equipVendorsContainer');
+  if (!el) return;
+  if (!_equipVendorsCache.length) {
+    el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-faint);font-size:13px">No vendors yet. Click + Add Vendor to create one.</div>';
+    return;
+  }
+  el.innerHTML = `<div class="table-wrap"><table class="data-table">
+    <thead><tr><th>Vendor</th><th>Account #</th><th>Contact</th><th>Email</th><th>Phone</th><th></th></tr></thead>
+    <tbody>${_equipVendorsCache.map(v => `<tr style="cursor:pointer" onclick="openEditEquipmentVendor(${v.id})">
+      <td><strong>${escapeHtml(v.company_name)}</strong></td>
+      <td style="font-family:monospace;font-size:11px;color:var(--text-muted)">${escapeHtml(v.account_number||'')}</td>
+      <td style="font-size:12px">${escapeHtml(v.contact_name||'')}</td>
+      <td style="font-size:11px;color:var(--text-muted)">${escapeHtml(v.contact_email||v.main_email||'')}</td>
+      <td style="font-size:11px;color:var(--text-muted)">${escapeHtml(v.contact_phone||v.main_phone||'')}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditEquipmentVendor(${v.id})">Edit</button></td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+function renderEquipCatalog() {
+  const el = $('equipCatalogContainer');
+  if (!el) return;
+  if (!_equipCatalogCache.length) {
+    el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-faint);font-size:13px">No equipment yet. Click + Add Equipment to add common items.</div>';
+    return;
+  }
+  el.innerHTML = `<div class="table-wrap"><table class="data-table">
+    <thead><tr><th>Equipment</th><th>Category</th><th>Default Vendor</th><th>Daily</th><th>Weekly</th><th>Monthly</th><th></th></tr></thead>
+    <tbody>${_equipCatalogCache.map(c => `<tr style="cursor:pointer" onclick="openEditEquipmentItem(${c.id})">
+      <td><strong>${escapeHtml(c.name)}</strong>${c.notes ? `<br><span style="font-size:10px;color:var(--text-faint)">${escapeHtml(c.notes).substring(0,80)}</span>` : ''}</td>
+      <td style="font-size:11px;color:var(--text-muted);text-transform:uppercase">${escapeHtml(c.category||'—')}</td>
+      <td style="font-size:12px">${escapeHtml(c.vendor_name||'—')}</td>
+      <td style="font-size:12px">${c.daily_rate ? '$'+parseFloat(c.daily_rate).toFixed(2) : '—'}</td>
+      <td style="font-size:12px">${c.weekly_rate ? '$'+parseFloat(c.weekly_rate).toFixed(2) : '—'}</td>
+      <td style="font-size:12px">${c.monthly_rate ? '$'+parseFloat(c.monthly_rate).toFixed(2) : '—'}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditEquipmentItem(${c.id})">Edit</button></td>
+    </tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+// ─── Vendor add/edit modal ─────────────────────────────────────────────────
+
+function openAddEquipmentVendor() {
+  $('equipVendorModalTitle').textContent = 'Add Equipment Vendor';
+  $('ev-id').value = 0;
+  ['ev-company','ev-main-phone','ev-main-email','ev-address','ev-account','ev-contact-name','ev-contact-email','ev-contact-phone','ev-notes'].forEach(id => { const e=$(id); if (e) e.value=''; });
+  $('ev-delete-btn').style.display = 'none';
+  openModal('equipVendorModal');
+}
+
+function openEditEquipmentVendor(vendorId) {
+  const v = _equipVendorsCache.find(x => x.id === vendorId);
+  if (!v) return;
+  $('equipVendorModalTitle').textContent = 'Edit ' + v.company_name;
+  $('ev-id').value = v.id;
+  $('ev-company').value = v.company_name || '';
+  $('ev-main-phone').value = v.main_phone || '';
+  $('ev-main-email').value = v.main_email || '';
+  $('ev-address').value = v.address || '';
+  $('ev-account').value = v.account_number || '';
+  $('ev-contact-name').value = v.contact_name || '';
+  $('ev-contact-email').value = v.contact_email || '';
+  $('ev-contact-phone').value = v.contact_phone || '';
+  $('ev-notes').value = v.notes || '';
+  $('ev-delete-btn').style.display = 'inline-block';
+  openModal('equipVendorModal');
+}
+
+async function saveEquipmentVendor() {
+  const id = parseInt($('ev-id').value) || 0;
+  const payload = {
+    company_name: $('ev-company').value.trim(),
+    main_phone: $('ev-main-phone').value.trim(),
+    main_email: $('ev-main-email').value.trim(),
+    address: $('ev-address').value.trim(),
+    account_number: $('ev-account').value.trim(),
+    contact_name: $('ev-contact-name').value.trim(),
+    contact_email: $('ev-contact-email').value.trim(),
+    contact_phone: $('ev-contact-phone').value.trim(),
+    notes: $('ev-notes').value.trim()
+  };
+  if (!payload.company_name) { showToast('Vendor name required.','error'); return; }
+  try {
+    if (id) await api('PUT', '/api/equipment-vendors/' + id, payload);
+    else await api('POST', '/api/equipment-vendors', payload);
+    closeModal('equipVendorModal');
+    showToast('Saved.','success');
+    loadEquipmentSettings();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteEquipmentVendor() {
+  const id = parseInt($('ev-id').value) || 0;
+  if (!id) return;
+  if (!await confirmModal('Remove this vendor? Existing POs that reference it will keep the vendor name on file, but the vendor will no longer appear in dropdowns.', { title:'Remove Vendor', danger:true, okLabel:'Remove' })) return;
+  try {
+    await api('DELETE', '/api/equipment-vendors/' + id);
+    closeModal('equipVendorModal');
+    showToast('Removed.','success');
+    loadEquipmentSettings();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ─── Catalog item add/edit modal ───────────────────────────────────────────
+
+function _populateEquipVendorSelect(selectId, currentId) {
+  const sel = $(selectId);
+  if (!sel) return;
+  sel.innerHTML = '<option value="0">— none —</option>' +
+    _equipVendorsCache.map(v => `<option value="${v.id}" ${v.id===currentId?'selected':''}>${escapeHtml(v.company_name)}</option>`).join('');
+}
+
+function openAddEquipmentItem() {
+  $('equipCatalogModalTitle').textContent = 'Add Equipment';
+  $('ec-id').value = 0;
+  $('ec-name').value = '';
+  $('ec-category').value = 'aerial';
+  $('ec-daily').value = '';
+  $('ec-weekly').value = '';
+  $('ec-monthly').value = '';
+  $('ec-notes').value = '';
+  _populateEquipVendorSelect('ec-vendor', 0);
+  $('ec-delete-btn').style.display = 'none';
+  openModal('equipCatalogModal');
+}
+
+function openEditEquipmentItem(itemId) {
+  const c = _equipCatalogCache.find(x => x.id === itemId);
+  if (!c) return;
+  $('equipCatalogModalTitle').textContent = 'Edit ' + c.name;
+  $('ec-id').value = c.id;
+  $('ec-name').value = c.name || '';
+  $('ec-category').value = c.category || 'aerial';
+  $('ec-daily').value = c.daily_rate || '';
+  $('ec-weekly').value = c.weekly_rate || '';
+  $('ec-monthly').value = c.monthly_rate || '';
+  $('ec-notes').value = c.notes || '';
+  _populateEquipVendorSelect('ec-vendor', c.vendor_id);
+  $('ec-delete-btn').style.display = 'inline-block';
+  openModal('equipCatalogModal');
+}
+
+async function saveEquipmentItem() {
+  const id = parseInt($('ec-id').value) || 0;
+  const payload = {
+    name: $('ec-name').value.trim(),
+    vendor_id: parseInt($('ec-vendor').value) || 0,
+    category: $('ec-category').value,
+    daily_rate: parseFloat($('ec-daily').value) || 0,
+    weekly_rate: parseFloat($('ec-weekly').value) || 0,
+    monthly_rate: parseFloat($('ec-monthly').value) || 0,
+    notes: $('ec-notes').value.trim()
+  };
+  if (!payload.name) { showToast('Equipment name required.','error'); return; }
+  try {
+    if (id) await api('PUT', '/api/equipment-catalog/' + id, payload);
+    else await api('POST', '/api/equipment-catalog', payload);
+    closeModal('equipCatalogModal');
+    showToast('Saved.','success');
+    loadEquipmentSettings();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteEquipmentItem() {
+  const id = parseInt($('ec-id').value) || 0;
+  if (!id) return;
+  if (!await confirmModal('Remove this equipment item from the catalog? Existing POs that reference it keep their item lines.', { title:'Remove Equipment', danger:true, okLabel:'Remove' })) return;
+  try {
+    await api('DELETE', '/api/equipment-catalog/' + id);
+    closeModal('equipCatalogModal');
+    showToast('Removed.','success');
+    loadEquipmentSettings();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ─── Project detail: Equipment POs section ─────────────────────────────────
+
+let _projEquipmentPOs = [];
+
+async function loadProjectEquipmentPOs(projectId) {
+  const el = $('proj-equipment-list');
+  if (!el) return;
+  try {
+    _projEquipmentPOs = await api('GET', '/api/equipment-pos?project_id=' + projectId);
+    renderProjectEquipmentPOs();
+  } catch(e) {
+    el.innerHTML = '<div style="padding:20px;color:var(--danger);font-size:12px">Error: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function renderProjectEquipmentPOs() {
+  const el = $('proj-equipment-list');
+  if (!el) return;
+  if (!_projEquipmentPOs.length) {
+    el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-faint);font-size:13px">No equipment POs yet. Click + New Equipment PO to generate one.</div>';
+    return;
+  }
+  const statusColors = { draft:'#888', sent:'#2980b9', confirmed:'var(--green)', cancelled:'var(--danger)' };
+  let total = 0;
+  _projEquipmentPOs.forEach(po => { if (po.status !== 'cancelled') total += parseFloat(po.total_estimated_cost || 0); });
+  el.innerHTML = `<div class="table-wrap"><table class="data-table">
+    <thead><tr><th>PO #</th><th>Vendor</th><th>Equipment</th><th>Delivery</th><th>Status</th><th style="text-align:right">Est. Cost</th><th></th></tr></thead>
+    <tbody>${_projEquipmentPOs.map(po => {
+      const sc = statusColors[po.status] || '#888';
+      const itemSummary = (po.items||[]).map(i => i.description).join(', ').substring(0,60);
+      return `<tr style="cursor:pointer" onclick="openEditEquipmentPO(${po.id})">
+        <td style="font-family:monospace;font-size:11px;color:var(--amber)">${escapeHtml(po.po_number)}</td>
+        <td style="font-size:12px">${escapeHtml(po.vendor_name||po.vendor_name_resolved||'—')}</td>
+        <td style="font-size:12px;color:var(--text-muted)">${escapeHtml(itemSummary||'—')}</td>
+        <td style="font-size:11px">${po.delivery_date ? fmtDate(po.delivery_date) : '—'}</td>
+        <td><span style="font-size:10px;padding:2px 7px;border-radius:3px;background:${sc}22;color:${sc};border:1px solid ${sc}44;text-transform:uppercase;font-weight:700">${po.status}</span></td>
+        <td style="text-align:right;font-weight:600">$${parseFloat(po.total_estimated_cost||0).toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})}</td>
+        <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditEquipmentPO(${po.id})">${po.status==='draft'?'Edit':'View'}</button></td>
+      </tr>`;
+    }).join('')}</tbody>
+    <tfoot><tr><td colspan="5" style="text-align:right;font-weight:700;color:var(--text-muted)">Total committed:</td><td style="text-align:right;font-weight:700;color:var(--amber)">$${total.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})}</td><td></td></tr></tfoot>
+  </table></div>`;
+}
+
+// ─── Equipment PO Builder Modal ────────────────────────────────────────────
+
+// Make window._epoCurrentItems window-scoped from the start so inline event handlers
+// in rendered tables (oninput="window._epoCurrentItems[idx]...") can reach it
+window._epoCurrentItems = [];
+window._epoCurrentPO = null;
+
+async function openNewEquipmentPO(projectId) {
+  // Load vendors + catalog + project context
+  try {
+    if (!_equipVendorsCache.length) _equipVendorsCache = await api('GET', '/api/equipment-vendors');
+    if (!_equipCatalogCache.length) _equipCatalogCache = await api('GET', '/api/equipment-catalog');
+  } catch(e){}
+  const proj = currentProjectData || (projectId ? await api('GET', '/api/projects/' + projectId) : null);
+  if (!proj) { showToast('Could not load project.', 'error'); return; }
+
+  window._epoCurrentItems = [];
+  window._epoCurrentPO = null;
+
+  $('equipPOModalTitle').textContent = 'New Equipment PO';
+  $('epo-id').value = 0;
+  $('epo-project-id').value = proj.id;
+  $('epo-number').value = '(assigned on save)';
+  $('epo-status').value = 'draft';
+  $('epo-job-name').value = (proj.job_number ? proj.job_number + ' — ' : '') + (proj.project_name || proj.customer_name || '');
+  $('epo-job-address').value = proj.location || '';
+
+  // Default delivery date: 1 day before material_expected_date if known
+  let defaultDelivery = '';
+  if (proj.material_expected_date) {
+    const d = new Date(proj.material_expected_date + 'T00:00:00');
+    d.setDate(d.getDate() - 1);
+    defaultDelivery = d.toISOString().split('T')[0];
+  } else {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    defaultDelivery = d.toISOString().split('T')[0];
+  }
+  $('epo-delivery-date').value = defaultDelivery;
+  $('epo-delivery-window').value = '';
+  $('epo-return-date').value = '';
+  $('epo-delivery-notes').value = '';
+
+  // Site contact (foreman)
+  let foremanName = proj.foreman_name || '';
+  let foremanPhone = '';
+  if (proj.foreman_id) {
+    try {
+      const fm = await api('GET', '/api/users/' + proj.foreman_id).catch(() => null);
+      if (fm) {
+        foremanName = ((fm.first_name||'') + ' ' + (fm.last_name||'')).trim() || foremanName;
+        foremanPhone = fm.phone || '';
+      }
+    } catch(e){}
+  }
+  $('epo-lead-name').value = foremanName;
+  $('epo-lead-phone').value = foremanPhone;
+
+  // Office contact (sales rep — project's created_by)
+  let repName = '', repPhone = '', repEmail = '';
+  if (proj.created_by) {
+    try {
+      const r = await api('GET', '/api/users/' + proj.created_by).catch(() => null);
+      if (r) {
+        repName = ((r.first_name||'') + ' ' + (r.last_name||'')).trim();
+        repPhone = r.phone || '';
+        repEmail = r.email || '';
+      }
+    } catch(e){}
+  }
+  $('epo-sales-name').value = repName;
+  $('epo-sales-phone').value = repPhone;
+  $('epo-sales-email').value = repEmail;
+
+  $('epo-notes').value = '';
+
+  // Populate vendor dropdown
+  _populateEquipVendorSelect('epo-vendor', 0);
+
+  // Reset items
+  renderEPOItems();
+
+  // Button visibility: new PO = save + print, no send/confirm/cancel/delete
+  $('epo-save-btn').style.display = 'inline-block';
+  $('epo-save-btn').textContent = 'Save Draft';
+  $('epo-send-btn').style.display = 'none';
+  $('epo-confirm-btn').style.display = 'none';
+  $('epo-delete-btn').style.display = 'none';
+  $('epo-cancel-btn').style.display = 'none';
+
+  openModal('equipPOModal');
+}
+
+async function openEditEquipmentPO(poId) {
+  try {
+    if (!_equipVendorsCache.length) _equipVendorsCache = await api('GET', '/api/equipment-vendors');
+    if (!_equipCatalogCache.length) _equipCatalogCache = await api('GET', '/api/equipment-catalog');
+    const po = await api('GET', '/api/equipment-pos/' + poId);
+    window._epoCurrentPO = po;
+    window._epoCurrentItems = (po.items || []).map(i => ({
+      catalog_id: i.catalog_id || 0,
+      description: i.description || '',
+      qty: i.qty || 1,
+      rate: i.rate || 0,
+      rate_period: i.rate_period || 'day'
+    }));
+
+    $('equipPOModalTitle').textContent = po.status === 'draft' ? 'Edit Equipment PO ' + po.po_number : 'Equipment PO ' + po.po_number;
+    $('epo-id').value = po.id;
+    $('epo-project-id').value = po.project_id;
+    $('epo-number').value = po.po_number;
+    $('epo-status').value = po.status;
+    $('epo-job-name').value = po.job_name;
+    $('epo-job-address').value = po.job_address;
+    $('epo-delivery-date').value = po.delivery_date || '';
+    $('epo-delivery-window').value = po.delivery_time_window || '';
+    $('epo-return-date').value = po.return_date || '';
+    $('epo-delivery-notes').value = po.delivery_notes || '';
+    $('epo-lead-name').value = po.lead_tech_name || '';
+    $('epo-lead-phone').value = po.lead_tech_phone || '';
+    $('epo-sales-name').value = po.sales_rep_name || '';
+    $('epo-sales-phone').value = po.sales_rep_phone || '';
+    $('epo-sales-email').value = po.sales_rep_email || '';
+    $('epo-notes').value = po.notes || '';
+
+    _populateEquipVendorSelect('epo-vendor', po.vendor_id);
+    renderEPOItems();
+
+    // Button visibility based on status
+    const isDraft = po.status === 'draft';
+    const isSent = po.status === 'sent';
+    const isConfirmed = po.status === 'confirmed';
+    const isCancelled = po.status === 'cancelled';
+
+    // Lock fields if not draft
+    document.querySelectorAll('#equipPOModal input:not([type=hidden]), #equipPOModal textarea, #equipPOModal select').forEach(el => {
+      if (el.id === 'epo-job-name' || el.id === 'epo-number' || el.id === 'epo-status') return; // already readonly
+      el.disabled = !isDraft;
+    });
+
+    $('epo-save-btn').style.display = isDraft ? 'inline-block' : 'none';
+    $('epo-save-btn').textContent = 'Save Draft';
+    $('epo-send-btn').style.display = isDraft ? 'inline-block' : 'none';
+    $('epo-confirm-btn').style.display = isSent ? 'inline-block' : 'none';
+    $('epo-delete-btn').style.display = (isDraft || isCancelled) ? 'inline-block' : 'none';
+    $('epo-cancel-btn').style.display = (isSent || isConfirmed) ? 'inline-block' : 'none';
+
+    openModal('equipPOModal');
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+function renderEPOItems() {
+  const el = $('epo-items-list');
+  if (!el) return;
+  if (!window._epoCurrentItems.length) {
+    el.innerHTML = '<div style="padding:14px;text-align:center;color:var(--text-faint);font-size:12px">No items yet. Click + From Catalog or + Manual Add.</div>';
+    epoUpdateTotal();
+    return;
+  }
+  el.innerHTML = '<table class="data-table" style="margin:0"><thead><tr><th style="width:40%">Description</th><th>Qty</th><th>Rate ($)</th><th>Period</th><th style="text-align:right">Est.</th><th></th></tr></thead><tbody>' +
+    window._epoCurrentItems.map((it, idx) => `<tr>
+      <td><input type="text" value="${escapeHtml(it.description||'')}" oninput="window._epoCurrentItems[${idx}].description=this.value" style="width:100%;padding:4px 6px;font-size:12px" /></td>
+      <td><input type="number" step="0.01" value="${it.qty||1}" oninput="window._epoCurrentItems[${idx}].qty=parseFloat(this.value)||1;epoUpdateTotal()" style="width:60px;padding:4px 6px;font-size:12px" /></td>
+      <td><input type="number" step="0.01" value="${it.rate||0}" oninput="window._epoCurrentItems[${idx}].rate=parseFloat(this.value)||0;epoUpdateTotal()" style="width:80px;padding:4px 6px;font-size:12px" /></td>
+      <td><select onchange="window._epoCurrentItems[${idx}].rate_period=this.value" style="padding:4px 6px;font-size:12px">
+          <option value="day" ${it.rate_period==='day'?'selected':''}>day</option>
+          <option value="week" ${it.rate_period==='week'?'selected':''}>week</option>
+          <option value="month" ${it.rate_period==='month'?'selected':''}>month</option>
+          <option value="flat" ${it.rate_period==='flat'?'selected':''}>flat</option>
+        </select></td>
+      <td style="text-align:right;font-size:12px;font-weight:600" id="epo-line-total-${idx}">$${(((it.qty||1)*(it.rate||0))).toFixed(2)}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="epoRemoveItem(${idx})" style="padding:2px 6px">✕</button></td>
+    </tr>`).join('') + '</tbody></table>';
+  epoUpdateTotal();
+}
+
+function epoUpdateTotal() {
+  let total = 0;
+  window._epoCurrentItems.forEach((it, idx) => {
+    const t = (it.qty||1) * (it.rate||0);
+    total += t;
+    const line = $('epo-line-total-' + idx);
+    if (line) line.textContent = '$' + t.toFixed(2);
+  });
+  if ($('epo-total')) $('epo-total').textContent = '$' + total.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+async function epoAddCatalogItem() {
+  if (!_equipCatalogCache.length) {
+    showToast('No catalog items yet. Add equipment in Settings → Equipment Catalog first.', 'error');
+    return;
+  }
+  // Simple picker: prompt for which item to add
+  const optsHtml = _equipCatalogCache.map((c, idx) => `<option value="${idx}">${escapeHtml(c.name)} (${c.daily_rate ? '$'+c.daily_rate+'/day' : 'no rate'})</option>`).join('');
+  // Use a small inline prompt — for simplicity, fall back to first item if confirm
+  // We'll do a minimal inline picker using a quick dropdown insertion — easier UX for v1:
+  const choice = prompt('Type the equipment name (partial match), or leave blank for the first one:', '');
+  let chosen = null;
+  if (choice && choice.trim()) {
+    const q = choice.trim().toLowerCase();
+    chosen = _equipCatalogCache.find(c => (c.name||'').toLowerCase().includes(q));
+    if (!chosen) { showToast('No catalog match for "' + choice + '". Adding blank instead.', 'error'); }
+  }
+  if (!chosen) chosen = _equipCatalogCache[0];
+  window._epoCurrentItems.push({
+    catalog_id: chosen.id,
+    description: chosen.name,
+    qty: 1,
+    rate: chosen.daily_rate || 0,
+    rate_period: 'day'
+  });
+  // If no vendor picked yet and the catalog item has one, default to it
+  const vendorSel = $('epo-vendor');
+  if (vendorSel && (parseInt(vendorSel.value)||0) === 0 && chosen.vendor_id) {
+    vendorSel.value = chosen.vendor_id;
+  }
+  renderEPOItems();
+}
+
+function epoAddBlankItem() {
+  window._epoCurrentItems.push({
+    catalog_id: 0,
+    description: '',
+    qty: 1,
+    rate: 0,
+    rate_period: 'day'
+  });
+  renderEPOItems();
+}
+
+function epoRemoveItem(idx) {
+  window._epoCurrentItems.splice(idx, 1);
+  renderEPOItems();
+}
+
+function _epoBuildPayload() {
+  return {
+    project_id: parseInt($('epo-project-id').value) || 0,
+    vendor_id: parseInt($('epo-vendor').value) || 0,
+    job_address: $('epo-job-address').value.trim(),
+    delivery_date: $('epo-delivery-date').value,
+    delivery_time_window: $('epo-delivery-window').value.trim(),
+    return_date: $('epo-return-date').value,
+    delivery_notes: $('epo-delivery-notes').value.trim(),
+    lead_tech_name: $('epo-lead-name').value.trim(),
+    lead_tech_phone: $('epo-lead-phone').value.trim(),
+    sales_rep_name: $('epo-sales-name').value.trim(),
+    sales_rep_phone: $('epo-sales-phone').value.trim(),
+    sales_rep_email: $('epo-sales-email').value.trim(),
+    notes: $('epo-notes').value.trim(),
+    items: window._epoCurrentItems
+  };
+}
+
+async function saveEquipmentPO() {
+  const id = parseInt($('epo-id').value) || 0;
+  const payload = _epoBuildPayload();
+  if (!payload.vendor_id) { showToast('Pick a vendor.','error'); return; }
+  if (!window._epoCurrentItems.length) { showToast('Add at least one item.','error'); return; }
+  try {
+    if (id) {
+      await api('PUT', '/api/equipment-pos/' + id, payload);
+      showToast('Saved.','success');
+    } else {
+      const r = await api('POST', '/api/equipment-pos', payload);
+      showToast('PO ' + r.po_number + ' created.','success');
+      $('epo-id').value = r.id;
+      $('epo-number').value = r.po_number;
+      // Reload as edit mode
+      setTimeout(() => openEditEquipmentPO(r.id), 200);
+    }
+    if (currentProjectData && currentProjectData.id) loadProjectEquipmentPOs(currentProjectData.id);
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function sendEquipmentPO() {
+  const id = parseInt($('epo-id').value) || 0;
+  if (!id) {
+    showToast('Save the PO first.','error');
+    return;
+  }
+  // Save first to capture any unsaved edits
+  try {
+    await saveEquipmentPO();
+  } catch(e){}
+  // Then send
+  if (!await confirmModal('Mark this Equipment PO as Sent? This will:\n• Generate a project Cost line item (Equipment, $' + parseFloat(window._epoCurrentItems.reduce((s,i)=>s+(i.qty*i.rate),0)).toFixed(2) + ')\n• Lock the PO from further edits\n\nYou can preview/print the PDF anytime.', { title: 'Send Equipment PO', okLabel: 'Mark Sent' })) return;
+  try {
+    const vendor = _equipVendorsCache.find(v => v.id === parseInt($('epo-vendor').value));
+    const emailTo = vendor ? (vendor.contact_email || vendor.main_email || '') : '';
+    await api('POST', '/api/equipment-pos/' + id + '/send', { email_sent_to: emailTo });
+    showToast('PO marked as sent. Cost added to project.','success');
+    closeModal('equipPOModal');
+    if (currentProjectData && currentProjectData.id) {
+      // Reload project to reflect the new cost row
+      loadProjectEquipmentPOs(currentProjectData.id);
+      loadProjectDetail(currentProjectData.id);
+    }
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function confirmEquipmentPO() {
+  const id = parseInt($('epo-id').value) || 0;
+  if (!id) return;
+  const cnumber = prompt('Enter the vendor confirmation # (or leave blank):', '');
+  try {
+    await api('POST', '/api/equipment-pos/' + id + '/confirm', { confirmation_number: cnumber || '' });
+    showToast('PO confirmed.','success');
+    openEditEquipmentPO(id);
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function cancelEquipmentPO() {
+  const id = parseInt($('epo-id').value) || 0;
+  if (!id) return;
+  if (!await confirmModal('Cancel this Equipment PO? The associated project cost line will be removed.', { title:'Cancel PO', danger:true, okLabel:'Cancel PO' })) return;
+  try {
+    await api('POST', '/api/equipment-pos/' + id + '/cancel', {});
+    showToast('PO cancelled.','success');
+    closeModal('equipPOModal');
+    if (currentProjectData && currentProjectData.id) {
+      loadProjectEquipmentPOs(currentProjectData.id);
+      loadProjectDetail(currentProjectData.id);
+    }
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteEquipmentPO() {
+  const id = parseInt($('epo-id').value) || 0;
+  if (!id) return;
+  if (!await confirmModal('Delete this draft Equipment PO? This cannot be undone.', { title:'Delete PO', danger:true, okLabel:'Delete' })) return;
+  try {
+    await api('DELETE', '/api/equipment-pos/' + id);
+    showToast('Deleted.','success');
+    closeModal('equipPOModal');
+    if (currentProjectData && currentProjectData.id) loadProjectEquipmentPOs(currentProjectData.id);
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+function printEquipmentPO() {
+  // Build a printable PDF-style window from current modal data
+  const poNumber = $('epo-number').value;
+  const status = $('epo-status').value;
+  const jobName = $('epo-job-name').value;
+  const jobAddress = $('epo-job-address').value;
+  const vendorId = parseInt($('epo-vendor').value);
+  const vendor = _equipVendorsCache.find(v => v.id === vendorId);
+  const vendorName = vendor ? vendor.company_name : '(no vendor selected)';
+  const vendorEmail = vendor ? (vendor.contact_email || vendor.main_email || '') : '';
+  const accountNum = vendor ? (vendor.account_number || '') : '';
+  const deliveryDate = $('epo-delivery-date').value;
+  const deliveryWindow = $('epo-delivery-window').value;
+  const returnDate = $('epo-return-date').value;
+  const deliveryNotes = $('epo-delivery-notes').value;
+  const leadName = $('epo-lead-name').value;
+  const leadPhone = $('epo-lead-phone').value;
+  const salesName = $('epo-sales-name').value;
+  const salesPhone = $('epo-sales-phone').value;
+  const salesEmail = $('epo-sales-email').value;
+
+  let total = 0;
+  window._epoCurrentItems.forEach(i => total += (i.qty||1)*(i.rate||0));
+
+  const itemsHtml = window._epoCurrentItems.map(i => `<tr>
+    <td>${escapeHtml(i.description||'')}</td>
+    <td style="text-align:right">${i.qty||1}</td>
+    <td style="text-align:right">$${parseFloat(i.rate||0).toFixed(2)}</td>
+    <td style="text-align:right">${i.rate_period||'day'}</td>
+    <td style="text-align:right">$${(((i.qty||1)*(i.rate||0))).toFixed(2)}</td>
+  </tr>`).join('');
+
+  const win = window.open('', '_blank', 'width=900,height=900');
+  win.document.write(`<html><head><title>Equipment PO ${poNumber}</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 30px; color: #111; max-width: 800px; }
+      .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #F5A623; padding-bottom: 15px; margin-bottom: 20px; }
+      .header h1 { margin: 0; color: #F5A623; font-size: 24px; letter-spacing: 0.05em; }
+      .po-number { font-size: 22px; font-family: monospace; font-weight: bold; }
+      .status-badge { display: inline-block; padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: bold; text-transform: uppercase; }
+      h2 { font-size: 14px; color: #555; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 25px; margin-bottom: 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+      .field { margin-bottom: 8px; font-size: 13px; }
+      .field-label { font-size: 10px; color: #777; text-transform: uppercase; letter-spacing: 0.05em; }
+      .field-value { font-weight: 500; margin-top: 2px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+      th, td { border-bottom: 1px solid #ccc; padding: 8px; font-size: 13px; text-align: left; }
+      th { background: #f5f5f5; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+      .total-row { font-weight: bold; font-size: 14px; background: #fafafa; }
+      .footer { margin-top: 40px; font-size: 11px; color: #777; border-top: 1px solid #ddd; padding-top: 10px; }
+      @media print { body { margin: 15mm; } button { display: none; } }
+    </style></head><body>
+    <div class="header">
+      <div>
+        <h1>EQUIPMENT RENTAL PURCHASE ORDER</h1>
+        <div style="font-size:13px;color:#555;margin-top:4px">KVM Door Systems</div>
+      </div>
+      <div style="text-align:right">
+        <div class="po-number">${escapeHtml(poNumber)}</div>
+        <div style="margin-top:6px"><span class="status-badge" style="background:${status==='sent'?'#d1ecf1;color:#0c5460':status==='confirmed'?'#d4edda;color:#155724':status==='cancelled'?'#f8d7da;color:#721c24':'#e2e3e5;color:#383d41'}">${escapeHtml(status||'draft')}</span></div>
+        <div style="font-size:11px;color:#777;margin-top:4px">Generated ${new Date().toLocaleDateString()}</div>
+      </div>
+    </div>
+
+    <h2>Vendor</h2>
+    <div class="grid">
+      <div>
+        <div class="field"><div class="field-label">Company</div><div class="field-value">${escapeHtml(vendorName)}</div></div>
+        ${accountNum ? `<div class="field"><div class="field-label">KVM Account #</div><div class="field-value">${escapeHtml(accountNum)}</div></div>` : ''}
+      </div>
+      <div>
+        ${vendorEmail ? `<div class="field"><div class="field-label">Vendor Email</div><div class="field-value">${escapeHtml(vendorEmail)}</div></div>` : ''}
+        ${vendor && vendor.contact_name ? `<div class="field"><div class="field-label">Vendor Contact</div><div class="field-value">${escapeHtml(vendor.contact_name)}</div></div>` : ''}
+      </div>
+    </div>
+
+    <h2>Job Site</h2>
+    <div class="field"><div class="field-label">Job</div><div class="field-value">${escapeHtml(jobName)}</div></div>
+    <div class="field"><div class="field-label">Site Address</div><div class="field-value" style="white-space:pre-line">${escapeHtml(jobAddress)}</div></div>
+
+    <h2>Delivery</h2>
+    <div class="grid">
+      <div class="field"><div class="field-label">Requested Delivery Date</div><div class="field-value">${deliveryDate ? fmtDate(deliveryDate) : '—'}</div></div>
+      <div class="field"><div class="field-label">Time Window</div><div class="field-value">${escapeHtml(deliveryWindow||'—')}</div></div>
+      <div class="field"><div class="field-label">Estimated Return</div><div class="field-value">${returnDate ? fmtDate(returnDate) : '—'}</div></div>
+    </div>
+    ${deliveryNotes ? `<div class="field" style="margin-top:8px"><div class="field-label">Delivery Notes</div><div class="field-value" style="white-space:pre-line">${escapeHtml(deliveryNotes)}</div></div>` : ''}
+
+    <h2>Contacts</h2>
+    <div class="grid">
+      <div>
+        <div class="field"><div class="field-label">Site Contact (Lead Tech)</div><div class="field-value">${escapeHtml(leadName||'—')}</div></div>
+        ${leadPhone ? `<div class="field"><div class="field-label">Phone</div><div class="field-value">${escapeHtml(leadPhone)}</div></div>` : ''}
+      </div>
+      <div>
+        <div class="field"><div class="field-label">Office Contact (Sales)</div><div class="field-value">${escapeHtml(salesName||'—')}</div></div>
+        ${salesPhone ? `<div class="field"><div class="field-label">Phone</div><div class="field-value">${escapeHtml(salesPhone)}</div></div>` : ''}
+        ${salesEmail ? `<div class="field"><div class="field-label">Email</div><div class="field-value">${escapeHtml(salesEmail)}</div></div>` : ''}
+      </div>
+    </div>
+
+    <h2>Equipment Items</h2>
+    <table>
+      <thead><tr><th>Description</th><th style="text-align:right">Qty</th><th style="text-align:right">Rate</th><th style="text-align:right">Period</th><th style="text-align:right">Estimated</th></tr></thead>
+      <tbody>${itemsHtml || '<tr><td colspan="5" style="text-align:center;color:#999">No items</td></tr>'}</tbody>
+      <tfoot><tr class="total-row"><td colspan="4" style="text-align:right">Total Estimated</td><td style="text-align:right">$${total.toFixed(2)}</td></tr></tfoot>
+    </table>
+
+    <div class="footer">
+      KVM Door Systems · Equipment PO ${escapeHtml(poNumber)} · ${new Date().toLocaleDateString()}
+    </div>
+    <button onclick="window.print()" style="margin-top:25px;padding:10px 20px;font-size:14px;background:#F5A623;color:#000;border:none;border-radius:4px;cursor:pointer;font-weight:600">Print / Save as PDF</button>
+    </body></html>`);
+  win.document.close();
+}
+
+// Expose 1A.6 + 1A.5.1 functions
+(function() {
+  try {
+    ['loadEquipmentSettings','renderEquipVendors','renderEquipCatalog',
+     'openAddEquipmentVendor','openEditEquipmentVendor','saveEquipmentVendor','deleteEquipmentVendor',
+     'openAddEquipmentItem','openEditEquipmentItem','saveEquipmentItem','deleteEquipmentItem',
+     'loadProjectEquipmentPOs','renderProjectEquipmentPOs',
+     'openNewEquipmentPO','openEditEquipmentPO','renderEPOItems','epoUpdateTotal',
+     'epoAddCatalogItem','epoAddBlankItem','epoRemoveItem',
+     'saveEquipmentPO','sendEquipmentPO','confirmEquipmentPO','cancelEquipmentPO','deleteEquipmentPO',
+     'printEquipmentPO'
+    ].forEach(function(name){
+      try { if (typeof eval(name) === 'function') window[name] = eval(name); } catch(e) {}
+    });
+    // Also expose mutation arrays for inline event handlers
+    window._epoCurrentItems = window._epoCurrentItems;
+    console.log('[KVM] Phase 1A.6 + 1A.5.1 functions exposed');
+  } catch(e) { console.error('[KVM] Phase 1A.6 exposure failed:', e); }
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PHASE 1A.4a — BILLING MODULE (Erin's AP Dashboard + Invoice Entry) ══════
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Settings: Bill Vendors tab ─────────────────────────────────────────────
+
+let _billVendorsCache = [];
+
+async function loadBillVendors() {
+  const search = ($('bv-search') ? $('bv-search').value : '').trim();
+  const params = new URLSearchParams();
+  if (search) params.set('search', search);
+  params.set('limit', '500');
+  try {
+    _billVendorsCache = await api('GET', '/api/bill-vendors?' + params.toString());
+    renderBillVendorsList();
+  } catch(e) {
+    if ($('bv-list-container')) $('bv-list-container').innerHTML = '<div style="color:var(--danger);padding:14px">Error: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function renderBillVendorsList() {
+  const el = $('bv-list-container');
+  if (!el) return;
+  if (!_billVendorsCache.length) {
+    el.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-faint);font-size:13px">No vendors yet. Import your QB vendor list above, or click + Add Vendor.</div>';
+    return;
+  }
+  el.innerHTML = `<div class="table-wrap"><table class="data-table">
+    <thead><tr><th>Vendor</th><th>Account #</th><th>Contact</th><th>Email</th><th>Phone</th><th>Last Used</th><th></th></tr></thead>
+    <tbody>${_billVendorsCache.map(v => `<tr style="cursor:pointer" onclick="openEditBillVendor(${v.id})">
+      <td><strong>${escapeHtml(v.name)}</strong></td>
+      <td style="font-family:monospace;font-size:11px;color:var(--text-muted)">${escapeHtml(v.account_number||'')}</td>
+      <td style="font-size:12px">${escapeHtml(v.contact_name||'')}</td>
+      <td style="font-size:11px;color:var(--text-muted)">${escapeHtml(v.email||'')}</td>
+      <td style="font-size:11px;color:var(--text-muted)">${escapeHtml(v.phone||'')}</td>
+      <td style="font-size:11px;color:var(--text-faint)">${v.last_used_at ? notifTimeAgo(v.last_used_at) : '—'}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditBillVendor(${v.id})">Edit</button></td>
+    </tr>`).join('')}</tbody>
+  </table></div>
+  <div style="padding:8px 0;font-size:11px;color:var(--text-faint);text-align:right">${_billVendorsCache.length} vendors</div>`;
+}
+
+function openAddBillVendor() {
+  $('billVendorModalTitle').textContent = 'Add Bill Vendor';
+  ['bv-id'].forEach(id => $(id).value = '0');
+  ['bv-name','bv-contact','bv-account','bv-email','bv-phone','bv-address','bv-terms','bv-gl','bv-notes'].forEach(id => { const e=$(id); if (e) e.value=''; });
+  $('bv-delete-btn').style.display = 'none';
+  openModal('billVendorModal');
+  setTimeout(() => $('bv-name').focus(), 50);
+}
+
+function openEditBillVendor(id) {
+  const v = _billVendorsCache.find(x => x.id === id);
+  if (!v) return;
+  $('billVendorModalTitle').textContent = 'Edit ' + v.name;
+  $('bv-id').value = v.id;
+  $('bv-name').value = v.name || '';
+  $('bv-contact').value = v.contact_name || '';
+  $('bv-account').value = v.account_number || '';
+  $('bv-email').value = v.email || '';
+  $('bv-phone').value = v.phone || '';
+  $('bv-address').value = v.address || '';
+  $('bv-terms').value = v.terms || '';
+  $('bv-gl').value = v.default_gl_account || '';
+  $('bv-notes').value = v.notes || '';
+  $('bv-delete-btn').style.display = 'inline-block';
+  openModal('billVendorModal');
+}
+
+async function saveBillVendor() {
+  const id = parseInt($('bv-id').value) || 0;
+  const payload = {
+    name: $('bv-name').value.trim(),
+    contact_name: $('bv-contact').value.trim(),
+    account_number: $('bv-account').value.trim(),
+    email: $('bv-email').value.trim(),
+    phone: $('bv-phone').value.trim(),
+    address: $('bv-address').value.trim(),
+    terms: $('bv-terms').value.trim(),
+    default_gl_account: $('bv-gl').value.trim(),
+    notes: $('bv-notes').value.trim()
+  };
+  if (!payload.name) { showToast('Vendor name required.','error'); return; }
+  try {
+    if (id) await api('PUT', '/api/bill-vendors/' + id, payload);
+    else await api('POST', '/api/bill-vendors', payload);
+    closeModal('billVendorModal');
+    showToast('Saved.','success');
+    loadBillVendors();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function deleteBillVendor() {
+  const id = parseInt($('bv-id').value) || 0;
+  if (!id) return;
+  if (!await confirmModal('Remove this vendor? Cost line items already entered with this vendor name keep the name on file.', { title:'Remove Vendor', danger:true, okLabel:'Remove' })) return;
+  try {
+    await api('DELETE', '/api/bill-vendors/' + id);
+    closeModal('billVendorModal');
+    showToast('Removed.','success');
+    loadBillVendors();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ─── CSV import ──────────────────────────────────────────────────────────────
+
+async function bvHandleCsvFile() {
+  const input = $('bv-csv-file');
+  if (!input || !input.files || !input.files[0]) return;
+  const file = input.files[0];
+  const text = await file.text();
+  const resultEl = $('bv-import-result');
+  resultEl.style.display = 'block';
+  resultEl.innerHTML = '<div style="padding:10px;background:var(--bg-surface);border-radius:var(--radius-sm);font-size:12px;color:var(--text-muted)">Parsing CSV...</div>';
+  // Dry run first to preview
+  try {
+    const dryRun = await api('POST', '/api/bill-vendors/import-csv', { csv: text, dry_run: true });
+    const sampleHtml = (dryRun.sample || []).map(s => `<li><strong>${escapeHtml(s.name)}</strong>${s.email ? ' · ' + escapeHtml(s.email) : ''}${s.phone ? ' · ' + escapeHtml(s.phone) : ''}</li>`).join('');
+    resultEl.innerHTML = `
+      <div style="padding:14px;background:var(--bg-surface);border:1px solid var(--amber);border-radius:var(--radius-sm)">
+        <div style="font-weight:700;color:var(--amber);margin-bottom:6px">📋 CSV Preview</div>
+        <div style="font-size:13px;margin-bottom:8px">
+          ${dryRun.total_rows} data rows · <strong>${dryRun.inserted}</strong> new vendors will be added · ${dryRun.updated} existing will be updated · ${dryRun.skipped} skipped (no name)
+        </div>
+        ${sampleHtml ? `<details style="margin-bottom:10px"><summary style="cursor:pointer;font-size:12px;color:var(--text-muted)">First 5 rows preview</summary><ul style="margin:6px 0 0 20px;font-size:12px;color:var(--text-muted)">${sampleHtml}</ul></details>` : ''}
+        ${dryRun.errors && dryRun.errors.length ? `<div style="color:var(--danger);font-size:12px;margin-bottom:10px">⚠ ${dryRun.errors.length} parse errors</div>` : ''}
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary btn-sm" onclick="bvCommitImport()">✓ Confirm Import</button>
+          <button class="btn btn-ghost btn-sm" onclick="bvCancelImport()">Cancel</button>
+        </div>
+      </div>`;
+    window._bvPendingCsv = text;
+  } catch(e) {
+    resultEl.innerHTML = '<div style="padding:14px;color:var(--danger);background:var(--bg-surface);border-radius:var(--radius-sm)">Error: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+async function bvCommitImport() {
+  if (!window._bvPendingCsv) return;
+  const resultEl = $('bv-import-result');
+  resultEl.innerHTML = '<div style="padding:10px;background:var(--bg-surface);border-radius:var(--radius-sm);font-size:12px;color:var(--text-muted)">Importing...</div>';
+  try {
+    const r = await api('POST', '/api/bill-vendors/import-csv', { csv: window._bvPendingCsv, dry_run: false });
+    resultEl.innerHTML = `
+      <div style="padding:14px;background:var(--bg-surface);border:1px solid var(--green);border-radius:var(--radius-sm)">
+        <div style="font-weight:700;color:var(--green);margin-bottom:6px">✓ Import Complete</div>
+        <div style="font-size:13px">${r.inserted} new vendors added · ${r.updated} existing updated · ${r.skipped} skipped</div>
+        ${r.errors && r.errors.length ? `<div style="color:var(--danger);font-size:11px;margin-top:6px">${r.errors.length} errors</div>` : ''}
+      </div>`;
+    delete window._bvPendingCsv;
+    if ($('bv-csv-file')) $('bv-csv-file').value = '';
+    loadBillVendors();
+  } catch(e) {
+    resultEl.innerHTML = '<div style="padding:14px;color:var(--danger);background:var(--bg-surface);border-radius:var(--radius-sm)">Error: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function bvCancelImport() {
+  delete window._bvPendingCsv;
+  if ($('bv-csv-file')) $('bv-csv-file').value = '';
+  if ($('bv-import-result')) $('bv-import-result').style.display = 'none';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ BILLING DASHBOARD ════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function loadBillingDashboard() {
+  const body = $('billing-dashboard-body');
+  if (!body) return;
+  body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-faint)">Loading...</div>';
+  try {
+    const data = await api('GET', '/api/billing/dashboard');
+    bdRender(data);
+  } catch(e) {
+    body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--danger)">Error: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function bdFmt$(n) { return '$' + (parseFloat(n)||0).toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0}); }
+
+function bdRender(data) {
+  const body = $('billing-dashboard-body');
+  const qj = data.quick_jobs_to_bill || {};
+  const pj = data.projects_not_billed || {};
+  const sp = data.stale_projects || {};
+  const today = data.today_entries || {};
+
+  body.innerHTML = `
+    <!-- KPI tiles -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-bottom:1.25rem">
+      <div class="card" style="padding:18px;text-align:center;border-left:3px solid #2980b9">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600">Quick Jobs Ready to Bill</div>
+        <div style="font-size:34px;font-weight:700;color:#2980b9;line-height:1.1;margin-top:4px">${qj.count || 0}</div>
+        ${qj.stale_count > 0 ? `<div style="font-size:12px;color:var(--danger);margin-top:6px">⚠ ${qj.stale_count} over 1 week</div>` : '<div style="font-size:11px;color:var(--text-muted);margin-top:6px">Quick jobs awaiting billing</div>'}
+      </div>
+      <div class="card" style="padding:18px;text-align:center;border-left:3px solid var(--amber)">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600">Projects — First Bill Pending</div>
+        <div style="font-size:34px;font-weight:700;color:var(--amber);line-height:1.1;margin-top:4px">${pj.count || 0}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Projects in flight, no bill sent yet</div>
+      </div>
+      <div class="card" style="padding:18px;text-align:center;border-left:3px solid var(--danger)">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600">Stale: 45+ Days Since Last Bill</div>
+        <div style="font-size:34px;font-weight:700;color:var(--danger);line-height:1.1;margin-top:4px">${sp.count || 0}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">Active projects, last invoice over 45d</div>
+      </div>
+      <div class="card" style="padding:18px;text-align:center;border-left:3px solid var(--green)">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600">Today's Entries</div>
+        <div style="font-size:34px;font-weight:700;color:var(--green);line-height:1.1;margin-top:4px">${today.count || 0}</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:6px">${bdFmt$(today.total||0)} entered today</div>
+      </div>
+    </div>
+
+    <!-- Stale Quick Jobs (priority — past due) -->
+    ${qj.stale_rows && qj.stale_rows.length ? `
+    <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--danger)">
+      <div class="card-header"><span class="card-title">⚠️ Quick Jobs Past Due (>1 week ready to bill)</span><span style="color:var(--danger);font-size:12px">${qj.stale_rows.length} jobs</span></div>
+      ${bdRenderJobList(qj.stale_rows, 'quickJob', true)}
+    </div>` : ''}
+
+    <!-- Quick Jobs Ready to Bill -->
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-header"><span class="card-title">Quick Jobs Ready to Bill</span><span style="color:var(--text-muted);font-size:12px">${(qj.rows||[]).length} jobs</span></div>
+      ${bdRenderJobList(qj.rows || [], 'quickJob', false)}
+    </div>
+
+    <!-- Projects Not Billed -->
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-header"><span class="card-title">Projects in Flight — No Bill Sent Yet</span><span style="color:var(--text-muted);font-size:12px">${(pj.rows||[]).length} projects</span></div>
+      ${bdRenderJobList(pj.rows || [], 'project', false, 'days_since_created', 'days since started')}
+    </div>
+
+    <!-- Stale Projects -->
+    <div class="card" style="margin-bottom:1rem;${sp.count > 0 ? 'border-left:3px solid var(--danger)' : ''}">
+      <div class="card-header"><span class="card-title">⚠️ Stale Projects — 45+ Days Since Last Bill</span><span style="color:${sp.count>0?'var(--danger)':'var(--text-muted)'};font-size:12px">${(sp.rows||[]).length} projects</span></div>
+      ${bdRenderJobList(sp.rows || [], 'project', true, 'days_since_last_bill', 'days since last bill', true)}
+    </div>
+  `;
+}
+
+function bdRenderJobList(rows, jobType, highlight, ageField, ageLabel, showBilledTotal) {
+  if (!rows.length) return '<div style="padding:30px;text-align:center;color:var(--text-faint);font-size:13px">Nothing here.</div>';
+  return `<div class="table-wrap"><table class="data-table">
+    <thead><tr>
+      <th>Job #</th><th>Customer</th><th>Project</th>
+      ${showBilledTotal ? '<th>Contract</th><th>Billed</th>' : '<th>Status / Bill</th>'}
+      <th style="text-align:right">${ageLabel || 'Age'}</th>
+      <th></th>
+    </tr></thead>
+    <tbody>${rows.map(r => {
+      const age = r[ageField || 'days_since_ready'] || 0;
+      const ageClass = age > 14 ? 'var(--danger)' : age > 7 ? 'var(--amber)' : 'var(--text-muted)';
+      const onclickAction = jobType === 'quickJob'
+        ? `showPage('quickJobs',document.getElementById('nav-quickJobs'));setTimeout(()=>openQuickJobDetail(${r.id}),200)`
+        : `showPage('projects',document.getElementById('nav-projects'));setTimeout(()=>openProjectDetail(${r.id}),200)`;
+      return `<tr style="cursor:pointer" onclick="${onclickAction}">
+        <td style="font-family:monospace;font-size:12px;color:var(--amber);font-weight:700">${escapeHtml(r.job_number||'—')}</td>
+        <td><strong>${escapeHtml(r.customer_name||'—')}</strong></td>
+        <td style="font-size:12px;color:var(--text-muted)">${escapeHtml((r.project_name||'').substring(0,50))}</td>
+        ${showBilledTotal ? `
+          <td style="font-size:12px;font-weight:600">${r.contract_value ? bdFmt$(r.contract_value) : '—'}</td>
+          <td style="font-size:12px;color:${(r.total_billed_to_date||0) >= (r.contract_value||0) ? 'var(--green)' : 'var(--amber)'}">${bdFmt$(r.total_billed_to_date||0)}${r.contract_value ? ' (' + Math.round((r.total_billed_to_date||0)/r.contract_value*100) + '%)' : ''}</td>
+        ` : `
+          <td style="font-size:11px;color:var(--text-muted);text-transform:uppercase">${escapeHtml(r.status||'—')}${r.bill_status ? ' · ' + escapeHtml(r.bill_status) : ''}</td>
+        `}
+        <td style="text-align:right;font-size:13px;font-weight:600;color:${ageClass}">${age}d</td>
+        <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ieJumpToJob(${r.id})" title="Enter invoice for this job">⌨️ Enter</button></td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
+}
+
+// "Enter invoice for this job" — jumps from billing dashboard to invoice entry, pre-loaded
+async function ieJumpToJob(projectId) {
+  showPage('invoiceEntry', document.getElementById('nav-invoiceEntry'));
+  setTimeout(async () => {
+    await ieLoadJob(projectId);
+  }, 250);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ INVOICE ENTRY PAGE ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let _ieCurrentJob = null;
+let _ieJobSearchTimer = null;
+let _ieVendorSearchTimer = null;
+let _ieJobSearchActiveIdx = -1;
+let _ieVendorActiveIdx = -1;
+let _ieVendorResults = [];
+
+async function loadInvoiceEntryPage() {
+  // Reset state
+  _ieCurrentJob = null;
+  if ($('ie-current-job')) $('ie-current-job').style.display = 'none';
+  if ($('ie-form-card')) $('ie-form-card').style.display = 'none';
+  if ($('ie-clear-btn')) $('ie-clear-btn').style.display = 'none';
+  if ($('ie-job-search')) {
+    $('ie-job-search').value = '';
+    setTimeout(() => $('ie-job-search').focus(), 80);
+  }
+  // Load today's stats + recent
+  ieRefreshStats();
+}
+
+async function ieRefreshStats() {
+  try {
+    const dash = await api('GET', '/api/billing/dashboard');
+    const t = dash.today_entries || {};
+    if ($('ie-today-count')) $('ie-today-count').textContent = t.count || 0;
+    if ($('ie-today-total')) $('ie-today-total').textContent = (parseFloat(t.total)||0).toFixed(2);
+  } catch(e){}
+  try {
+    const recent = await api('GET', '/api/billing/recent-entries?limit=20');
+    ieRenderRecent(recent);
+  } catch(e){}
+}
+
+function ieRenderRecent(rows) {
+  const el = $('ie-recent-list');
+  const countEl = $('ie-recent-count');
+  if (!el) return;
+  if (countEl) countEl.textContent = rows.length ? `${rows.length} most recent` : '';
+  if (!rows.length) {
+    el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-faint);font-size:13px">No entries yet today.</div>';
+    return;
+  }
+  el.innerHTML = `<div class="table-wrap"><table class="data-table">
+    <thead><tr><th>Time</th><th>Job #</th><th>Customer</th><th>Vendor</th><th>Description</th><th>Inv #</th><th style="text-align:right">Total</th><th></th></tr></thead>
+    <tbody>${rows.map(r => {
+      const t = r.created_at ? new Date(r.created_at.replace(' ','T') + 'Z').toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '—';
+      return `<tr>
+        <td style="font-size:11px;color:var(--text-muted);font-family:monospace">${t}</td>
+        <td style="font-size:11px;font-family:monospace;color:var(--amber)">${escapeHtml(r.job_number||'—')}</td>
+        <td style="font-size:12px"><strong>${escapeHtml((r.customer_name||'—').substring(0,30))}</strong></td>
+        <td style="font-size:12px">${escapeHtml((r.vendor||'—').substring(0,25))}</td>
+        <td style="font-size:11px;color:var(--text-muted)">${escapeHtml((r.description||'').substring(0,40))}</td>
+        <td style="font-size:11px;color:var(--text-muted);font-family:monospace">${escapeHtml(r.invoice_number||'—')}</td>
+        <td style="text-align:right;font-weight:600">${bdFmt$(r.total_cost)}</td>
+        <td><button class="btn btn-ghost btn-sm" onclick="ieJumpToJob(${r.project_id})" title="Add another for this job">+ More</button></td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
+}
+
+// ─── Job search box behavior ─────────────────────────────────────────────────
+
+function ieJobSearch() {
+  const q = $('ie-job-search').value.trim();
+  const resultsEl = $('ie-job-results');
+  if (q.length < 2) {
+    resultsEl.style.display = 'none';
+    return;
+  }
+  if (_ieJobSearchTimer) clearTimeout(_ieJobSearchTimer);
+  _ieJobSearchTimer = setTimeout(async () => {
+    try {
+      const rows = await api('GET', '/api/projects/search?q=' + encodeURIComponent(q));
+      ieRenderJobSearchResults(rows);
+    } catch(e){}
+  }, 180);
+}
+
+function ieRenderJobSearchResults(rows) {
+  const el = $('ie-job-results');
+  if (!el) return;
+  if (!rows.length) {
+    el.innerHTML = '<div style="padding:14px;color:var(--text-faint);font-size:13px">No matches.</div>';
+    el.style.display = 'block';
+    return;
+  }
+  _ieJobSearchActiveIdx = -1;
+  el.innerHTML = rows.map((r, idx) => `<div class="ie-job-result-row" data-idx="${idx}" data-id="${r.id}" onclick="ieLoadJob(${r.id})" style="padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px">
+    <div style="flex:1;min-width:0">
+      <div style="display:flex;gap:10px;align-items:center">
+        <span style="font-family:monospace;font-size:13px;color:var(--amber);font-weight:700;min-width:80px">${escapeHtml(r.job_number||'—')}</span>
+        <span style="font-size:14px;font-weight:600">${escapeHtml(r.customer_name||'—')}</span>
+        <span style="font-size:11px;color:var(--text-muted);text-transform:uppercase;background:var(--bg-surface);padding:1px 6px;border-radius:3px">${r.job_type === 'quick_job' ? '⚡ Quick' : '📋 Project'}</span>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:2px">${escapeHtml(r.project_name||'')} · ${escapeHtml(r.status||'')}</div>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);font-weight:600">${r.contract_value ? bdFmt$(r.contract_value) : ''}</div>
+  </div>`).join('');
+  el.style.display = 'block';
+  // Hover/keyboard navigation styles
+  el.querySelectorAll('.ie-job-result-row').forEach(row => {
+    row.onmouseover = () => { row.style.background = 'var(--bg-surface)'; };
+    row.onmouseout = () => { row.style.background = 'transparent'; };
+  });
+}
+
+function ieJobSearchKeydown(e) {
+  const el = $('ie-job-results');
+  if (!el || el.style.display === 'none') {
+    if (e.key === 'Escape') { ieClearJob(); }
+    return;
+  }
+  const rows = el.querySelectorAll('.ie-job-result-row');
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    _ieJobSearchActiveIdx = Math.min(_ieJobSearchActiveIdx + 1, rows.length - 1);
+    rows.forEach((r, i) => r.style.background = i === _ieJobSearchActiveIdx ? 'var(--amber-bg2)' : 'transparent');
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    _ieJobSearchActiveIdx = Math.max(_ieJobSearchActiveIdx - 1, 0);
+    rows.forEach((r, i) => r.style.background = i === _ieJobSearchActiveIdx ? 'var(--amber-bg2)' : 'transparent');
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    let target;
+    if (_ieJobSearchActiveIdx >= 0) target = rows[_ieJobSearchActiveIdx];
+    else if (rows.length === 1) target = rows[0];
+    if (target) {
+      const id = parseInt(target.getAttribute('data-id'));
+      ieLoadJob(id);
+    }
+  } else if (e.key === 'Escape') {
+    el.style.display = 'none';
+    _ieJobSearchActiveIdx = -1;
+  }
+}
+
+async function ieLoadJob(projectId) {
+  try {
+    const job = await api('GET', '/api/projects/' + projectId);
+    _ieCurrentJob = job;
+    $('ie-job-search').value = '';
+    $('ie-job-results').style.display = 'none';
+    // Render current job card
+    $('ie-cj-jobnum').textContent = job.job_number || '#'+job.id;
+    $('ie-cj-customer').textContent = job.customer_name || '—';
+    $('ie-cj-project').textContent = job.project_name || '';
+    $('ie-cj-status').textContent = job.status || '—';
+    $('ie-cj-contract').textContent = job.contract_value ? bdFmt$(job.contract_value) : '—';
+    $('ie-current-job').style.display = 'block';
+    $('ie-form-card').style.display = 'block';
+    $('ie-clear-btn').style.display = 'inline-flex';
+    // Set today's date as default
+    if (!$('ie-invoice-date').value) $('ie-invoice-date').value = new Date().toISOString().split('T')[0];
+    // Focus vendor field
+    setTimeout(() => $('ie-vendor').focus(), 80);
+  } catch(e) {
+    showToast('Could not load job: ' + e.message, 'error');
+  }
+}
+
+function ieClearJob() {
+  _ieCurrentJob = null;
+  $('ie-current-job').style.display = 'none';
+  $('ie-form-card').style.display = 'none';
+  $('ie-clear-btn').style.display = 'none';
+  $('ie-job-search').value = '';
+  $('ie-job-results').style.display = 'none';
+  setTimeout(() => $('ie-job-search').focus(), 50);
+}
+
+// ─── Vendor type-ahead ───────────────────────────────────────────────────────
+
+function ieVendorSearch() {
+  const q = $('ie-vendor').value.trim();
+  if (q.length < 1) {
+    $('ie-vendor-results').style.display = 'none';
+    return;
+  }
+  if (_ieVendorSearchTimer) clearTimeout(_ieVendorSearchTimer);
+  _ieVendorSearchTimer = setTimeout(async () => {
+    try {
+      const rows = await api('GET', '/api/bill-vendors?search=' + encodeURIComponent(q) + '&limit=10');
+      _ieVendorResults = rows;
+      ieRenderVendorResults();
+    } catch(e){}
+  }, 150);
+}
+
+function ieRenderVendorResults() {
+  const el = $('ie-vendor-results');
+  if (!el) return;
+  const q = $('ie-vendor').value.trim();
+  const exactMatch = _ieVendorResults.find(v => v.name.toLowerCase() === q.toLowerCase());
+  let html = '';
+  if (_ieVendorResults.length) {
+    html += _ieVendorResults.map((v, idx) => `<div class="ie-vendor-row" data-idx="${idx}" onclick="ieSelectVendor('${escapeHtml(v.name).replace(/'/g,'\\\'')}', ${v.id})" style="padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer">
+      <div style="font-size:13px;font-weight:600">${escapeHtml(v.name)}</div>
+      ${v.email || v.account_number ? `<div style="font-size:11px;color:var(--text-muted)">${escapeHtml(v.email||'')}${v.account_number?' · #'+escapeHtml(v.account_number):''}</div>` : ''}
+    </div>`).join('');
+  }
+  if (q && !exactMatch) {
+    html += `<div onclick="ieAddNewVendor()" style="padding:10px 12px;background:var(--bg-surface);cursor:pointer;border-top:1px solid var(--border);font-size:12px;color:var(--amber);font-weight:600">+ Add "${escapeHtml(q)}" as new vendor</div>`;
+  }
+  if (!html) {
+    html = '<div style="padding:14px;color:var(--text-faint);font-size:12px">No matches. Press <kbd>Tab</kbd> to use this name.</div>';
+  }
+  el.innerHTML = html;
+  el.style.display = 'block';
+  el.querySelectorAll('.ie-vendor-row').forEach((r, i) => {
+    r.onmouseover = () => { r.style.background = 'var(--bg-surface)'; };
+    r.onmouseout = () => { r.style.background = 'transparent'; };
+  });
+}
+
+function ieVendorKeydown(e) {
+  const el = $('ie-vendor-results');
+  if (!el || el.style.display === 'none') return;
+  const rows = el.querySelectorAll('.ie-vendor-row');
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    _ieVendorActiveIdx = Math.min(_ieVendorActiveIdx + 1, rows.length - 1);
+    rows.forEach((r, i) => r.style.background = i === _ieVendorActiveIdx ? 'var(--amber-bg2)' : 'transparent');
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    _ieVendorActiveIdx = Math.max(_ieVendorActiveIdx - 1, 0);
+    rows.forEach((r, i) => r.style.background = i === _ieVendorActiveIdx ? 'var(--amber-bg2)' : 'transparent');
+  } else if (e.key === 'Enter') {
+    if (_ieVendorActiveIdx >= 0 && _ieVendorResults[_ieVendorActiveIdx]) {
+      e.preventDefault();
+      const v = _ieVendorResults[_ieVendorActiveIdx];
+      ieSelectVendor(v.name, v.id);
+    }
+  } else if (e.key === 'Escape') {
+    el.style.display = 'none';
+    _ieVendorActiveIdx = -1;
+  } else if (e.key === 'Tab') {
+    el.style.display = 'none';
+    _ieVendorActiveIdx = -1;
+  }
+}
+
+function ieSelectVendor(name, id) {
+  $('ie-vendor').value = name;
+  $('ie-vendor-results').style.display = 'none';
+  _ieVendorActiveIdx = -1;
+  // Move focus to next field
+  $('ie-invoice-num').focus();
+}
+
+async function ieAddNewVendor() {
+  const name = $('ie-vendor').value.trim();
+  if (!name) return;
+  try {
+    const r = await api('POST', '/api/bill-vendors', { name });
+    showToast('Added vendor: ' + name, 'success');
+    $('ie-vendor-results').style.display = 'none';
+    $('ie-invoice-num').focus();
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ─── Form recalculation + save ───────────────────────────────────────────────
+
+function ieRecalc() {
+  const qty = parseFloat($('ie-qty').value) || 0;
+  const unit = parseFloat($('ie-unit').value) || 0;
+  const total = parseFloat($('ie-total').value) || 0;
+  // If user enters total directly, leave it. Otherwise, compute total from qty × unit.
+  if (total === 0 && qty > 0 && unit > 0) {
+    $('ie-total').value = (qty * unit).toFixed(2);
+  } else if (qty > 0 && unit === 0 && total > 0) {
+    // User entered total only — back-fill unit cost
+    $('ie-unit').value = (total / qty).toFixed(2);
+  }
+}
+
+function ieClearForm() {
+  ['ie-vendor','ie-invoice-num','ie-total','ie-description','ie-unit','ie-notes'].forEach(id => { const e=$(id); if (e) e.value = ''; });
+  $('ie-qty').value = '1';
+  $('ie-category').value = 'materials';
+  $('ie-invoice-date').value = new Date().toISOString().split('T')[0];
+  setTimeout(() => $('ie-vendor').focus(), 50);
+}
+
+async function ieSaveAndNext() {
+  if (!_ieCurrentJob) { showToast('Pick a job first.', 'error'); return; }
+  const description = $('ie-description').value.trim();
+  if (!description) { showToast('Description required.', 'error'); $('ie-description').focus(); return; }
+  // Re-compute total if needed
+  ieRecalc();
+  const totalEntered = parseFloat($('ie-total').value) || 0;
+  if (totalEntered <= 0) { showToast('Enter a total cost > 0.', 'error'); $('ie-total').focus(); return; }
+  const payload = {
+    category: $('ie-category').value,
+    vendor: $('ie-vendor').value.trim(),
+    description,
+    quantity: parseFloat($('ie-qty').value) || 1,
+    unit_cost: parseFloat($('ie-unit').value) || 0,
+    total_cost: totalEntered,
+    invoice_number: $('ie-invoice-num').value.trim(),
+    invoice_date: $('ie-invoice-date').value,
+    notes: $('ie-notes').value.trim()
+  };
+  // If vendor isn't in the bill_vendors table, auto-create it (silent)
+  if (payload.vendor) {
+    try { await api('POST', '/api/bill-vendors', { name: payload.vendor }); } catch(e){}
+  }
+  try {
+    await api('POST', '/api/projects/' + _ieCurrentJob.id + '/costs', payload);
+    showToast(`Saved $${totalEntered.toFixed(2)} to ${_ieCurrentJob.job_number}`, 'success');
+    // Clear form, keep job loaded, focus job-search box for next entry
+    ieClearForm();
+    ieRefreshStats();
+    // Move focus to job-search to load next job (Erin's typical workflow)
+    setTimeout(() => {
+      $('ie-job-search').focus();
+    }, 100);
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+// ─── Keyboard shortcut: Ctrl+Enter to save ───────────────────────────────────
+
+document.addEventListener('keydown', function(e) {
+  // Only when on Invoice Entry page
+  if (!document.querySelector('#page-invoiceEntry.active')) return;
+  if (e.ctrlKey && e.key === 'Enter') {
+    e.preventDefault();
+    if (_ieCurrentJob) ieSaveAndNext();
+  }
+});
+
+// Click outside dropdowns closes them
+document.addEventListener('click', function(e) {
+  const jobBox = $('ie-job-search');
+  const jobResults = $('ie-job-results');
+  const venBox = $('ie-vendor');
+  const venResults = $('ie-vendor-results');
+  if (jobResults && jobResults.style.display !== 'none') {
+    if (e.target !== jobBox && !jobResults.contains(e.target)) jobResults.style.display = 'none';
+  }
+  if (venResults && venResults.style.display !== 'none') {
+    if (e.target !== venBox && !venResults.contains(e.target)) venResults.style.display = 'none';
+  }
+});
+
+// Expose Phase 1A.4a functions
+(function() {
+  ['loadBillVendors','renderBillVendorsList','openAddBillVendor','openEditBillVendor',
+   'saveBillVendor','deleteBillVendor','bvHandleCsvFile','bvCommitImport','bvCancelImport',
+   'loadBillingDashboard','bdRender','bdRenderJobList','bdFmt$','ieJumpToJob',
+   'loadInvoiceEntryPage','ieRefreshStats','ieRenderRecent',
+   'ieJobSearch','ieJobSearchKeydown','ieRenderJobSearchResults','ieLoadJob','ieClearJob',
+   'ieVendorSearch','ieVendorKeydown','ieRenderVendorResults','ieSelectVendor','ieAddNewVendor',
+   'ieRecalc','ieClearForm','ieSaveAndNext'
+  ].forEach(function(name){
+    try { if (typeof eval(name) === 'function') window[name] = eval(name); } catch(e) {}
+  });
+  console.log('[KVM] Phase 1A.4a functions exposed');
 })();
