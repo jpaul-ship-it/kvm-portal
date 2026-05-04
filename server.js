@@ -462,6 +462,36 @@ async function initDb() {
   // Phase 1A.2b — site linkage on quotes (for Kroger #56 style quotes)
   try { db.run(`ALTER TABLE quotes ADD COLUMN site_id INTEGER DEFAULT 0`); saveDb(); } catch(e){}
 
+  // Phase 1.6 — Notifications system
+  db.run(`CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    source_type TEXT DEFAULT '',
+    source_id INTEGER DEFAULT 0,
+    title TEXT NOT NULL,
+    message TEXT DEFAULT '',
+    action_url TEXT DEFAULT '',
+    priority TEXT DEFAULT 'normal',
+    metadata TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now')),
+    read_at TEXT DEFAULT '',
+    cleared_at TEXT DEFAULT '',
+    snoozed_until TEXT DEFAULT ''
+  )`);
+  saveDb();
+  // Index for fast unread lookups per user
+  try { db.run(`CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, cleared_at)`); saveDb(); } catch(e){}
+  // Track which followup notifications have already fired for each (quote, milestone) pair so we don't spam
+  db.run(`CREATE TABLE IF NOT EXISTS followup_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    quote_id INTEGER NOT NULL,
+    milestone_days INTEGER NOT NULL,
+    fired_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(quote_id, milestone_days)
+  )`);
+  saveDb();
+
   // Phase 1A.5 — Workflow tasks on projects (admin task kanban like MS Planner)
   // Template tables (library of sections + tasks copied onto each new project)
   db.run(`CREATE TABLE IF NOT EXISTS workflow_templates (
@@ -518,6 +548,115 @@ async function initDb() {
   // Phase 1A.5 fix — material lead time + expected date
   try { db.run(`ALTER TABLE projects ADD COLUMN material_lead_time TEXT DEFAULT ''`); saveDb(); } catch(e){}
   try { db.run(`ALTER TABLE projects ADD COLUMN material_expected_date TEXT DEFAULT ''`); saveDb(); } catch(e){}
+
+  // Phase 1A.5.1 — material order date (when materials were actually ordered, vs. when project was created)
+  try { db.run(`ALTER TABLE projects ADD COLUMN material_order_date TEXT DEFAULT ''`); saveDb(); } catch(e){}
+
+  // Phase 1A.4a — Billing module schema
+  // bill_vendors: vendor list mirrored from QuickBooks (CSV import on day 1)
+  db.run(`CREATE TABLE IF NOT EXISTS bill_vendors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    contact_name TEXT DEFAULT '',
+    email TEXT DEFAULT '',
+    phone TEXT DEFAULT '',
+    address TEXT DEFAULT '',
+    account_number TEXT DEFAULT '',
+    terms TEXT DEFAULT '',
+    default_gl_account TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    is_active INTEGER DEFAULT 1,
+    last_used_at TEXT DEFAULT '',
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  saveDb();
+  try { db.run(`CREATE INDEX IF NOT EXISTS idx_bill_vendors_name ON bill_vendors(name)`); saveDb(); } catch(e){}
+  // Track billed-to-customer state per cost line
+  try { db.run(`ALTER TABLE project_costs ADD COLUMN billed_to_customer INTEGER DEFAULT 0`); saveDb(); } catch(e){}
+  try { db.run(`ALTER TABLE project_costs ADD COLUMN billed_on TEXT DEFAULT ''`); saveDb(); } catch(e){}
+  // Project-level billing tracking
+  try { db.run(`ALTER TABLE projects ADD COLUMN billing_model TEXT DEFAULT ''`); saveDb(); } catch(e){}
+  try { db.run(`ALTER TABLE projects ADD COLUMN total_billed_to_date REAL DEFAULT 0`); saveDb(); } catch(e){}
+  try { db.run(`ALTER TABLE projects ADD COLUMN last_customer_invoice_date TEXT DEFAULT ''`); saveDb(); } catch(e){}
+
+  // Phase 1A.6 — Equipment PO Generator schema
+  db.run(`CREATE TABLE IF NOT EXISTS equipment_catalog (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    vendor_id INTEGER DEFAULT 0,
+    category TEXT DEFAULT '',
+    daily_rate REAL DEFAULT 0,
+    weekly_rate REAL DEFAULT 0,
+    monthly_rate REAL DEFAULT 0,
+    notes TEXT DEFAULT '',
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  saveDb();
+  db.run(`CREATE TABLE IF NOT EXISTS equipment_vendors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_name TEXT NOT NULL,
+    main_phone TEXT DEFAULT '',
+    main_email TEXT DEFAULT '',
+    address TEXT DEFAULT '',
+    account_number TEXT DEFAULT '',
+    contact_name TEXT DEFAULT '',
+    contact_email TEXT DEFAULT '',
+    contact_phone TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`);
+  saveDb();
+  db.run(`CREATE TABLE IF NOT EXISTS equipment_pos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    po_number TEXT NOT NULL,
+    project_id INTEGER NOT NULL,
+    vendor_id INTEGER DEFAULT 0,
+    vendor_name TEXT DEFAULT '',
+    job_name TEXT DEFAULT '',
+    job_address TEXT DEFAULT '',
+    lead_tech_id INTEGER DEFAULT 0,
+    lead_tech_name TEXT DEFAULT '',
+    lead_tech_phone TEXT DEFAULT '',
+    sales_rep_id INTEGER DEFAULT 0,
+    sales_rep_name TEXT DEFAULT '',
+    sales_rep_phone TEXT DEFAULT '',
+    sales_rep_email TEXT DEFAULT '',
+    delivery_date TEXT DEFAULT '',
+    delivery_time_window TEXT DEFAULT '',
+    return_date TEXT DEFAULT '',
+    delivery_notes TEXT DEFAULT '',
+    status TEXT DEFAULT 'draft',
+    confirmation_number TEXT DEFAULT '',
+    total_estimated_cost REAL DEFAULT 0,
+    notes TEXT DEFAULT '',
+    cost_id INTEGER DEFAULT 0,
+    created_by INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    sent_at TEXT DEFAULT '',
+    email_sent_to TEXT DEFAULT '',
+    is_test_data INTEGER DEFAULT 0
+  )`);
+  saveDb();
+  db.run(`CREATE TABLE IF NOT EXISTS equipment_po_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    po_id INTEGER NOT NULL,
+    catalog_id INTEGER DEFAULT 0,
+    description TEXT NOT NULL,
+    qty REAL DEFAULT 1,
+    rate REAL DEFAULT 0,
+    rate_period TEXT DEFAULT 'day',
+    estimated_cost REAL DEFAULT 0,
+    sort_order INTEGER DEFAULT 0
+  )`);
+  saveDb();
+  // Equipment PO sequence (separate from job number sequence)
+  db.run(`CREATE TABLE IF NOT EXISTS equipment_po_sequence (
+    month_key TEXT PRIMARY KEY,
+    last_seq INTEGER DEFAULT 0
+  )`);
+  saveDb();
   // bill_status: 'not_ready' | 'ready_to_bill' | 'billed' | 'paid' (simpler than a full AR state machine)
   try { db.run(`ALTER TABLE projects ADD COLUMN bill_status TEXT DEFAULT 'not_ready'`); saveDb(); } catch(e){}
   try { db.run(`ALTER TABLE projects ADD COLUMN bill_notes TEXT DEFAULT ''`); saveDb(); } catch(e){}
@@ -1013,6 +1152,8 @@ app.post('/api/pto',requireAuth,(req,res)=>{
   const u=get('SELECT first_name,last_name FROM users WHERE id=?',[req.session.userId]);
   const id=runGetId('INSERT INTO pto_requests (user_id,user_name,start_date,end_date,type,notes,days,submitted_at) VALUES (?,?,?,?,?,?,?,?)',
     [req.session.userId,u.first_name+' '+u.last_name,start_date,end_date,type||'Vacation',notes||'',days,nowStr()]);
+  // Phase 1.6 — notify all admins/managers
+  try { notifyPTORequestPending(id); } catch(e){}
   res.json({id});
 });
 app.put('/api/pto/:id/review',requireAdmin,async(req,res)=>{
@@ -1985,16 +2126,42 @@ app.delete('/api/projects/:id', requireAdmin, (req, res) => {
 });
 
 // Phase 1A.2a — quick status toggle for material / bill status without full record PUT
+// Phase 1A.5.1 — when material_status transitions to 'ordered', capture material_order_date
+//                 and recalculate material_expected_date from order_date + lead_time midpoint
 app.patch('/api/projects/:id/status', requireAuth, (req, res) => {
-  const p = get('SELECT id FROM projects WHERE id=?', [req.params.id]);
+  const p = get('SELECT id, material_status, material_lead_time, material_order_date FROM projects WHERE id=?', [req.params.id]);
   if (!p) return res.status(404).json({error:'Not found'});
-  const { material_status, material_notes, material_lead_time, material_expected_date, bill_status, bill_notes, invoice_number, status } = req.body;
+  const { material_status, material_notes, material_lead_time, material_expected_date, material_order_date, bill_status, bill_notes, invoice_number, status } = req.body;
   const sets = [];
   const params = [];
+
+  // Phase 1A.5.1 — handle ordered transition
+  let computedOrderDate = null;
+  let computedExpectedDate = null;
+  if (material_status !== undefined && material_status === 'ordered' && p.material_status !== 'ordered' && !p.material_order_date && !material_order_date) {
+    // First time being marked ordered — capture today as order date
+    computedOrderDate = new Date().toISOString().split('T')[0];
+    // Recalculate expected date from order_date + lead_time midpoint (use submitted lead_time if present, else existing)
+    const effectiveLead = material_lead_time !== undefined ? material_lead_time : p.material_lead_time;
+    if (effectiveLead && effectiveLead !== 'custom' && effectiveLead !== '10_plus_weeks') {
+      const d = new Date(computedOrderDate + 'T00:00:00');
+      if (effectiveLead === 'from_stock')   { /* same day */ }
+      else if (effectiveLead === '1_2_weeks')  d.setDate(d.getDate() + 11);
+      else if (effectiveLead === '2_4_weeks')  d.setDate(d.getDate() + 21);
+      else if (effectiveLead === '4_8_weeks')  d.setDate(d.getDate() + 42);
+      else if (effectiveLead === '8_10_weeks') d.setDate(d.getDate() + 63);
+      computedExpectedDate = d.toISOString().split('T')[0];
+    }
+  }
+
   if (material_status !== undefined) { sets.push('material_status=?'); params.push(material_status); }
   if (material_notes !== undefined)  { sets.push('material_notes=?');  params.push(material_notes); }
   if (material_lead_time !== undefined) { sets.push('material_lead_time=?'); params.push(material_lead_time); }
+  // Use submitted expected date if present, else our computed one
   if (material_expected_date !== undefined) { sets.push('material_expected_date=?'); params.push(material_expected_date); }
+  else if (computedExpectedDate) { sets.push('material_expected_date=?'); params.push(computedExpectedDate); }
+  if (material_order_date !== undefined)    { sets.push('material_order_date=?');    params.push(material_order_date); }
+  else if (computedOrderDate)               { sets.push('material_order_date=?');    params.push(computedOrderDate); }
   if (bill_status !== undefined)     { sets.push('bill_status=?');     params.push(bill_status); }
   if (bill_notes !== undefined)      { sets.push('bill_notes=?');      params.push(bill_notes); }
   if (invoice_number !== undefined)  { sets.push('invoice_number=?');  params.push(invoice_number); }
@@ -2003,7 +2170,7 @@ app.patch('/api/projects/:id/status', requireAuth, (req, res) => {
   sets.push("updated_at=datetime('now')");
   params.push(req.params.id);
   run(`UPDATE projects SET ${sets.join(',')} WHERE id=?`, params);
-  res.json({ok:true, updated: sets.length - 1});
+  res.json({ok:true, updated: sets.length - 1, computed_order_date: computedOrderDate, computed_expected_date: computedExpectedDate});
 });
 
 // ─── PHASES ───────────────────────────────────────────────────────────────────
@@ -2059,6 +2226,8 @@ app.post('/api/projects/:id/notes', requireAuth, (req, res) => {
   const id = runGetId('INSERT INTO project_notes (project_id,author_id,author_name,note) VALUES (?,?,?,?)',
     [req.params.id, req.session.userId, author_name, note]);
   run("UPDATE projects SET updated_at=datetime('now') WHERE id=?", [req.params.id]);
+  // Phase 1.6 — fire notification to project owner
+  try { notifyProjectNoteAdded(req.params.id, note, req.session.userId); } catch(e){}
   res.json({id});
 });
 
@@ -2126,6 +2295,13 @@ app.post('/api/projects/:id/costs', requireAuth, (req, res) => {
   const id = runGetId(`INSERT INTO project_costs (project_id,po_number,category,vendor,description,quantity,unit_cost,total_cost,invoice_number,invoice_date,notes,logged_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
     [req.params.id, po_number, category||'materials', vendor||'', description, parseFloat(quantity)||1, parseFloat(unit_cost)||0, parseFloat(tc)||0, invoice_number||'', invoice_date||'', notes||'', loggedBy]);
   run("UPDATE projects SET updated_at=datetime('now') WHERE id=?", [req.params.id]);
+  // Phase 1A.4a — bump bill vendor's last_used_at so it surfaces first in type-ahead
+  if (vendor && vendor.trim()) {
+    try {
+      const v = get('SELECT id FROM bill_vendors WHERE LOWER(name)=LOWER(?)', [vendor.trim()]);
+      if (v) run("UPDATE bill_vendors SET last_used_at=datetime('now') WHERE id=?", [v.id]);
+    } catch(e){}
+  }
   res.json({id, po_number});
 });
 
@@ -3118,6 +3294,10 @@ app.post('/api/projects/:id/workflow-tasks', requireAuth, (req, res) => {
     VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
     [req.params.id, section || 'General', task_name, description || '',
      parseInt(assigned_user_id) || 0, aName, due_date || '', parseInt(sort_order) || 999]);
+  // Phase 1.6 — notify the assignee if any
+  if (parseInt(assigned_user_id) > 0) {
+    try { notifyWorkflowTaskAssigned(id, parseInt(assigned_user_id), req.session.userId); } catch(e){}
+  }
   res.json({ ok: true, id });
 });
 
@@ -3168,6 +3348,10 @@ app.put('/api/projects/:id/workflow-tasks/:tid', requireAuth, (req, res) => {
   sets.push("updated_at=datetime('now')");
   params.push(req.params.tid);
   run(`UPDATE project_workflow_tasks SET ${sets.join(',')} WHERE id=?`, params);
+  // Phase 1.6 — if assignee was changed, notify the new assignee
+  if (assigned_user_id !== undefined && parseInt(assigned_user_id) > 0) {
+    try { notifyWorkflowTaskAssigned(req.params.tid, parseInt(assigned_user_id), req.session.userId); } catch(e){}
+  }
   res.json({ ok: true });
 });
 
@@ -3270,7 +3454,923 @@ app.patch('/api/quotes/:id/status', requireAuth, (req, res) => {
   const allowed = ['draft','sent','accepted','declined'];
   if (!allowed.includes(status)) return res.status(400).json({ error: 'Invalid status' });
   run("UPDATE quotes SET status=?, updated_at=datetime('now') WHERE id=?", [status, req.params.id]);
+  // Phase 1.6 — when quote leaves 'sent' status, clear any existing follow-up notifications for this quote
+  // and reset the followup_history so if it re-enters 'sent' the cycle starts fresh
+  if (status !== 'sent') {
+    try {
+      run(`UPDATE notifications SET cleared_at=datetime('now') WHERE event_type='quote_followup_due' AND source_type='quote' AND source_id=? AND cleared_at=''`, [req.params.id]);
+      run('DELETE FROM followup_history WHERE quote_id=?', [req.params.id]);
+    } catch(e) {}
+  }
   res.json({ ok: true, status });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PHASE 1.6 — NOTIFICATIONS + SALES DASHBOARD + FOLLOW-UP REMINDERS ═══════
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Helper — create a notification. Idempotent if you provide a unique source/event combo.
+function createNotification(userId, eventType, opts) {
+  if (!userId) return null;
+  opts = opts || {};
+  // De-dupe: if there's already an un-cleared notification with the same user+event+source, skip
+  if (opts.dedupe !== false && opts.source_type && opts.source_id) {
+    const existing = get(
+      `SELECT id FROM notifications WHERE user_id=? AND event_type=? AND source_type=? AND source_id=? AND cleared_at='' LIMIT 1`,
+      [userId, eventType, opts.source_type, opts.source_id]
+    );
+    if (existing) return existing.id;
+  }
+  const id = runGetId(
+    `INSERT INTO notifications (user_id, event_type, source_type, source_id, title, message, action_url, priority, metadata)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [userId, eventType, opts.source_type || '', opts.source_id || 0,
+     opts.title || '', opts.message || '', opts.action_url || '',
+     opts.priority || 'normal', JSON.stringify(opts.metadata || {})]
+  );
+  return id;
+}
+
+// Helper — notify all users with a specific role (used for PTO + attendance broadcasts)
+function notifyByRole(roles, eventType, opts) {
+  const placeholders = roles.map(() => '?').join(',');
+  const users = all(`SELECT id FROM users WHERE role_type IN (${placeholders})`, roles);
+  users.forEach(u => createNotification(u.id, eventType, opts));
+}
+
+// ─── User-facing notification endpoints ──────────────────────────────────────
+
+app.get('/api/notifications', requireAuth, (req, res) => {
+  const { tab } = req.query;  // 'unread' (default) | 'past_due' | 'cleared' | 'all'
+  let where = 'user_id=?';
+  const params = [req.session.userId];
+  if (tab === 'cleared') {
+    where += " AND cleared_at != ''";
+  } else if (tab === 'past_due') {
+    where += " AND cleared_at='' AND created_at < datetime('now','-5 days')";
+  } else if (tab === 'all') {
+    // no-op, all rows for this user
+  } else {
+    // unread (default) — uncleared, not snoozed past today
+    where += " AND cleared_at=''";
+    where += " AND (snoozed_until='' OR snoozed_until <= date('now'))";
+  }
+  const rows = all(`SELECT * FROM notifications WHERE ${where} ORDER BY created_at DESC LIMIT 200`, params);
+  rows.forEach(n => {
+    try { n.metadata = JSON.parse(n.metadata||'{}'); } catch(e) { n.metadata = {}; }
+  });
+  res.json({ rows, count: rows.length });
+});
+
+// Lightweight unread count for the bell badge
+app.get('/api/notifications/count', requireAuth, (req, res) => {
+  const row = get(
+    `SELECT COUNT(*) AS unread FROM notifications WHERE user_id=? AND cleared_at='' AND read_at=''
+       AND (snoozed_until='' OR snoozed_until <= date('now'))`,
+    [req.session.userId]
+  );
+  const pastDueRow = get(
+    `SELECT COUNT(*) AS past_due FROM notifications WHERE user_id=? AND cleared_at='' AND created_at < datetime('now','-5 days')`,
+    [req.session.userId]
+  );
+  res.json({ unread: row ? row.unread : 0, past_due: pastDueRow ? pastDueRow.past_due : 0 });
+});
+
+// Mark one notification read
+app.patch('/api/notifications/:id/read', requireAuth, (req, res) => {
+  run(`UPDATE notifications SET read_at=datetime('now') WHERE id=? AND user_id=? AND read_at=''`,
+    [req.params.id, req.session.userId]);
+  res.json({ ok: true });
+});
+
+// Clear (mark done) one notification
+app.patch('/api/notifications/:id/clear', requireAuth, (req, res) => {
+  run(`UPDATE notifications SET cleared_at=datetime('now'), read_at=COALESCE(NULLIF(read_at,''), datetime('now')) WHERE id=? AND user_id=?`,
+    [req.params.id, req.session.userId]);
+  res.json({ ok: true });
+});
+
+// Snooze a notification N days
+app.patch('/api/notifications/:id/snooze', requireAuth, (req, res) => {
+  const days = parseInt(req.body && req.body.days) || 1;
+  run(`UPDATE notifications SET snoozed_until=date('now','+' || ? || ' days') WHERE id=? AND user_id=?`,
+    [days, req.params.id, req.session.userId]);
+  res.json({ ok: true });
+});
+
+// Mark all read
+app.patch('/api/notifications/mark-all-read', requireAuth, (req, res) => {
+  run(`UPDATE notifications SET read_at=datetime('now') WHERE user_id=? AND read_at='' AND cleared_at=''`,
+    [req.session.userId]);
+  res.json({ ok: true });
+});
+
+// Clear all read
+app.patch('/api/notifications/clear-all', requireAuth, (req, res) => {
+  run(`UPDATE notifications SET cleared_at=datetime('now') WHERE user_id=? AND cleared_at='' AND read_at != ''`,
+    [req.session.userId]);
+  res.json({ ok: true });
+});
+
+// ─── Quote follow-up scheduled job ───────────────────────────────────────────
+// Runs once daily; for each sent quote, fires notifications at 3/7/14/30-day milestones if not already fired.
+const FOLLOWUP_MILESTONES = [3, 7, 14, 30];
+function runQuoteFollowupJob() {
+  try {
+    console.log('[1.6] Running quote follow-up job...');
+    const sent = all(`SELECT id, quote_number, client_name, project_name, rep_id, rep_name, total, updated_at
+      FROM quotes WHERE status='sent' AND (is_test_data IS NULL OR is_test_data=0)`);
+    let fired = 0;
+    const now = new Date();
+    sent.forEach(q => {
+      if (!q.updated_at || !q.rep_id) return;
+      const updatedAt = new Date(q.updated_at.replace(' ', 'T') + 'Z');
+      if (isNaN(updatedAt.getTime())) return;
+      const ageDays = Math.floor((now - updatedAt) / (1000 * 60 * 60 * 24));
+      // For each milestone, if quote is currently at-or-past that milestone AND we've not fired this milestone yet, fire it.
+      FOLLOWUP_MILESTONES.forEach(milestone => {
+        if (ageDays < milestone) return;
+        // Check if we've already fired this milestone for this quote
+        const exists = get('SELECT id FROM followup_history WHERE quote_id=? AND milestone_days=?', [q.id, milestone]);
+        if (exists) return;
+        // Fire
+        const isLast = milestone === 30;
+        const title = isLast
+          ? `⚠ Quote ${q.quote_number || '#'+q.id} idle 30 days — likely lost?`
+          : `Follow up on quote ${q.quote_number || '#'+q.id} — ${milestone} days idle`;
+        const message = `${q.client_name || 'Client'} · ${q.project_name || ''} · ${q.total ? '$' + q.total : ''}`;
+        createNotification(q.rep_id, 'quote_followup_due', {
+          source_type: 'quote',
+          source_id: q.id,
+          title,
+          message,
+          priority: isLast ? 'urgent' : 'normal',
+          metadata: { quote_number: q.quote_number, milestone_days: milestone, age_days: ageDays },
+          dedupe: false  // we use followup_history for dedup, not the dedup flag
+        });
+        run('INSERT INTO followup_history (quote_id, milestone_days) VALUES (?,?)', [q.id, milestone]);
+        fired++;
+      });
+    });
+    console.log(`[1.6] Quote follow-up job complete. Fired ${fired} notifications across ${sent.length} sent quotes.`);
+  } catch(e) { console.error('[1.6] Follow-up job error:', e); }
+}
+
+// Schedule job: run once on boot 30 seconds after startup, then daily at 8 AM
+setTimeout(() => runQuoteFollowupJob(), 30 * 1000);
+function scheduleNextDailyRun() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(8, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);  // tomorrow at 8 AM
+  const ms = next - now;
+  setTimeout(() => {
+    runQuoteFollowupJob();
+    scheduleNextDailyRun();
+  }, ms);
+}
+scheduleNextDailyRun();
+
+// Manual trigger for the job (admin only, useful for testing)
+app.post('/api/admin/run-followup-job', requireAdmin, (req, res) => {
+  runQuoteFollowupJob();
+  res.json({ ok: true, message: 'Follow-up job ran. Check server logs.' });
+});
+
+// ─── Hooks: emit notifications when events occur ─────────────────────────────
+
+// Hook: project note added → notify the project owner (created_by) if not the same person
+function notifyProjectNoteAdded(projectId, noteText, addedByUserId) {
+  try {
+    const proj = get('SELECT id, project_name, customer_name, job_number, created_by FROM projects WHERE id=?', [projectId]);
+    if (!proj || !proj.created_by || proj.created_by === addedByUserId) return;
+    const addedBy = get('SELECT first_name, last_name FROM users WHERE id=?', [addedByUserId]);
+    const addedByName = addedBy ? ((addedBy.first_name||'') + ' ' + (addedBy.last_name||'')).trim() : 'someone';
+    createNotification(proj.created_by, 'project_note_added', {
+      source_type: 'project',
+      source_id: proj.id,
+      title: `New note on ${proj.job_number || proj.project_name}`,
+      message: `${addedByName}: ${(noteText||'').substring(0, 120)}${(noteText||'').length > 120 ? '...' : ''}`,
+      priority: 'normal'
+    });
+  } catch(e) { console.error('notifyProjectNoteAdded error:', e); }
+}
+
+// Hook: workflow task assigned → notify assignee
+function notifyWorkflowTaskAssigned(taskId, assignedUserId, assignedByUserId) {
+  if (!assignedUserId || assignedUserId === assignedByUserId) return;
+  try {
+    const t = get(`SELECT t.task_name, t.section, t.due_date, p.project_name, p.job_number, p.id AS project_id
+      FROM project_workflow_tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?`, [taskId]);
+    if (!t) return;
+    createNotification(assignedUserId, 'task_assigned', {
+      source_type: 'workflow_task',
+      source_id: taskId,
+      title: `Task assigned: ${t.task_name}`,
+      message: `${t.job_number || t.project_name || 'Project'} · ${t.section || ''}${t.due_date ? ' · due ' + t.due_date : ''}`,
+      priority: 'normal',
+      metadata: { project_id: t.project_id }
+    });
+  } catch(e) { console.error('notifyWorkflowTaskAssigned error:', e); }
+}
+
+// Hook: PTO request created → notify all admins + managers
+function notifyPTORequestPending(requestId) {
+  try {
+    const r = get(`SELECT pr.*, (u.first_name || ' ' || u.last_name) AS requester_name
+      FROM pto_requests pr LEFT JOIN users u ON u.id=pr.user_id WHERE pr.id=?`, [requestId]);
+    if (!r) return;
+    notifyByRole(['admin','global_admin','manager'], 'pto_request_pending', {
+      source_type: 'pto_request',
+      source_id: requestId,
+      title: `PTO request from ${r.requester_name || 'employee'}`,
+      message: `${r.start_date} to ${r.end_date} · ${r.reason || ''}`,
+      priority: 'normal'
+    });
+  } catch(e) { console.error('notifyPTORequestPending error:', e); }
+}
+
+// ─── Sales Dashboard data endpoint ───────────────────────────────────────────
+// Returns aggregated metrics for the requesting user (or any user, for managers)
+app.get('/api/sales-dashboard', requireAuth, (req, res) => {
+  // Determine target rep: by default, the requesting user; managers/admins can ?rep=ID for someone else, ?rep=all for everyone
+  const requesterRole = getUserRole(req.session.userId);
+  const isManager = ['admin','global_admin','manager'].includes(requesterRole);
+  let repFilter = '';
+  let repParams = [];
+  let viewingRepId = req.session.userId;
+  let viewingRepName = '';
+  let viewingScope = 'me';
+
+  if (isManager && req.query.rep) {
+    if (req.query.rep === 'all') {
+      repFilter = '';
+      viewingRepId = 0;
+      viewingScope = 'all';
+    } else {
+      const r = parseInt(req.query.rep) || 0;
+      if (r) {
+        repFilter = ' AND rep_id=?';
+        repParams = [r];
+        viewingRepId = r;
+        viewingScope = 'specific';
+      }
+    }
+  } else {
+    // Non-manager — always self
+    repFilter = ' AND rep_id=?';
+    repParams = [req.session.userId];
+  }
+
+  // Get viewing rep name
+  if (viewingRepId) {
+    const u = get('SELECT first_name, last_name FROM users WHERE id=?', [viewingRepId]);
+    if (u) viewingRepName = ((u.first_name||'') + ' ' + (u.last_name||'')).trim();
+  }
+
+  // Month filter
+  const month = req.query.month || ''; // YYYY-MM format
+  let monthFilter = '';
+  let monthParams = [];
+  if (month && /^\d{4}-\d{2}$/.test(month)) {
+    monthFilter = " AND SUBSTR(created_at, 1, 7)=?";
+    monthParams = [month];
+  }
+
+  const baseExclude = ' AND (is_test_data IS NULL OR is_test_data=0)';
+
+  // Pipeline counts (current state, not month-bound)
+  const draftCount = get(`SELECT COUNT(*) AS c FROM quotes WHERE status='draft'${repFilter}${baseExclude}`, repParams);
+  const sentCount  = get(`SELECT COUNT(*) AS c FROM quotes WHERE status='sent'${repFilter}${baseExclude}`, repParams);
+
+  // Awarded this month — quotes accepted in the selected month
+  const awardedThisMonthQuotes = get(
+    `SELECT COUNT(*) AS c, COALESCE(SUM(CAST(REPLACE(REPLACE(total,',',''),'$','') AS REAL)),0) AS sum_total
+     FROM quotes WHERE status='accepted'${repFilter}${baseExclude}${monthFilter ? ' AND SUBSTR(updated_at,1,7)=?' : ''}`,
+    [...repParams, ...monthParams]
+  );
+
+  // Lost this month
+  const lostThisMonth = get(
+    `SELECT COUNT(*) AS c FROM quotes WHERE status='declined'${repFilter}${baseExclude}${monthFilter ? ' AND SUBSTR(updated_at,1,7)=?' : ''}`,
+    [...repParams, ...monthParams]
+  );
+
+  // Quotes sent (any status, created in the month)
+  const sentThisMonth = get(
+    `SELECT COUNT(*) AS c, COALESCE(SUM(CAST(REPLACE(REPLACE(total,',',''),'$','') AS REAL)),0) AS sum_total
+     FROM quotes WHERE 1=1${repFilter}${baseExclude}${monthFilter}`,
+    [...repParams, ...monthParams]
+  );
+
+  const winRate = (awardedThisMonthQuotes.c + lostThisMonth.c) > 0
+    ? (awardedThisMonthQuotes.c / (awardedThisMonthQuotes.c + lostThisMonth.c) * 100).toFixed(1)
+    : '0.0';
+
+  // Follow-up queue — sent quotes idle, with age
+  const followups = all(
+    `SELECT id, quote_number, client_name, project_name, total, updated_at,
+       CAST((julianday('now') - julianday(updated_at)) AS INTEGER) AS age_days
+     FROM quotes WHERE status='sent'${repFilter}${baseExclude}
+     ORDER BY updated_at ASC LIMIT 50`,
+    repParams
+  );
+  // Bucket the followups
+  const followupBuckets = { fresh: [], aging: [], urgent: [], stale: [] };
+  followups.forEach(f => {
+    if (f.age_days < 3)        followupBuckets.fresh.push(f);
+    else if (f.age_days < 7)   followupBuckets.aging.push(f);
+    else if (f.age_days < 14)  followupBuckets.urgent.push(f);
+    else                       followupBuckets.stale.push(f);
+  });
+
+  // Awarded pipeline (active projects + quick jobs the rep won)
+  const activePipelineSql = `SELECT id, job_number, project_name, customer_name, status, contract_value, job_type, material_status, updated_at
+    FROM projects WHERE created_by=? AND status NOT IN ('complete','cancelled')${baseExclude}
+    ORDER BY updated_at DESC LIMIT 50`;
+  const activePipeline = (viewingScope === 'all')
+    ? all(`SELECT id, job_number, project_name, customer_name, status, contract_value, job_type, material_status, updated_at
+        FROM projects WHERE status NOT IN ('complete','cancelled')${baseExclude}
+        ORDER BY updated_at DESC LIMIT 50`)
+    : all(activePipelineSql, [viewingRepId]);
+
+  // My quotes (recent, all statuses, this month if filter set)
+  const myQuotes = all(
+    `SELECT id, quote_number, client_name, project_name, status, total, updated_at
+     FROM quotes WHERE 1=1${repFilter}${baseExclude}${monthFilter}
+     ORDER BY updated_at DESC LIMIT 100`,
+    [...repParams, ...monthParams]
+  );
+
+  res.json({
+    viewing_rep_id: viewingRepId,
+    viewing_rep_name: viewingRepName,
+    viewing_scope: viewingScope,
+    is_manager: isManager,
+    month: month,
+    pipeline: {
+      drafts: draftCount ? draftCount.c : 0,
+      sent: sentCount ? sentCount.c : 0,
+      awarded_this_month_count: awardedThisMonthQuotes ? awardedThisMonthQuotes.c : 0,
+      awarded_this_month_value: awardedThisMonthQuotes ? awardedThisMonthQuotes.sum_total : 0,
+      lost_this_month: lostThisMonth ? lostThisMonth.c : 0,
+      sent_this_month_count: sentThisMonth ? sentThisMonth.c : 0,
+      sent_this_month_value: sentThisMonth ? sentThisMonth.sum_total : 0,
+      win_rate_pct: winRate
+    },
+    followups: followupBuckets,
+    active_pipeline: activePipeline,
+    my_quotes: myQuotes
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PHASE 1A.6 — EQUIPMENT PO GENERATOR ═════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Helper — allocate next equipment PO number ("EQ-MMYY-N")
+function allocateNextEquipmentPONumber() {
+  const key = currentMonthKey();  // e.g. "0426"
+  const row = get('SELECT last_seq FROM equipment_po_sequence WHERE month_key=?', [key]);
+  const next = row ? (row.last_seq || 0) + 1 : 1;
+  if (row) {
+    run('UPDATE equipment_po_sequence SET last_seq=? WHERE month_key=?', [next, key]);
+  } else {
+    run('INSERT INTO equipment_po_sequence (month_key, last_seq) VALUES (?, ?)', [key, next]);
+  }
+  saveDb();
+  return `EQ-${key}-${next}`;
+}
+
+// ─── Equipment Vendors ───────────────────────────────────────────────────────
+app.get('/api/equipment-vendors', requireAuth, (req, res) => {
+  res.json(all('SELECT * FROM equipment_vendors WHERE is_active=1 ORDER BY company_name'));
+});
+app.post('/api/equipment-vendors', requireAdmin, (req, res) => {
+  const { company_name, main_phone, main_email, address, account_number, contact_name, contact_email, contact_phone, notes } = req.body;
+  if (!company_name) return res.status(400).json({error:'Vendor name required'});
+  const id = runGetId(`INSERT INTO equipment_vendors (company_name, main_phone, main_email, address, account_number, contact_name, contact_email, contact_phone, notes)
+    VALUES (?,?,?,?,?,?,?,?,?)`,
+    [company_name, main_phone||'', main_email||'', address||'', account_number||'', contact_name||'', contact_email||'', contact_phone||'', notes||'']);
+  res.json({id});
+});
+app.put('/api/equipment-vendors/:id', requireAdmin, (req, res) => {
+  const v = get('SELECT id FROM equipment_vendors WHERE id=?', [req.params.id]);
+  if (!v) return res.status(404).json({error:'Not found'});
+  const { company_name, main_phone, main_email, address, account_number, contact_name, contact_email, contact_phone, notes } = req.body;
+  run(`UPDATE equipment_vendors SET company_name=?, main_phone=?, main_email=?, address=?, account_number=?, contact_name=?, contact_email=?, contact_phone=?, notes=? WHERE id=?`,
+    [company_name, main_phone||'', main_email||'', address||'', account_number||'', contact_name||'', contact_email||'', contact_phone||'', notes||'', req.params.id]);
+  res.json({ok:true});
+});
+app.delete('/api/equipment-vendors/:id', requireAdmin, (req, res) => {
+  // Soft-delete (preserve historical PO references)
+  run('UPDATE equipment_vendors SET is_active=0 WHERE id=?', [req.params.id]);
+  res.json({ok:true});
+});
+
+// ─── Equipment Catalog ───────────────────────────────────────────────────────
+app.get('/api/equipment-catalog', requireAuth, (req, res) => {
+  const items = all(`SELECT c.*, v.company_name AS vendor_name FROM equipment_catalog c
+    LEFT JOIN equipment_vendors v ON v.id=c.vendor_id WHERE c.is_active=1 ORDER BY c.category, c.name`);
+  res.json(items);
+});
+app.post('/api/equipment-catalog', requireAdmin, (req, res) => {
+  const { name, vendor_id, category, daily_rate, weekly_rate, monthly_rate, notes } = req.body;
+  if (!name) return res.status(400).json({error:'Equipment name required'});
+  const id = runGetId(`INSERT INTO equipment_catalog (name, vendor_id, category, daily_rate, weekly_rate, monthly_rate, notes)
+    VALUES (?,?,?,?,?,?,?)`,
+    [name, parseInt(vendor_id)||0, category||'', parseFloat(daily_rate)||0, parseFloat(weekly_rate)||0, parseFloat(monthly_rate)||0, notes||'']);
+  res.json({id});
+});
+app.put('/api/equipment-catalog/:id', requireAdmin, (req, res) => {
+  const c = get('SELECT id FROM equipment_catalog WHERE id=?', [req.params.id]);
+  if (!c) return res.status(404).json({error:'Not found'});
+  const { name, vendor_id, category, daily_rate, weekly_rate, monthly_rate, notes } = req.body;
+  run(`UPDATE equipment_catalog SET name=?, vendor_id=?, category=?, daily_rate=?, weekly_rate=?, monthly_rate=?, notes=? WHERE id=?`,
+    [name, parseInt(vendor_id)||0, category||'', parseFloat(daily_rate)||0, parseFloat(weekly_rate)||0, parseFloat(monthly_rate)||0, notes||'', req.params.id]);
+  res.json({ok:true});
+});
+app.delete('/api/equipment-catalog/:id', requireAdmin, (req, res) => {
+  run('UPDATE equipment_catalog SET is_active=0 WHERE id=?', [req.params.id]);
+  res.json({ok:true});
+});
+
+// ─── Equipment POs ───────────────────────────────────────────────────────────
+// List all POs for a project (or all POs)
+app.get('/api/equipment-pos', requireAuth, (req, res) => {
+  const { project_id } = req.query;
+  let sql = `SELECT po.*, v.company_name AS vendor_name_resolved
+    FROM equipment_pos po LEFT JOIN equipment_vendors v ON v.id=po.vendor_id`;
+  const params = [];
+  if (project_id) { sql += ' WHERE po.project_id=?'; params.push(project_id); }
+  sql += ' ORDER BY po.created_at DESC';
+  const rows = all(sql, params);
+  rows.forEach(po => {
+    po.items = all('SELECT * FROM equipment_po_items WHERE po_id=? ORDER BY sort_order, id', [po.id]);
+  });
+  res.json(rows);
+});
+
+app.get('/api/equipment-pos/:id', requireAuth, (req, res) => {
+  const po = get(`SELECT po.*, v.company_name AS vendor_name_resolved, v.main_email AS vendor_main_email,
+                    v.contact_email AS vendor_contact_email, v.contact_name AS vendor_contact_name,
+                    v.account_number AS vendor_account_number
+    FROM equipment_pos po LEFT JOIN equipment_vendors v ON v.id=po.vendor_id WHERE po.id=?`, [req.params.id]);
+  if (!po) return res.status(404).json({error:'Not found'});
+  po.items = all('SELECT * FROM equipment_po_items WHERE po_id=? ORDER BY sort_order, id', [po.id]);
+  res.json(po);
+});
+
+// Create a new PO (status=draft) — pre-fills from project context
+app.post('/api/equipment-pos', requireAuth, (req, res) => {
+  const { project_id, vendor_id, items, delivery_date, delivery_time_window, return_date, delivery_notes, notes } = req.body;
+  if (!project_id) return res.status(400).json({error:'project_id required'});
+  const proj = get(`SELECT id, project_name, location, foreman_id, foreman_name, created_by, customer_name, job_number, material_expected_date FROM projects WHERE id=?`, [project_id]);
+  if (!proj) return res.status(404).json({error:'Project not found'});
+  // Pre-fill contacts from project
+  const foreman = proj.foreman_id ? get('SELECT first_name, last_name, phone FROM users WHERE id=?', [proj.foreman_id]) : null;
+  const salesRep = proj.created_by ? get('SELECT first_name, last_name, phone, email FROM users WHERE id=?', [proj.created_by]) : null;
+  const vendor = vendor_id ? get('SELECT company_name FROM equipment_vendors WHERE id=?', [vendor_id]) : null;
+  // Default delivery date: 1 day before material expected date if known, else 7 days from today
+  let dDate = delivery_date || '';
+  if (!dDate && proj.material_expected_date) {
+    const d = new Date(proj.material_expected_date + 'T00:00:00');
+    d.setDate(d.getDate() - 1);
+    dDate = d.toISOString().split('T')[0];
+  }
+  if (!dDate) {
+    const d = new Date(); d.setDate(d.getDate() + 7);
+    dDate = d.toISOString().split('T')[0];
+  }
+  const poNumber = allocateNextEquipmentPONumber();
+  const jobName = (proj.job_number ? proj.job_number + ' — ' : '') + (proj.project_name || proj.customer_name || '');
+  const poId = runGetId(`INSERT INTO equipment_pos
+    (po_number, project_id, vendor_id, vendor_name, job_name, job_address,
+     lead_tech_id, lead_tech_name, lead_tech_phone,
+     sales_rep_id, sales_rep_name, sales_rep_phone, sales_rep_email,
+     delivery_date, delivery_time_window, return_date, delivery_notes,
+     status, notes, created_by)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [poNumber, project_id, parseInt(vendor_id)||0, vendor ? vendor.company_name : '',
+     jobName, proj.location || '',
+     proj.foreman_id || 0, foreman ? ((foreman.first_name||'') + ' ' + (foreman.last_name||'')).trim() : (proj.foreman_name||''), foreman ? (foreman.phone||'') : '',
+     proj.created_by || 0, salesRep ? ((salesRep.first_name||'') + ' ' + (salesRep.last_name||'')).trim() : '', salesRep ? (salesRep.phone||'') : '', salesRep ? (salesRep.email||'') : '',
+     dDate, delivery_time_window||'', return_date||'', delivery_notes||'',
+     'draft', notes||'', req.session.userId]);
+  // Insert items
+  let totalEst = 0;
+  if (Array.isArray(items)) {
+    items.forEach((it, idx) => {
+      const qty = parseFloat(it.qty) || 1;
+      const rate = parseFloat(it.rate) || 0;
+      const period = it.rate_period || 'day';
+      // Estimated cost — naive: qty × rate (user will adjust based on actual rental period later)
+      const est = qty * rate;
+      totalEst += est;
+      run(`INSERT INTO equipment_po_items (po_id, catalog_id, description, qty, rate, rate_period, estimated_cost, sort_order)
+        VALUES (?,?,?,?,?,?,?,?)`,
+        [poId, parseInt(it.catalog_id)||0, it.description||'', qty, rate, period, est, idx]);
+    });
+  }
+  run('UPDATE equipment_pos SET total_estimated_cost=? WHERE id=?', [totalEst, poId]);
+  res.json({ok:true, id: poId, po_number: poNumber});
+});
+
+// Update an existing PO (only if still draft)
+app.put('/api/equipment-pos/:id', requireAuth, (req, res) => {
+  const po = get('SELECT id, status FROM equipment_pos WHERE id=?', [req.params.id]);
+  if (!po) return res.status(404).json({error:'Not found'});
+  if (po.status !== 'draft') return res.status(400).json({error:'Cannot edit PO once sent. Cancel and create a new one if changes are needed.'});
+  const { vendor_id, items, delivery_date, delivery_time_window, return_date, delivery_notes, notes,
+          lead_tech_id, lead_tech_name, lead_tech_phone, sales_rep_id, sales_rep_name, sales_rep_phone, sales_rep_email,
+          job_address } = req.body;
+  const vendor = vendor_id ? get('SELECT company_name FROM equipment_vendors WHERE id=?', [vendor_id]) : null;
+  run(`UPDATE equipment_pos SET vendor_id=?, vendor_name=?,
+       lead_tech_id=?, lead_tech_name=?, lead_tech_phone=?,
+       sales_rep_id=?, sales_rep_name=?, sales_rep_phone=?, sales_rep_email=?,
+       job_address=COALESCE(?, job_address),
+       delivery_date=?, delivery_time_window=?, return_date=?, delivery_notes=?, notes=?
+       WHERE id=?`,
+    [parseInt(vendor_id)||0, vendor ? vendor.company_name : '',
+     parseInt(lead_tech_id)||0, lead_tech_name||'', lead_tech_phone||'',
+     parseInt(sales_rep_id)||0, sales_rep_name||'', sales_rep_phone||'', sales_rep_email||'',
+     job_address,
+     delivery_date||'', delivery_time_window||'', return_date||'', delivery_notes||'', notes||'',
+     req.params.id]);
+  // Replace items
+  if (Array.isArray(items)) {
+    run('DELETE FROM equipment_po_items WHERE po_id=?', [req.params.id]);
+    let totalEst = 0;
+    items.forEach((it, idx) => {
+      const qty = parseFloat(it.qty) || 1;
+      const rate = parseFloat(it.rate) || 0;
+      const period = it.rate_period || 'day';
+      const est = qty * rate;
+      totalEst += est;
+      run(`INSERT INTO equipment_po_items (po_id, catalog_id, description, qty, rate, rate_period, estimated_cost, sort_order)
+        VALUES (?,?,?,?,?,?,?,?)`,
+        [req.params.id, parseInt(it.catalog_id)||0, it.description||'', qty, rate, period, est, idx]);
+    });
+    run('UPDATE equipment_pos SET total_estimated_cost=? WHERE id=?', [totalEst, req.params.id]);
+  }
+  res.json({ok:true});
+});
+
+// Mark PO as sent (changes status, captures sent_at, optionally creates project_costs row)
+app.post('/api/equipment-pos/:id/send', requireAuth, (req, res) => {
+  const po = get('SELECT * FROM equipment_pos WHERE id=?', [req.params.id]);
+  if (!po) return res.status(404).json({error:'Not found'});
+  if (po.status !== 'draft') return res.status(400).json({error:'PO already sent.'});
+  const { email_sent_to } = req.body || {};
+  run(`UPDATE equipment_pos SET status='sent', sent_at=datetime('now'), email_sent_to=? WHERE id=?`,
+    [email_sent_to || '', req.params.id]);
+  // Auto-create a corresponding project_costs row (category=equipment) so the project shows the encumbered cost
+  const proj = get('SELECT id FROM projects WHERE id=?', [po.project_id]);
+  if (proj) {
+    const items = all('SELECT description FROM equipment_po_items WHERE po_id=?', [po.id]);
+    const description = (items.length ? items.map(i => i.description).join('; ') : 'Equipment rental') + ` (${po.po_number})`;
+    const costId = runGetId(`INSERT INTO project_costs
+      (project_id, category, vendor, description, quantity, unit_cost, total_cost, invoice_number, invoice_date, po_number, notes, logged_by)
+      VALUES (?, 'equipment', ?, ?, 1, ?, ?, '', ?, ?, ?, ?)`,
+      [po.project_id, po.vendor_name||'', description, po.total_estimated_cost, po.total_estimated_cost,
+       po.delivery_date || '', po.po_number, 'Auto-created from equipment PO', 'system']);
+    run('UPDATE equipment_pos SET cost_id=? WHERE id=?', [costId, req.params.id]);
+  }
+  res.json({ok:true, status:'sent'});
+});
+
+// Confirm PO (vendor confirmed delivery)
+app.post('/api/equipment-pos/:id/confirm', requireAuth, (req, res) => {
+  const po = get('SELECT id, status FROM equipment_pos WHERE id=?', [req.params.id]);
+  if (!po) return res.status(404).json({error:'Not found'});
+  if (po.status === 'cancelled') return res.status(400).json({error:'PO is cancelled.'});
+  const { confirmation_number } = req.body || {};
+  run(`UPDATE equipment_pos SET status='confirmed', confirmation_number=? WHERE id=?`,
+    [confirmation_number||'', req.params.id]);
+  res.json({ok:true});
+});
+
+// Cancel PO (and remove the project cost row if it was created)
+app.post('/api/equipment-pos/:id/cancel', requireAuth, (req, res) => {
+  const po = get('SELECT id, cost_id FROM equipment_pos WHERE id=?', [req.params.id]);
+  if (!po) return res.status(404).json({error:'Not found'});
+  run(`UPDATE equipment_pos SET status='cancelled' WHERE id=?`, [req.params.id]);
+  if (po.cost_id) {
+    run('DELETE FROM project_costs WHERE id=?', [po.cost_id]);
+  }
+  res.json({ok:true});
+});
+
+// Hard-delete a draft PO (only if it's never been sent)
+app.delete('/api/equipment-pos/:id', requireAuth, (req, res) => {
+  const po = get('SELECT id, status FROM equipment_pos WHERE id=?', [req.params.id]);
+  if (!po) return res.status(404).json({error:'Not found'});
+  if (po.status !== 'draft' && po.status !== 'cancelled') {
+    return res.status(400).json({error:'Can only delete draft or cancelled POs. Cancel it first if it was sent.'});
+  }
+  run('DELETE FROM equipment_po_items WHERE po_id=?', [req.params.id]);
+  run('DELETE FROM equipment_pos WHERE id=?', [req.params.id]);
+  res.json({ok:true});
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ═══ PHASE 1A.4a — BILLING MODULE (Erin's AP Dashboard + Invoice Entry) ══════
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const BILLING_ROLES = ['billing','admin','global_admin'];
+function requireBilling(req, res, next) {
+  if (!req.session.userId) return res.status(401).json({ error: 'Not logged in' });
+  const role = getUserRole(req.session.userId);
+  if (!BILLING_ROLES.includes(role)) return res.status(403).json({ error: 'Billing access required' });
+  next();
+}
+
+// ─── Bill Vendors CRUD ───────────────────────────────────────────────────────
+
+app.get('/api/bill-vendors', requireAuth, (req, res) => {
+  const search = (req.query.search || '').trim();
+  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+  let sql = `SELECT id, name, contact_name, email, phone, address, account_number, terms, default_gl_account, last_used_at FROM bill_vendors WHERE is_active=1`;
+  const params = [];
+  if (search) {
+    sql += ` AND (LOWER(name) LIKE ? OR LOWER(contact_name) LIKE ?)`;
+    const q = '%' + search.toLowerCase() + '%';
+    params.push(q, q);
+  }
+  // Order: most recently used first, then alphabetical
+  sql += ` ORDER BY (CASE WHEN last_used_at='' THEN 1 ELSE 0 END), last_used_at DESC, name LIMIT ?`;
+  params.push(limit);
+  res.json(all(sql, params));
+});
+
+app.post('/api/bill-vendors', requireBilling, (req, res) => {
+  const { name, contact_name, email, phone, address, account_number, terms, default_gl_account, notes } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Vendor name required' });
+  // Check for existing (idempotent — return existing id if name matches)
+  const existing = get('SELECT id FROM bill_vendors WHERE LOWER(name)=LOWER(?)', [name.trim()]);
+  if (existing) return res.json({ id: existing.id, existed: true });
+  try {
+    const id = runGetId(`INSERT INTO bill_vendors (name, contact_name, email, phone, address, account_number, terms, default_gl_account, notes)
+      VALUES (?,?,?,?,?,?,?,?,?)`,
+      [name.trim(), contact_name||'', email||'', phone||'', address||'', account_number||'', terms||'', default_gl_account||'', notes||'']);
+    res.json({ id, existed: false });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/bill-vendors/:id', requireBilling, (req, res) => {
+  const v = get('SELECT id FROM bill_vendors WHERE id=?', [req.params.id]);
+  if (!v) return res.status(404).json({ error: 'Not found' });
+  const { name, contact_name, email, phone, address, account_number, terms, default_gl_account, notes } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Vendor name required' });
+  run(`UPDATE bill_vendors SET name=?, contact_name=?, email=?, phone=?, address=?, account_number=?, terms=?, default_gl_account=?, notes=? WHERE id=?`,
+    [name.trim(), contact_name||'', email||'', phone||'', address||'', account_number||'', terms||'', default_gl_account||'', notes||'', req.params.id]);
+  res.json({ ok: true });
+});
+
+app.delete('/api/bill-vendors/:id', requireBilling, (req, res) => {
+  // Soft delete to preserve history
+  run('UPDATE bill_vendors SET is_active=0 WHERE id=?', [req.params.id]);
+  res.json({ ok: true });
+});
+
+// CSV import endpoint — accepts a CSV body (string), parses, inserts new vendors
+// Expected QB export format: name in column 1; everything else optional
+// Tries common QB column header names: "Company", "Name", "Vendor", "Email", "Phone", "Account No", etc.
+app.post('/api/bill-vendors/import-csv', requireBilling, (req, res) => {
+  const { csv, dry_run } = req.body || {};
+  if (!csv || typeof csv !== 'string') return res.status(400).json({ error: 'csv body required' });
+  // Naive CSV parser — handles quoted fields and commas inside quotes
+  function parseCsv(text) {
+    const rows = [];
+    let row = [], field = '', inQuote = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (inQuote) {
+        if (c === '"') {
+          if (text[i+1] === '"') { field += '"'; i++; }
+          else { inQuote = false; }
+        } else { field += c; }
+      } else {
+        if (c === '"') { inQuote = true; }
+        else if (c === ',') { row.push(field); field = ''; }
+        else if (c === '\n' || c === '\r') {
+          if (c === '\r' && text[i+1] === '\n') i++;
+          row.push(field); rows.push(row);
+          row = []; field = '';
+        } else { field += c; }
+      }
+    }
+    if (field.length || row.length) { row.push(field); rows.push(row); }
+    return rows.filter(r => r.some(f => f && f.trim()));
+  }
+  const rows = parseCsv(csv);
+  if (rows.length < 2) return res.status(400).json({ error: 'CSV needs a header row and at least one data row' });
+  // Detect header columns
+  const header = rows[0].map(h => (h||'').trim().toLowerCase());
+  function findCol(candidates) {
+    for (const cand of candidates) {
+      const idx = header.findIndex(h => h === cand || h.includes(cand));
+      if (idx >= 0) return idx;
+    }
+    return -1;
+  }
+  const colName     = findCol(['company','vendor','name','company name','vendor name']);
+  const colContact  = findCol(['contact','primary contact','contact name','first name']);
+  const colEmail    = findCol(['email','main email']);
+  const colPhone    = findCol(['phone','main phone','telephone']);
+  const colAddress  = findCol(['address','billing address','street']);
+  const colAccount  = findCol(['account','account no','account #','account number']);
+  const colTerms    = findCol(['terms','payment terms']);
+  if (colName < 0) {
+    return res.status(400).json({ error: `CSV must have a column named "Company", "Vendor", or "Name". Found columns: ${header.join(', ')}` });
+  }
+  const stats = { total_rows: rows.length - 1, inserted: 0, updated: 0, skipped: 0, errors: [] };
+  const sample = [];
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    const name = (row[colName]||'').trim();
+    if (!name) { stats.skipped++; continue; }
+    const data = {
+      name,
+      contact_name: colContact >= 0 ? (row[colContact]||'').trim() : '',
+      email:        colEmail   >= 0 ? (row[colEmail]||'').trim()   : '',
+      phone:        colPhone   >= 0 ? (row[colPhone]||'').trim()   : '',
+      address:      colAddress >= 0 ? (row[colAddress]||'').trim() : '',
+      account_number: colAccount >= 0 ? (row[colAccount]||'').trim() : '',
+      terms:        colTerms   >= 0 ? (row[colTerms]||'').trim()   : ''
+    };
+    if (dry_run) {
+      if (sample.length < 5) sample.push(data);
+      stats.inserted++;
+      continue;
+    }
+    try {
+      const existing = get('SELECT id FROM bill_vendors WHERE LOWER(name)=LOWER(?)', [name]);
+      if (existing) {
+        // Update missing fields only (don't blow away existing data)
+        run(`UPDATE bill_vendors SET
+          contact_name=COALESCE(NULLIF(contact_name,''),?),
+          email=COALESCE(NULLIF(email,''),?),
+          phone=COALESCE(NULLIF(phone,''),?),
+          address=COALESCE(NULLIF(address,''),?),
+          account_number=COALESCE(NULLIF(account_number,''),?),
+          terms=COALESCE(NULLIF(terms,''),?),
+          is_active=1
+          WHERE id=?`,
+          [data.contact_name, data.email, data.phone, data.address, data.account_number, data.terms, existing.id]);
+        stats.updated++;
+      } else {
+        run(`INSERT INTO bill_vendors (name, contact_name, email, phone, address, account_number, terms)
+          VALUES (?,?,?,?,?,?,?)`,
+          [data.name, data.contact_name, data.email, data.phone, data.address, data.account_number, data.terms]);
+        stats.inserted++;
+      }
+    } catch(e) {
+      stats.errors.push({ row: r + 1, name, error: e.message });
+    }
+  }
+  saveDb();
+  if (dry_run) stats.sample = sample;
+  res.json(stats);
+});
+
+// ─── Project Search (for Invoice Entry job picker) ───────────────────────────
+// Searches by job number, customer, project name. Used in the always-focused search box.
+app.get('/api/projects/search', requireAuth, (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (!q || q.length < 2) return res.json([]);
+  const ql = '%' + q.toLowerCase() + '%';
+  const rows = all(`
+    SELECT id, job_number, project_name, customer_name, status, job_type,
+           billing_model, total_billed_to_date, contract_value
+      FROM projects
+     WHERE (LOWER(job_number) LIKE ?
+            OR LOWER(project_name) LIKE ?
+            OR LOWER(customer_name) LIKE ?)
+       AND status != 'cancelled'
+     ORDER BY
+       CASE WHEN LOWER(job_number) = LOWER(?) THEN 0
+            WHEN LOWER(job_number) LIKE ? THEN 1
+            ELSE 2 END,
+       updated_at DESC
+     LIMIT 30
+  `, [ql, ql, ql, q, q.toLowerCase() + '%']);
+  res.json(rows);
+});
+
+// ─── Billing Dashboard data ──────────────────────────────────────────────────
+
+app.get('/api/billing/dashboard', requireBilling, (req, res) => {
+  // Tile 1: Quick jobs ready to bill (bill_status='ready_to_bill' OR status='complete' with bill_status != 'billed'/'paid')
+  const quickJobsToBill = all(`
+    SELECT id, job_number, project_name, customer_name, contract_value, bill_status,
+           updated_at,
+           CAST((julianday('now') - julianday(updated_at)) AS INTEGER) AS days_since_ready
+      FROM projects
+     WHERE job_type='quick_job'
+       AND status != 'cancelled'
+       AND (bill_status='ready_to_bill' OR (status='complete' AND bill_status != 'billed' AND bill_status != 'paid'))
+     ORDER BY updated_at ASC
+  `);
+
+  // Tile 2: Projects ready to bill — first invoice not yet sent (total_billed_to_date = 0)
+  // AND status is at least scheduled (work has begun)
+  const projectsNotBilled = all(`
+    SELECT id, job_number, project_name, customer_name, contract_value, status, billing_model,
+           total_billed_to_date, last_customer_invoice_date,
+           updated_at, created_at,
+           CAST((julianday('now') - julianday(created_at)) AS INTEGER) AS days_since_created
+      FROM projects
+     WHERE job_type='project'
+       AND status NOT IN ('awarded','shop_drawings','cancelled','complete')
+       AND (total_billed_to_date IS NULL OR total_billed_to_date = 0)
+     ORDER BY created_at ASC
+  `);
+
+  // Tile 3: Stale billing — projects where last_customer_invoice_date > 45 days ago AND not 100% billed
+  const staleProjects = all(`
+    SELECT id, job_number, project_name, customer_name, contract_value, status, billing_model,
+           total_billed_to_date, last_customer_invoice_date,
+           CAST((julianday('now') - julianday(last_customer_invoice_date)) AS INTEGER) AS days_since_last_bill
+      FROM projects
+     WHERE job_type='project'
+       AND status NOT IN ('cancelled','complete')
+       AND last_customer_invoice_date != ''
+       AND last_customer_invoice_date IS NOT NULL
+       AND date(last_customer_invoice_date) < date('now','-45 days')
+       AND (contract_value IS NULL OR contract_value = 0 OR total_billed_to_date < contract_value)
+     ORDER BY last_customer_invoice_date ASC
+  `);
+
+  // Tile 4: Stale quick jobs — ready_to_bill > 7 days
+  const staleQuickJobs = quickJobsToBill.filter(q => q.days_since_ready > 7);
+
+  // Today's entry stats (cost lines created today by this user across any project)
+  const todayCount = get(`
+    SELECT COUNT(*) AS c, COALESCE(SUM(total_cost),0) AS total
+      FROM project_costs
+     WHERE date(created_at) = date('now')
+       AND logged_by = ?
+  `, [req.session.userId.toString()]);
+  // Fallback: if logged_by stored as name not id
+  const u = get('SELECT first_name, last_name FROM users WHERE id=?', [req.session.userId]);
+  const userName = u ? ((u.first_name||'') + ' ' + (u.last_name||'')).trim() : '';
+  const todayCountByName = userName ? get(`
+    SELECT COUNT(*) AS c, COALESCE(SUM(total_cost),0) AS total
+      FROM project_costs
+     WHERE date(created_at) = date('now')
+       AND logged_by = ?
+  `, [userName]) : null;
+
+  res.json({
+    quick_jobs_to_bill: {
+      count: quickJobsToBill.length,
+      stale_count: staleQuickJobs.length,
+      rows: quickJobsToBill,
+      stale_rows: staleQuickJobs
+    },
+    projects_not_billed: {
+      count: projectsNotBilled.length,
+      rows: projectsNotBilled
+    },
+    stale_projects: {
+      count: staleProjects.length,
+      rows: staleProjects
+    },
+    today_entries: {
+      count: Math.max(todayCount ? todayCount.c : 0, todayCountByName ? todayCountByName.c : 0),
+      total: Math.max(todayCount ? todayCount.total : 0, todayCountByName ? todayCountByName.total : 0)
+    }
+  });
+});
+
+// ─── Recent invoice entries by current user (for Invoice Entry "Today's recent" list) ─
+app.get('/api/billing/recent-entries', requireBilling, (req, res) => {
+  const u = get('SELECT first_name, last_name FROM users WHERE id=?', [req.session.userId]);
+  const userName = u ? ((u.first_name||'') + ' ' + (u.last_name||'')).trim() : '';
+  const limit = Math.min(parseInt(req.query.limit) || 30, 100);
+  const rows = all(`
+    SELECT pc.id, pc.project_id, pc.category, pc.vendor, pc.description,
+           pc.quantity, pc.unit_cost, pc.total_cost, pc.invoice_number, pc.invoice_date,
+           pc.po_number, pc.created_at,
+           p.job_number, p.project_name, p.customer_name
+      FROM project_costs pc
+      LEFT JOIN projects p ON p.id = pc.project_id
+     WHERE pc.logged_by = ?
+        OR pc.logged_by = ?
+     ORDER BY pc.created_at DESC
+     LIMIT ?
+  `, [userName, req.session.userId.toString(), limit]);
+  res.json(rows);
+});
+
+// ─── Update project's billing_model ─────────────────────────────────────────
+app.patch('/api/projects/:id/billing-model', requireAuth, (req, res) => {
+  const { billing_model } = req.body;
+  const valid = ['', 'lump_sum_on_completion', 'progress_billing', 'monthly_labor_only'];
+  if (!valid.includes(billing_model)) return res.status(400).json({ error: 'Invalid billing model' });
+  run('UPDATE projects SET billing_model=? WHERE id=?', [billing_model, req.params.id]);
+  res.json({ ok: true });
 });
 
 // ─── CATCH-ALL ────────────────────────────────────────────────────────────────
