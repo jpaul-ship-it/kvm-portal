@@ -1396,45 +1396,63 @@
   <!-- Entry form (visible only after job picked) -->
   <div class="card" id="ie-form-card" style="display:none">
     <div class="card-header">
-      <span class="card-title">Add Cost Line Item</span>
+      <span class="card-title">Enter Invoice</span>
+      <span style="font-size:11px;color:var(--text-faint)">One invoice can have multiple cost lines (materials + tax + freight + labor + O&P, etc.)</span>
     </div>
+
+    <!-- Invoice Header — shared across all cost lines -->
     <div class="form-row">
       <div class="form-group" style="flex:2;position:relative">
         <label>Vendor</label>
         <input type="text" id="ie-vendor" autocomplete="off" oninput="ieVendorSearch()" onkeydown="ieVendorKeydown(event)" placeholder="Type vendor name..." />
         <div id="ie-vendor-results" style="display:none;position:absolute;top:calc(100% - 4px);left:0;right:0;background:var(--bg-card);border:1px solid var(--border);border-radius:0 0 var(--radius-sm) var(--radius-sm);max-height:240px;overflow-y:auto;z-index:30;box-shadow:0 8px 16px rgba(0,0,0,.4)"></div>
       </div>
-      <div class="form-group">
-        <label>Category</label>
-        <select id="ie-category">
-          <option value="materials">Materials</option>
-          <option value="equipment">Equipment</option>
-          <option value="labor">Labor</option>
-          <option value="subcontractor">Subcontractor</option>
-          <option value="freight">Freight / Shipping</option>
-          <option value="other">Other</option>
-        </select>
-      </div>
-    </div>
-    <div class="form-row">
       <div class="form-group"><label>Invoice #</label><input type="text" id="ie-invoice-num" /></div>
       <div class="form-group"><label>Invoice Date</label><input type="date" id="ie-invoice-date" /></div>
-      <div class="form-group"><label>Total Cost ($)</label><input type="number" step="0.01" id="ie-total" placeholder="0.00" onchange="ieRecalc()" /></div>
+      <div class="form-group" style="position:relative">
+        <label>Invoice Total <span style="font-size:10px;color:var(--text-faint)">(optional sanity check)</span></label>
+        <input type="number" step="0.01" id="ie-invoice-total" placeholder="0.00" oninput="ieMatchCheck()" />
+        <span id="ie-match-indicator" style="position:absolute;right:8px;bottom:8px;font-size:11px;font-weight:700;display:none"></span>
+      </div>
     </div>
-    <div class="form-group"><label>Description / Line items</label><textarea id="ie-description" rows="2" placeholder="What did you buy on this invoice? (e.g., 'Spring kit, 2 strut bearings, weatherseal 12'')"></textarea></div>
-    <div class="form-row">
-      <div class="form-group"><label>Quantity</label><input type="number" step="0.01" id="ie-qty" value="1" onchange="ieRecalc()" /></div>
-      <div class="form-group"><label>Unit Cost ($)</label><input type="number" step="0.01" id="ie-unit" placeholder="0.00" onchange="ieRecalc()" /></div>
-      <div class="form-group"><label>Notes (internal)</label><input type="text" id="ie-notes" /></div>
+
+    <!-- Cost Lines Table -->
+    <div style="margin-top:1rem;margin-bottom:.5rem;display:flex;justify-content:space-between;align-items:center">
+      <label class="ql">Cost Line Items</label>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="ieAddLine()">+ Add Line</button>
+    </div>
+    <div style="border:1px solid var(--border);border-radius:var(--radius-sm);overflow:hidden">
+      <table id="ie-lines-table" class="data-table" style="margin:0;width:100%">
+        <thead>
+          <tr style="background:var(--bg-surface)">
+            <th style="width:140px;padding:8px">Category</th>
+            <th style="padding:8px">Description / Line Items</th>
+            <th style="width:60px;padding:8px;text-align:right">Qty</th>
+            <th style="width:90px;padding:8px;text-align:right">Unit Cost</th>
+            <th style="width:100px;padding:8px;text-align:right">Total</th>
+            <th style="width:36px;padding:8px"></th>
+          </tr>
+        </thead>
+        <tbody id="ie-lines-tbody">
+          <!-- rows injected by JS -->
+        </tbody>
+        <tfoot>
+          <tr style="background:var(--bg-surface);font-weight:700">
+            <td colspan="4" style="padding:8px;text-align:right">Lines Total:</td>
+            <td style="padding:8px;text-align:right;color:var(--amber);font-size:14px" id="ie-lines-total">$0.00</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
 
     <div class="modal-footer" style="margin-top:1rem;justify-content:space-between">
       <div style="font-size:11px;color:var(--text-faint)">
-        <kbd>Tab</kbd> through fields · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> = Save & Next · <kbd>Esc</kbd> = Clear job
+        <kbd>Tab</kbd> through fields · <kbd>Ctrl</kbd>+<kbd>Enter</kbd> = Save &amp; Next · <kbd>Esc</kbd> = Clear job
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost" onclick="ieClearForm()">Clear Form</button>
-        <button class="btn btn-primary" onclick="ieSaveAndNext()" id="ie-save-btn">Save & Next ↵</button>
+        <button class="btn btn-primary" onclick="ieSaveAndNext()" id="ie-save-btn">Save &amp; Next ↵</button>
       </div>
     </div>
   </div>
