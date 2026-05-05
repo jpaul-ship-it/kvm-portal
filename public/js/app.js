@@ -8701,6 +8701,13 @@ async function ieLoadJob(projectId) {
     $('ie-clear-btn').style.display = 'inline-flex';
     // Set today's date as default
     if (!$('ie-invoice-date').value) $('ie-invoice-date').value = new Date().toISOString().split('T')[0];
+    // Phase 1A.4a.1 — initialize line table with one blank Materials line
+    if ($('ie-lines-tbody')) {
+      $('ie-lines-tbody').innerHTML = '';
+      ieAddLine('materials');
+    }
+    // Hide match indicator from prior session
+    if ($('ie-match-indicator')) $('ie-match-indicator').style.display = 'none';
     // Focus vendor field
     setTimeout(() => $('ie-vendor').focus(), 80);
   } catch(e) {
@@ -8810,61 +8817,193 @@ async function ieAddNewVendor() {
 
 // ─── Form recalculation + save ───────────────────────────────────────────────
 
-function ieRecalc() {
-  const qty = parseFloat($('ie-qty').value) || 0;
-  const unit = parseFloat($('ie-unit').value) || 0;
-  const total = parseFloat($('ie-total').value) || 0;
-  // If user enters total directly, leave it. Otherwise, compute total from qty × unit.
-  if (total === 0 && qty > 0 && unit > 0) {
-    $('ie-total').value = (qty * unit).toFixed(2);
-  } else if (qty > 0 && unit === 0 && total > 0) {
-    // User entered total only — back-fill unit cost
-    $('ie-unit').value = (total / qty).toFixed(2);
+// ─── Phase 1A.4a.1 — Multi-Line Invoice Entry ───────────────────────────────
+// One vendor invoice can produce multiple cost lines (Materials + Tax + Freight + Labor + O&P)
+// All lines share the same vendor/invoice#/date and are saved as one transaction.
+
+// Categories — matches KVM's QB breakout (Materials/Tax/Labor/O&P/Equipment/Freight/Sub/Tariff/Other)
+const IE_CATEGORIES = [
+  { value: 'materials',     label: 'Materials' },
+  { value: 'tax',           label: 'Tax' },
+  { value: 'labor',         label: 'Labor' },
+  { value: 'oandp',         label: 'O&P' },
+  { value: 'equipment',     label: 'Equipment' },
+  { value: 'freight',       label: 'Freight / Shipping' },
+  { value: 'subcontractor', label: 'Subcontractor' },
+  { value: 'tariff',        label: 'Tariff / Customs' },
+  { value: 'other',         label: 'Other' }
+];
+
+// Lines state (in-memory, rebuilt from DOM-on-save)
+let _ieLineCounter = 0;
+
+function ieCategoryOptions(selected) {
+  return IE_CATEGORIES.map(c => `<option value="${c.value}"${c.value===selected?' selected':''}>${c.label}</option>`).join('');
+}
+
+function ieAddLine(category) {
+  _ieLineCounter++;
+  const i = _ieLineCounter;
+  const tbody = $('ie-lines-tbody');
+  if (!tbody) return;
+  const tr = document.createElement('tr');
+  tr.id = 'ie-line-' + i;
+  tr.style.borderBottom = '1px solid var(--border)';
+  tr.innerHTML = `
+    <td style="padding:6px"><select class="ie-cat" onchange="ieRecalcLines()" style="width:100%;padding:4px 6px;font-size:12px">${ieCategoryOptions(category||'materials')}</select></td>
+    <td style="padding:6px"><input type="text" class="ie-desc" placeholder="What is this line for?" style="width:100%;padding:4px 6px;font-size:12px" /></td>
+    <td style="padding:6px"><input type="number" step="0.01" class="ie-qty" value="1" oninput="ieRecalcLines()" style="width:100%;padding:4px 6px;font-size:12px;text-align:right" /></td>
+    <td style="padding:6px"><input type="number" step="0.01" class="ie-unit" placeholder="0.00" oninput="ieRecalcLines()" style="width:100%;padding:4px 6px;font-size:12px;text-align:right" /></td>
+    <td style="padding:6px"><input type="number" step="0.01" class="ie-total" placeholder="0.00" oninput="ieLineTotalChanged(this)" style="width:100%;padding:4px 6px;font-size:12px;text-align:right;font-weight:600" /></td>
+    <td style="padding:6px;text-align:center"><button type="button" class="btn btn-ghost btn-sm" onclick="ieRemoveLine(${i})" title="Remove line" style="padding:2px 8px;font-size:12px">✕</button></td>
+  `;
+  tbody.appendChild(tr);
+  // Focus the description of the new line
+  setTimeout(() => { const d = tr.querySelector('.ie-desc'); if (d) d.focus(); }, 50);
+  ieRecalcLines();
+}
+
+function ieRemoveLine(i) {
+  const tr = $('ie-line-' + i);
+  if (!tr) return;
+  const tbody = $('ie-lines-tbody');
+  // If this is the only row, replace with a fresh blank row instead of removing entirely
+  tr.remove();
+  if (tbody && tbody.children.length === 0) {
+    ieAddLine('materials');
+  }
+  ieRecalcLines();
+}
+
+// Per-line: when qty or unit changes, total auto-fills (only if user hasn't manually overridden the total).
+// When user edits total directly, we don't back-compute (keeps their explicit value).
+function ieRecalcLines() {
+  const rows = document.querySelectorAll('#ie-lines-tbody tr');
+  let grand = 0;
+  rows.forEach(tr => {
+    const qtyEl = tr.querySelector('.ie-qty');
+    const unitEl = tr.querySelector('.ie-unit');
+    const totalEl = tr.querySelector('.ie-total');
+    const qty = parseFloat(qtyEl.value) || 0;
+    const unit = parseFloat(unitEl.value) || 0;
+    const totalManual = parseFloat(totalEl.value);
+    // Auto-compute total from qty × unit if total is empty / 0 / not manually set
+    if (qty > 0 && unit > 0 && (!totalEl.dataset.manual || totalEl.dataset.manual === '0')) {
+      const computed = qty * unit;
+      totalEl.value = computed.toFixed(2);
+      grand += computed;
+    } else if (!isNaN(totalManual) && totalManual >= 0) {
+      grand += totalManual;
+    }
+  });
+  if ($('ie-lines-total')) $('ie-lines-total').textContent = '$' + grand.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  ieMatchCheck();
+}
+
+// User typed in the total field directly — mark that line as "manual" so we don't overwrite it
+function ieLineTotalChanged(el) {
+  el.dataset.manual = '1';
+  // If user clears total, clear the manual flag
+  if (!el.value || parseFloat(el.value) === 0) el.dataset.manual = '0';
+  ieRecalcLines();
+}
+
+// Compares Lines Total to user-entered Invoice Total (optional sanity check)
+function ieMatchCheck() {
+  const indicator = $('ie-match-indicator');
+  if (!indicator) return;
+  const invoiceTotalRaw = $('ie-invoice-total').value;
+  if (invoiceTotalRaw === '' || invoiceTotalRaw === null) { indicator.style.display = 'none'; return; }
+  const invoiceTotal = parseFloat(invoiceTotalRaw) || 0;
+  // Sum from line totals
+  let lineSum = 0;
+  document.querySelectorAll('#ie-lines-tbody tr .ie-total').forEach(el => {
+    lineSum += parseFloat(el.value) || 0;
+  });
+  const diff = lineSum - invoiceTotal;
+  indicator.style.display = 'inline-block';
+  if (Math.abs(diff) < 0.01) {
+    indicator.textContent = '✓ matches';
+    indicator.style.color = 'var(--green)';
+  } else {
+    indicator.textContent = '⚠ off by $' + Math.abs(diff).toFixed(2);
+    indicator.style.color = 'var(--danger)';
   }
 }
 
 function ieClearForm() {
-  ['ie-vendor','ie-invoice-num','ie-total','ie-description','ie-unit','ie-notes'].forEach(id => { const e=$(id); if (e) e.value = ''; });
-  $('ie-qty').value = '1';
-  $('ie-category').value = 'materials';
+  // Clear invoice header
+  ['ie-vendor','ie-invoice-num','ie-invoice-total'].forEach(id => { const e=$(id); if (e) e.value = ''; });
   $('ie-invoice-date').value = new Date().toISOString().split('T')[0];
+  // Clear all lines and start with one fresh
+  $('ie-lines-tbody').innerHTML = '';
+  ieAddLine('materials');
+  // Hide match indicator
+  if ($('ie-match-indicator')) $('ie-match-indicator').style.display = 'none';
   setTimeout(() => $('ie-vendor').focus(), 50);
 }
 
 async function ieSaveAndNext() {
   if (!_ieCurrentJob) { showToast('Pick a job first.', 'error'); return; }
-  const description = $('ie-description').value.trim();
-  if (!description) { showToast('Description required.', 'error'); $('ie-description').focus(); return; }
-  // Re-compute total if needed
-  ieRecalc();
-  const totalEntered = parseFloat($('ie-total').value) || 0;
-  if (totalEntered <= 0) { showToast('Enter a total cost > 0.', 'error'); $('ie-total').focus(); return; }
-  const payload = {
-    category: $('ie-category').value,
-    vendor: $('ie-vendor').value.trim(),
-    description,
-    quantity: parseFloat($('ie-qty').value) || 1,
-    unit_cost: parseFloat($('ie-unit').value) || 0,
-    total_cost: totalEntered,
-    invoice_number: $('ie-invoice-num').value.trim(),
-    invoice_date: $('ie-invoice-date').value,
-    notes: $('ie-notes').value.trim()
-  };
-  // If vendor isn't in the bill_vendors table, auto-create it (silent)
-  if (payload.vendor) {
-    try { await api('POST', '/api/bill-vendors', { name: payload.vendor }); } catch(e){}
+  ieRecalcLines();
+  // Collect lines from the DOM
+  const rows = document.querySelectorAll('#ie-lines-tbody tr');
+  const lines = [];
+  let totalSum = 0;
+  for (const tr of rows) {
+    const cat = tr.querySelector('.ie-cat').value;
+    const desc = tr.querySelector('.ie-desc').value.trim();
+    const qty = parseFloat(tr.querySelector('.ie-qty').value) || 1;
+    const unit = parseFloat(tr.querySelector('.ie-unit').value) || 0;
+    const total = parseFloat(tr.querySelector('.ie-total').value) || 0;
+    // Skip totally empty lines (no description AND no total)
+    if (!desc && total === 0) continue;
+    if (!desc) { showToast('Each line needs a description.', 'error'); tr.querySelector('.ie-desc').focus(); return; }
+    if (total <= 0) { showToast('Each line needs a total > 0.', 'error'); tr.querySelector('.ie-total').focus(); return; }
+    lines.push({ category: cat, description: desc, quantity: qty, unit_cost: unit, total_cost: total });
+    totalSum += total;
+  }
+  if (lines.length === 0) { showToast('Add at least one cost line.', 'error'); return; }
+
+  const vendor = $('ie-vendor').value.trim();
+  const invoiceNum = $('ie-invoice-num').value.trim();
+  const invoiceDate = $('ie-invoice-date').value;
+
+  // Optional Invoice Total mismatch warning
+  const invTotalRaw = $('ie-invoice-total').value;
+  if (invTotalRaw && invTotalRaw !== '') {
+    const invTotal = parseFloat(invTotalRaw) || 0;
+    if (Math.abs(invTotal - totalSum) >= 0.01) {
+      const diff = (totalSum - invTotal).toFixed(2);
+      const proceed = await confirmModal(
+        `The cost lines sum to $${totalSum.toFixed(2)} but you entered an Invoice Total of $${invTotal.toFixed(2)} (off by $${Math.abs(diff)}).\n\nSave anyway?`,
+        { title: 'Invoice Total Mismatch', okLabel: 'Save Anyway' }
+      );
+      if (!proceed) return;
+    }
+  }
+
+  // Auto-create vendor in bill_vendors if it's new (silent)
+  if (vendor) {
+    try { await api('POST', '/api/bill-vendors', { name: vendor }); } catch(e){}
   }
   try {
-    await api('POST', '/api/projects/' + _ieCurrentJob.id + '/costs', payload);
-    showToast(`Saved $${totalEntered.toFixed(2)} to ${_ieCurrentJob.job_number}`, 'success');
-    // Clear form, keep job loaded, focus job-search box for next entry
+    const r = await api('POST', '/api/projects/' + _ieCurrentJob.id + '/costs/bulk', {
+      vendor,
+      invoice_number: invoiceNum,
+      invoice_date: invoiceDate,
+      lines
+    });
+    const lineCount = r.lines_saved || lines.length;
+    const lineLabel = lineCount === 1 ? '1 line' : (lineCount + ' lines');
+    showToast(`Saved ${lineLabel}, $${totalSum.toFixed(2)} to ${_ieCurrentJob.job_number}`, 'success');
+    // Clear form, keep job loaded, refocus job-search for next invoice
     ieClearForm();
     ieRefreshStats();
-    // Move focus to job-search to load next job (Erin's typical workflow)
-    setTimeout(() => {
-      $('ie-job-search').focus();
-    }, 100);
-  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+    setTimeout(() => $('ie-job-search').focus(), 100);
+  } catch(e) {
+    showToast('Error: ' + (e.message || 'save failed'), 'error');
+  }
 }
 
 // ─── Keyboard shortcut: Ctrl+Enter to save ───────────────────────────────────
@@ -8900,7 +9039,7 @@ document.addEventListener('click', function(e) {
    'loadInvoiceEntryPage','ieRefreshStats','ieRenderRecent',
    'ieJobSearch','ieJobSearchKeydown','ieRenderJobSearchResults','ieLoadJob','ieClearJob',
    'ieVendorSearch','ieVendorKeydown','ieRenderVendorResults','ieSelectVendor','ieAddNewVendor',
-   'ieRecalc','ieClearForm','ieSaveAndNext'
+   'ieClearForm','ieSaveAndNext','ieAddLine','ieRemoveLine','ieRecalcLines','ieLineTotalChanged','ieMatchCheck'
   ].forEach(function(name){
     try { if (typeof eval(name) === 'function') window[name] = eval(name); } catch(e) {}
   });
