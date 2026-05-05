@@ -2386,6 +2386,46 @@ app.put('/api/projects/:id/costs/:cid', requireAuth, (req, res) => {
   res.json({ok:true});
 });
 
+// Phase 1A.4a.1 — Multi-line invoice entry. Accepts a shared invoice header + array of cost lines.
+// Used by Erin's Invoice Entry page so one vendor invoice can have multiple cost lines (materials + tax + freight + labor + O&P)
+// without needing 4-5 separate save actions.
+app.post('/api/projects/:id/costs/bulk', requireAuth, (req, res) => {
+  const { vendor, invoice_number, invoice_date, lines } = req.body;
+  if (!Array.isArray(lines) || lines.length === 0) return res.status(400).json({error:'At least one line required'});
+  // Validate every line has a description before doing anything
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].description || !String(lines[i].description).trim()) {
+      return res.status(400).json({error:`Line ${i+1}: description required`});
+    }
+  }
+  const logger = get('SELECT first_name,last_name FROM users WHERE id=?', [req.session.userId]);
+  const loggedBy = logger ? logger.first_name + (logger.last_name?' '+logger.last_name:'') : '';
+  const created = [];
+  let totalSaved = 0;
+  // Insert all lines as a logical unit. sql.js doesn't have BEGIN/COMMIT in this codebase's typical pattern,
+  // but we validate first then insert, which keeps things consistent enough for this use case.
+  try {
+    for (const line of lines) {
+      const po_number = generatePoNumber();
+      const tc = parseFloat(line.total_cost) || ((parseFloat(line.quantity)||1) * (parseFloat(line.unit_cost)||0));
+      const id = runGetId(`INSERT INTO project_costs (project_id,po_number,category,vendor,description,quantity,unit_cost,total_cost,invoice_number,invoice_date,notes,logged_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [req.params.id, po_number, line.category||'materials', vendor||'', line.description, parseFloat(line.quantity)||1, parseFloat(line.unit_cost)||0, parseFloat(tc)||0, invoice_number||'', invoice_date||'', line.notes||'', loggedBy]);
+      created.push({ id, po_number, category: line.category||'materials', total_cost: parseFloat(tc)||0 });
+      totalSaved += parseFloat(tc)||0;
+    }
+    run("UPDATE projects SET updated_at=datetime('now') WHERE id=?", [req.params.id]);
+    if (vendor && vendor.trim()) {
+      try {
+        const v = get('SELECT id FROM bill_vendors WHERE LOWER(name)=LOWER(?)', [vendor.trim()]);
+        if (v) run("UPDATE bill_vendors SET last_used_at=datetime('now') WHERE id=?", [v.id]);
+      } catch(e){}
+    }
+    res.json({ ok: true, lines_saved: created.length, total: totalSaved, created });
+  } catch (e) {
+    res.status(500).json({ error: e.message, partial: created });
+  }
+});
+
 app.delete('/api/projects/:id/costs/:cid', requireAuth, (req, res) => {
   run('DELETE FROM project_costs WHERE id=? AND project_id=?', [req.params.cid, req.params.id]);
   res.json({ok:true});
